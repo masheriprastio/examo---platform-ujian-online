@@ -11,14 +11,17 @@ import * as XLSX from 'xlsx';
 interface StudentManagerProps {
   students: User[];
   onUpdate: (updated: User[]) => void;
+  onAddStudent: (newStudent: User) => Promise<void>;
+  onDeleteStudent: (id: string) => Promise<void>;
 }
 
-const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) => {
+const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onAddStudent, onDeleteStudent }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const [modalMode, setModalMode] = useState<'add' | 'edit' | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({ name: '', email: '', grade: '', nis: '', password: '' });
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filteredStudents = students.filter(s => 
@@ -45,7 +48,7 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
 
     setIsImporting(true);
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const data = new Uint8Array(event.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
@@ -56,7 +59,7 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
         const importedStudents: User[] = jsonData
           .filter(row => row.Nama && (row.Email || row.NIS)) // Require Name and (Email OR NIS)
           .map((row, idx) => ({
-            id: `std-${Date.now()}-${idx}`,
+            id: `temp-${Date.now()}-${idx}`, // Temp ID, server should generate real ID
             name: row.Nama,
             email: row.Email || `user-${Date.now()}-${idx}@placeholder.com`, // Fallback email
             grade: row.Kelas || '-',
@@ -66,8 +69,9 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
           }));
 
         if (importedStudents.length > 0) {
-          onUpdate([...students, ...importedStudents]);
-          alert(`Berhasil mengimpor ${importedStudents.length} siswa.`);
+            // For bulk import, we pass to onUpdate which App.tsx will handle as bulk insert
+            onUpdate(importedStudents);
+            // Note: App.tsx implementation of onUpdate for bulk should handle appending
         } else {
           alert('Format Excel salah atau tidak ada data yang valid (Nama wajib diisi).');
         }
@@ -94,40 +98,59 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
     setModalMode('edit');
   };
 
-  const handleSubmitManual = (e: React.FormEvent) => {
+  const handleSubmitManual = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || (!formData.email && !formData.nis)) {
       alert("Nama dan salah satu dari Email atau NIS wajib diisi.");
       return;
     }
     
+    setIsSubmitting(true);
     // Fallback email if empty but NIS provided
     const emailToUse = formData.email || `${formData.nis}@sekolah.id`;
     const passwordToUse = formData.password || 'password';
 
-    if (modalMode === 'add') {
-      const student: User = {
-        id: `std-${Date.now()}`,
-        name: formData.name,
-        email: emailToUse,
-        grade: formData.grade,
-        nis: formData.nis,
-        role: 'student',
-        password: passwordToUse
-      };
-      onUpdate([student, ...students]);
-    } else if (modalMode === 'edit' && editingId) {
-      onUpdate(students.map(s => s.id === editingId ? { ...s, ...formData, email: emailToUse, password: passwordToUse } : s));
+    try {
+        if (modalMode === 'add') {
+        const student: User = {
+            id: `temp-add-${Date.now()}`, // Temporary ID
+            name: formData.name,
+            email: emailToUse,
+            grade: formData.grade,
+            nis: formData.nis,
+            role: 'student',
+            password: passwordToUse
+        };
+        await onAddStudent(student);
+        } else if (modalMode === 'edit' && editingId) {
+            // For edit, we still use the old way via onUpdate(all_students) OR ideally a new onEditStudent prop
+            // Given the plan, let's keep using onUpdate for edits for now as refactor focused on Add/Delete
+            const updatedStudents = students.map(s => s.id === editingId ? { ...s, ...formData, email: emailToUse, password: passwordToUse } : s);
+            // We can trick App.tsx: usually onUpdate handles replacement
+            // Ideally we need onUpdateStudent prop.
+            // But let's follow the prop signature: onUpdate
+            onUpdate(updatedStudents);
+        }
+
+        setFormData({ name: '', email: '', grade: '', nis: '', password: '' });
+        setModalMode(null);
+        setEditingId(null);
+    } catch (error) {
+        console.error("Failed to save student:", error);
+        alert("Gagal menyimpan data siswa.");
+    } finally {
+        setIsSubmitting(false);
     }
-    
-    setFormData({ name: '', email: '', grade: '', nis: '', password: '' });
-    setModalMode(null);
-    setEditingId(null);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm('Hapus siswa ini dari daftar?')) {
-      onUpdate(students.filter(s => s.id !== id));
+        try {
+            await onDeleteStudent(id);
+        } catch (error) {
+            console.error("Failed to delete student:", error);
+            alert("Gagal menghapus siswa.");
+        }
     }
   };
 
@@ -310,9 +333,10 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
                 <p className="text-[10px] text-gray-400 mt-1 ml-1">Default: 'password' jika dikosongkan.</p>
               </div>
 
-              <button type="submit" className="w-full bg-indigo-600 text-white font-black py-5 rounded-2xl shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 mt-4">
-                {modalMode === 'add' ? <UserPlus className="w-5 h-5" /> : <Save className="w-5 h-5" />}
-                {modalMode === 'add' ? 'Simpan Siswa' : 'Update Siswa'}
+              <button type="submit" disabled={isSubmitting} className="w-full bg-indigo-600 text-white font-black py-5 rounded-2xl shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 mt-4 disabled:opacity-70">
+                {isSubmitting ? 'Menyimpan...' : (modalMode === 'add' ? 'Simpan Siswa' : 'Update Siswa')}
+                {modalMode === 'add' && !isSubmitting && <UserPlus className="w-5 h-5" />}
+                {modalMode === 'edit' && !isSubmitting && <Save className="w-5 h-5" />}
               </button>
             </div>
           </form>

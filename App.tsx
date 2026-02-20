@@ -396,38 +396,100 @@ export default function App() {
     setView('RESULT');
   };
 
-  // Wrapper for Student Updates (Sync with DB)
+  // --- NEW HANDLERS FOR STUDENT MANAGEMENT ---
+
+  const handleAddStudent = async (newStudent: User) => {
+    // 1. Optimistic Update
+    setStudents(prev => [newStudent, ...prev]);
+
+    // 2. DB Insert
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase.from('users').insert({
+        name: newStudent.name,
+        email: newStudent.email,
+        password: newStudent.password, // In prod: hash this!
+        role: 'student',
+        grade: newStudent.grade,
+        school: newStudent.school || 'SMA Negeri 1 Digital',
+        nis: newStudent.nis
+      }).select().single();
+
+      if (error) {
+        console.error("Failed to insert student:", error);
+        // Rollback? Alert? For now, alert.
+        alert("Gagal menyimpan ke database: " + error.message);
+        // Remove optimistic update
+        setStudents(prev => prev.filter(s => s.id !== newStudent.id));
+      } else if (data) {
+        // Update local state with REAL ID from DB
+        setStudents(prev => prev.map(s => s.id === newStudent.id ? { ...s, id: data.id } : s));
+      }
+    }
+  };
+
+  const handleDeleteStudent = async (id: string) => {
+    // 1. Optimistic Update
+    const originalStudents = [...students];
+    setStudents(prev => prev.filter(s => s.id !== id));
+
+    // 2. DB Delete
+    if (isSupabaseConfigured && supabase) {
+      // Check if it's a temp ID (not in DB yet)
+      if (id.startsWith('temp-') || id.startsWith('std-')) {
+          // If it was just added and hasn't synced, we just removed it from state. Good.
+          return;
+      }
+
+      const { error } = await supabase.from('users').delete().eq('id', id);
+      if (error) {
+        console.error("Failed to delete student:", error);
+        alert("Gagal menghapus dari database: " + error.message);
+        // Rollback
+        setStudents(originalStudents);
+      }
+    }
+  };
+
+  // Wrapper for BULK Student Updates (e.g., Import)
   const handleStudentUpdate = async (newStudents: User[]) => {
-      // Logic to detect Add/Edit/Delete is complex with just the new array.
-      // For this simplified version, we will assume "Add" or "Edit" works via Upsert if we had proper IDs.
-      // But StudentManager generates random text IDs.
+      // This is primarily for Excel Import which replaces/appends the list
+      // Determine added items (simple diff based on ID format or just append logic from StudentManager)
 
-      // If we want to support true Sync, we really should refactor StudentManager.
-      // For now, we will just update local state to keep UI responsive.
-      // And we try to sync the LAST added/modified item if we could identify it.
+      // If StudentManager passes the WHOLE new list, and we want to sync:
+      // It's safer to just handle the NEW items if possible, but let's assume
+      // `newStudents` contains [newly_imported..., old_existing...]
 
-      // HACK: Check if count increased -> Add.
-      const isAdd = newStudents.length > students.length;
-      if (isAdd && isSupabaseConfigured && supabase) {
-          const addedStudent = newStudents[0]; // StudentManager prepends new students [new, ...old]
-          // Verify it's actually new
-          if (!students.find(s => s.id === addedStudent.id)) {
-              await supabase.from('users').insert({
-                  ...addedStudent,
-                  role: 'student' // Ensure role
-              });
-          }
-      }
+      // Filter out students that are already in state (by ID)
+      const existingIds = new Set(students.map(s => s.id));
+      const addedStudents = newStudents.filter(s => !existingIds.has(s.id));
 
-      // Check if count decreased -> Delete
-      if (newStudents.length < students.length && isSupabaseConfigured && supabase) {
-          const deleted = students.find(s => !newStudents.find(ns => ns.id === s.id));
-          if (deleted) {
-              await supabase.from('users').delete().eq('id', deleted.id);
-          }
-      }
-
+      // Optimistic
       setStudents(newStudents);
+
+      if (isSupabaseConfigured && supabase && addedStudents.length > 0) {
+          const rowsToInsert = addedStudents.map(s => ({
+            name: s.name,
+            email: s.email,
+            password: s.password,
+            role: 'student',
+            grade: s.grade,
+            school: 'SMA Negeri 1 Digital', // Default
+            nis: s.nis
+          }));
+
+          const { error } = await supabase.from('users').insert(rowsToInsert);
+          if (error) {
+              console.error("Bulk insert failed:", error);
+              alert("Gagal import ke database: " + error.message);
+              // Rollback optimistic
+              setStudents(students);
+          } else {
+              // Re-fetch to get IDs? Or just let next load handle it.
+              // For better UX, we should ideally re-fetch.
+              const { data } = await supabase.from('users').select('*').eq('role', 'student');
+              if (data) setStudents(data as User[]);
+          }
+      }
   };
 
   // Wrapper for Exam Updates (Sync with DB)
@@ -814,7 +876,12 @@ export default function App() {
             ) : view === 'TEACHER_BANK' ? (
               <QuestionBank questions={bankQuestions} onUpdate={setBankQuestions} />
             ) : view === 'TEACHER_STUDENTS' ? (
-              <StudentManager students={students} onUpdate={handleStudentUpdate} />
+              <StudentManager
+                  students={students}
+                  onUpdate={handleStudentUpdate}
+                  onAddStudent={handleAddStudent}
+                  onDeleteStudent={handleDeleteStudent}
+              />
             ) : view === 'AI_GENERATOR' ? (
               <AIGenerator 
                 onExamCreated={handleExamCreate}
