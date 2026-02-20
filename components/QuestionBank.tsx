@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Question, QuestionType } from '../types';
 import { 
   Plus, Search, Filter, Trash2, Edit2, Check, X,
-  ChevronDown, ChevronUp, Database, Tag, AlertCircle, Save, ArrowLeft
+  ChevronDown, ChevronUp, Database, Tag, AlertCircle, Save, ArrowLeft, GripVertical
 } from 'lucide-react';
 
 interface QuestionBankProps {
@@ -17,12 +17,18 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions, onUpdate }) => {
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [questionToDelete, setQuestionToDelete] = useState<string | null>(null);
 
+  // Drag and Drop state
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
   const filteredQuestions = questions.filter(q => {
     const matchesSearch = q.text.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           (q.topic && q.topic.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesType = filterType === 'all' || q.type === filterType;
     return matchesSearch && matchesType;
   });
+
+  const isReorderable = !searchTerm && filterType === 'all';
 
   const handleSaveQuestion = (updatedQ: Question) => {
     if (questions.some(q => q.id === updatedQ.id)) {
@@ -52,6 +58,37 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions, onUpdate }) => {
       topic: ''
     };
     setEditingQuestion(newQ);
+  };
+
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = "move";
+    // Optional: Set a custom drag image or style
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault(); // Necessary to allow dropping
+    if (draggedIndex === null || draggedIndex === index) return;
+    setDragOverIndex(index);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+    setDragOverIndex(null);
+
+    if (draggedIndex === null || draggedIndex === targetIndex) return;
+
+    const newQuestions = [...questions];
+    const [movedItem] = newQuestions.splice(draggedIndex, 1);
+    newQuestions.splice(targetIndex, 0, movedItem);
+
+    onUpdate(newQuestions);
+    setDraggedIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
   };
 
   if (editingQuestion) {
@@ -107,6 +144,12 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions, onUpdate }) => {
         </div>
       </div>
 
+      {!isReorderable && (
+        <div className="mb-4 text-center">
+           <span className="text-xs font-bold text-gray-400 bg-gray-50 px-3 py-1 rounded-full">Mode urutan dinonaktifkan saat filter aktif</span>
+        </div>
+      )}
+
       <div className="space-y-4">
         {filteredQuestions.length === 0 ? (
           <div className="text-center py-20 bg-white rounded-[30px] border border-gray-100">
@@ -115,27 +158,51 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions, onUpdate }) => {
             <p className="text-gray-400 mt-2">Mulai buat soal baru atau ubah filter pencarian.</p>
           </div>
         ) : (
-          filteredQuestions.map(q => (
-            <div key={q.id} className="bg-white p-6 rounded-[24px] shadow-sm border border-gray-100 hover:shadow-md transition-all group relative">
-              <div className="flex justify-between items-start gap-4 mb-3">
-                <div className="flex flex-wrap gap-2">
-                  <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-black uppercase tracking-widest border border-indigo-100">
-                    {q.type === 'mcq' ? 'PG' : q.type === 'multiple_select' ? 'PG (Banyak)' : q.type === 'true_false' ? 'B/S' : q.type === 'short_answer' ? 'Isian' : 'Esai'}
-                  </span>
-                  {q.topic && <span className="px-3 py-1 bg-gray-50 text-gray-500 rounded-lg text-[10px] font-black uppercase tracking-widest border border-gray-100">{q.topic}</span>}
-                  <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${q.difficulty === 'hard' ? 'bg-red-50 text-red-600 border-red-100' : q.difficulty === 'easy' ? 'bg-green-50 text-green-600 border-green-100' : 'bg-yellow-50 text-yellow-600 border-yellow-100'}`}>
-                    {q.difficulty === 'hard' ? 'Sulit' : q.difficulty === 'easy' ? 'Mudah' : 'Sedang'}
-                  </span>
+          filteredQuestions.map((q, index) => {
+            const isDragged = draggedIndex === index;
+            const isDragOver = dragOverIndex === index && !isDragged;
+
+            return (
+              <div
+                key={q.id}
+                draggable={isReorderable}
+                onDragStart={(e) => isReorderable && handleDragStart(e, index)}
+                onDragOver={(e) => isReorderable && handleDragOver(e, index)}
+                onDrop={(e) => isReorderable && handleDrop(e, index)}
+                onDragEnd={handleDragEnd}
+                className={`
+                  bg-white p-6 rounded-[24px] shadow-sm border transition-all group relative
+                  ${isDragged ? 'border-dashed border-2 border-indigo-300 opacity-50 bg-indigo-50' : 'border-gray-100 hover:shadow-md'}
+                  ${isDragOver ? 'border-t-[4px] border-t-indigo-500 pt-[20px] -mt-[4px]' : ''}
+                `}
+              >
+                <div className="flex justify-between items-start gap-4 mb-3">
+                  <div className="flex items-start gap-3">
+                    {isReorderable && (
+                      <div className="cursor-grab active:cursor-grabbing text-gray-300 hover:text-indigo-500 transition-colors p-1 -ml-2 self-center">
+                        <GripVertical className="w-5 h-5" />
+                      </div>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-black uppercase tracking-widest border border-indigo-100">
+                        {q.type === 'mcq' ? 'PG' : q.type === 'multiple_select' ? 'PG (Banyak)' : q.type === 'true_false' ? 'B/S' : q.type === 'short_answer' ? 'Isian' : 'Esai'}
+                      </span>
+                      {q.topic && <span className="px-3 py-1 bg-gray-50 text-gray-500 rounded-lg text-[10px] font-black uppercase tracking-widest border border-gray-100">{q.topic}</span>}
+                      <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${q.difficulty === 'hard' ? 'bg-red-50 text-red-600 border-red-100' : q.difficulty === 'easy' ? 'bg-green-50 text-green-600 border-green-100' : 'bg-yellow-50 text-yellow-600 border-yellow-100'}`}>
+                        {q.difficulty === 'hard' ? 'Sulit' : q.difficulty === 'easy' ? 'Mudah' : 'Sedang'}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <button onClick={() => setEditingQuestion(q)} className="p-2 text-indigo-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"><Edit2 className="w-4 h-4" /></button>
+                    <button onClick={() => setQuestionToDelete(q.id)} className="p-2 text-red-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"><Trash2 className="w-4 h-4" /></button>
+                  </div>
                 </div>
-                <div className="flex gap-2 shrink-0">
-                  <button onClick={() => setEditingQuestion(q)} className="p-2 text-indigo-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"><Edit2 className="w-4 h-4" /></button>
-                  <button onClick={() => setQuestionToDelete(q.id)} className="p-2 text-red-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"><Trash2 className="w-4 h-4" /></button>
-                </div>
+                <p className="font-bold text-gray-800 line-clamp-2 mb-2 pl-7 md:pl-0">{q.text || '(Tanpa Teks Soal)'}</p>
+                <div className="text-xs text-gray-400 font-medium pl-7 md:pl-0">Points: {q.points}</div>
               </div>
-              <p className="font-bold text-gray-800 line-clamp-2 mb-2">{q.text || '(Tanpa Teks Soal)'}</p>
-              <div className="text-xs text-gray-400 font-medium">Points: {q.points}</div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
