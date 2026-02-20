@@ -2,10 +2,32 @@
 import { createClient } from '@supabase/supabase-js';
 import { User, Exam } from '../types';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || import.meta.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+// Access variables safely, checking multiple possible sources
+const SUPABASE_URL =
+  import.meta.env.VITE_SUPABASE_URL ||
+  import.meta.env.NEXT_PUBLIC_SUPABASE_URL ||
+  process.env.VITE_SUPABASE_URL ||
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||
+  '';
 
-export const isSupabaseConfigured = SUPABASE_URL && SUPABASE_KEY;
+const SUPABASE_KEY =
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  process.env.VITE_SUPABASE_ANON_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  '';
+
+export const isSupabaseConfigured = !!(SUPABASE_URL && SUPABASE_KEY && SUPABASE_URL.trim() !== '' && SUPABASE_KEY.trim() !== '');
+
+// Debugging (Safe Log)
+if (import.meta.env.DEV) {
+  if (isSupabaseConfigured) {
+    console.log(`[Supabase] Connected to: ${SUPABASE_URL.substring(0, 15)}...`);
+  } else {
+    console.warn("[Supabase] Configuration missing. Running in Mock Mode.");
+    console.debug({ SUPABASE_URL, SUPABASE_KEY_PRESENT: !!SUPABASE_KEY });
+  }
+}
 
 export const supabase = isSupabaseConfigured
   ? createClient(SUPABASE_URL, SUPABASE_KEY)
