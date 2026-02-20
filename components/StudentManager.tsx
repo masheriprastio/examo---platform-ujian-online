@@ -3,7 +3,8 @@ import React, { useState, useRef } from 'react';
 import { User } from '../types';
 import { 
   Users, Upload, Download, FileSpreadsheet, Trash2, 
-  UserPlus, Search, X, CheckCircle2, AlertCircle, Edit3, Save
+  UserPlus, Search, X, CheckCircle2, AlertCircle, Edit3, Save,
+  BadgeCheck
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -17,19 +18,20 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
   const [isImporting, setIsImporting] = useState(false);
   const [modalMode, setModalMode] = useState<'add' | 'edit' | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState({ name: '', email: '', grade: '' });
+  const [formData, setFormData] = useState({ name: '', email: '', grade: '', nis: '' });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filteredStudents = students.filter(s => 
     s.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
     s.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (s.grade && s.grade.toLowerCase().includes(searchTerm.toLowerCase()))
+    (s.grade && s.grade.toLowerCase().includes(searchTerm.toLowerCase())) ||
+    (s.nis && s.nis.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   const handleDownloadTemplate = () => {
     const templateData = [
-      { Nama: 'Budi Santoso', Email: 'budi@sekolah.id', Kelas: 'X-1' },
-      { Nama: 'Siti Aminah', Email: 'siti@sekolah.id', Kelas: 'X-2' },
+      { Nama: 'Budi Santoso', Email: 'budi@sekolah.id', Kelas: 'X-1', NIS: '12345' },
+      { Nama: 'Siti Aminah', Email: 'siti@sekolah.id', Kelas: 'X-2', NIS: '67890' },
     ];
     const ws = XLSX.utils.json_to_sheet(templateData);
     const wb = XLSX.utils.book_new();
@@ -52,12 +54,13 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
         const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[];
 
         const importedStudents: User[] = jsonData
-          .filter(row => row.Nama && row.Email)
+          .filter(row => row.Nama && (row.Email || row.NIS)) // Require Name and (Email OR NIS)
           .map((row, idx) => ({
             id: `std-${Date.now()}-${idx}`,
             name: row.Nama,
-            email: row.Email,
+            email: row.Email || `user-${Date.now()}-${idx}@placeholder.com`, // Fallback email
             grade: row.Kelas || '-',
+            nis: row.NIS ? String(row.NIS) : undefined,
             role: 'student',
             password: 'password' // Password standar
           }));
@@ -66,10 +69,11 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
           onUpdate([...students, ...importedStudents]);
           alert(`Berhasil mengimpor ${importedStudents.length} siswa.`);
         } else {
-          alert('Format Excel salah atau tidak ada data.');
+          alert('Format Excel salah atau tidak ada data yang valid (Nama wajib diisi).');
         }
       } catch (err) {
         alert('Gagal memproses file Excel.');
+        console.error(err);
       } finally {
         setIsImporting(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
@@ -79,30 +83,42 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
   };
 
   const handleOpenEdit = (student: User) => {
-    setFormData({ name: student.name, email: student.email, grade: student.grade || '' });
+    setFormData({
+      name: student.name,
+      email: student.email,
+      grade: student.grade || '',
+      nis: student.nis || ''
+    });
     setEditingId(student.id);
     setModalMode('edit');
   };
 
   const handleSubmitManual = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.email) return;
+    if (!formData.name || (!formData.email && !formData.nis)) {
+      alert("Nama dan salah satu dari Email atau NIS wajib diisi.");
+      return;
+    }
     
+    // Fallback email if empty but NIS provided
+    const emailToUse = formData.email || `${formData.nis}@sekolah.id`;
+
     if (modalMode === 'add') {
       const student: User = {
         id: `std-${Date.now()}`,
         name: formData.name,
-        email: formData.email,
+        email: emailToUse,
         grade: formData.grade,
+        nis: formData.nis,
         role: 'student',
         password: 'password'
       };
       onUpdate([student, ...students]);
     } else if (modalMode === 'edit' && editingId) {
-      onUpdate(students.map(s => s.id === editingId ? { ...s, ...formData } : s));
+      onUpdate(students.map(s => s.id === editingId ? { ...s, ...formData, email: emailToUse } : s));
     }
     
-    setFormData({ name: '', email: '', grade: '' });
+    setFormData({ name: '', email: '', grade: '', nis: '' });
     setModalMode(null);
     setEditingId(null);
   };
@@ -135,7 +151,10 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
             <Upload className="w-5 h-5" /> Import Excel
           </button>
           <button 
-            onClick={() => setModalMode('add')}
+            onClick={() => {
+              setFormData({ name: '', email: '', grade: '', nis: '' });
+              setModalMode('add');
+            }}
             className="flex-1 md:flex-none bg-indigo-600 text-white px-6 py-4 rounded-[20px] font-black shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 active:scale-95 text-sm"
           >
             <UserPlus className="w-5 h-5" /> Tambah Manual
@@ -149,7 +168,7 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
           <Search className="absolute left-4 top-4 w-5 h-5 text-gray-300" />
           <input 
             type="text" 
-            placeholder="Cari nama, email, atau kelas..." 
+            placeholder="Cari nama, email, NIS, atau kelas..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-12 pr-4 py-3.5 rounded-2xl bg-gray-50 border-transparent focus:border-indigo-500 focus:bg-white transition font-bold text-gray-800 outline-none"
@@ -159,29 +178,40 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
 
       <div className="bg-white rounded-[40px] shadow-sm border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[600px]">
+          <table className="w-full min-w-[800px]">
             <thead className="bg-gray-50/50 border-b border-gray-50 text-left">
               <tr>
-                <th className="px-10 py-6 text-xs font-black text-gray-400 uppercase tracking-widest">Nama Lengkap</th>
-                <th className="px-10 py-6 text-xs font-black text-gray-400 uppercase tracking-widest">Kelas</th>
-                <th className="px-10 py-6 text-xs font-black text-gray-400 uppercase tracking-widest">Email Access</th>
-                <th className="px-10 py-6 text-xs font-black text-gray-400 uppercase tracking-widest text-right">Aksi</th>
+                <th className="px-8 py-6 text-xs font-black text-gray-400 uppercase tracking-widest w-[25%]">Nama Lengkap</th>
+                <th className="px-6 py-6 text-xs font-black text-gray-400 uppercase tracking-widest w-[15%]">NIS Ujian</th>
+                <th className="px-6 py-6 text-xs font-black text-gray-400 uppercase tracking-widest w-[15%]">Kelas</th>
+                <th className="px-6 py-6 text-xs font-black text-gray-400 uppercase tracking-widest w-[30%]">Email Access</th>
+                <th className="px-8 py-6 text-xs font-black text-gray-400 uppercase tracking-widest text-right w-[15%]">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {filteredStudents.length === 0 ? (
-                <tr><td colSpan={4} className="px-10 py-24 text-center text-gray-400 font-medium italic">Belum ada data siswa.</td></tr>
+                <tr><td colSpan={5} className="px-10 py-24 text-center text-gray-400 font-medium italic">Belum ada data siswa.</td></tr>
               ) : (
                 filteredStudents.map(s => (
                   <tr key={s.id} className="hover:bg-gray-50/30 transition-colors group">
-                    <td className="px-10 py-6 font-bold text-gray-900">{s.name}</td>
-                    <td className="px-10 py-6">
+                    <td className="px-8 py-6 font-bold text-gray-900">{s.name}</td>
+                    <td className="px-6 py-6">
+                      {s.nis ? (
+                        <div className="flex items-center gap-2">
+                          <BadgeCheck className="w-4 h-4 text-green-500" />
+                          <span className="font-mono font-bold text-gray-700">{s.nis}</span>
+                        </div>
+                      ) : (
+                        <span className="text-gray-300 italic">-</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-6">
                       <span className="bg-gray-100 text-gray-600 px-3 py-1 rounded-lg text-xs font-black border border-gray-200 uppercase tracking-tight">
                         {s.grade || '-'}
                       </span>
                     </td>
-                    <td className="px-10 py-6 text-indigo-600 font-medium">{s.email}</td>
-                    <td className="px-10 py-6 text-right">
+                    <td className="px-6 py-6 text-indigo-600 font-medium text-sm truncate max-w-[200px]">{s.email}</td>
+                    <td className="px-8 py-6 text-right">
                       <div className="flex justify-end gap-2">
                         <button onClick={() => handleOpenEdit(s)} className="p-3 bg-gray-50 text-gray-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all">
                           <Edit3 className="w-5 h-5" />
@@ -209,9 +239,9 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
               <button type="button" onClick={() => setModalMode(null)} className="p-2 text-gray-400 hover:bg-gray-50 rounded-xl"><X className="w-6 h-6" /></button>
             </div>
             
-            <div className="space-y-6">
+            <div className="space-y-5">
               <div>
-                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Nama Lengkap</label>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Nama Lengkap *</label>
                 <input 
                   type="text" 
                   value={formData.name}
@@ -221,8 +251,21 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
                   required
                 />
               </div>
+
               <div>
-                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Kelas (Spinner/Text)</label>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">NIS Ujian (Opsional)</label>
+                <input
+                  type="text"
+                  value={formData.nis}
+                  onChange={(e) => setFormData({...formData, nis: e.target.value})}
+                  className="w-full px-5 py-4 rounded-2xl bg-gray-50 border-transparent focus:border-indigo-500 focus:bg-white outline-none font-bold transition-all font-mono"
+                  placeholder="Contoh: 12345"
+                />
+                <p className="text-[10px] text-gray-400 mt-1 ml-1">Dapat digunakan untuk login pengganti email.</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Kelas</label>
                 <input 
                   type="text" 
                   list="grades-list"
@@ -237,6 +280,7 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
                   <option value="XII-IPA-1" /><option value="XII-IPS-1" />
                 </datalist>
               </div>
+
               <div>
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Email Access</label>
                 <input 
@@ -245,10 +289,11 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
                   onChange={(e) => setFormData({...formData, email: e.target.value})}
                   className="w-full px-5 py-4 rounded-2xl bg-gray-50 border-transparent focus:border-indigo-500 focus:bg-white outline-none font-bold transition-all"
                   placeholder="andi@sekolah.id"
-                  required
                 />
+                <p className="text-[10px] text-gray-400 mt-1 ml-1">Jika kosong, akan diisi otomatis jika NIS tersedia.</p>
               </div>
-              <button type="submit" className="w-full bg-indigo-600 text-white font-black py-5 rounded-2xl shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2">
+
+              <button type="submit" className="w-full bg-indigo-600 text-white font-black py-5 rounded-2xl shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 mt-4">
                 {modalMode === 'add' ? <UserPlus className="w-5 h-5" /> : <Save className="w-5 h-5" />}
                 {modalMode === 'add' ? 'Simpan Siswa' : 'Update Siswa'}
               </button>

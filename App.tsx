@@ -72,10 +72,10 @@ const LoginView: React.FC<{
 
           <div className="space-y-4">
             <div>
-              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Email / Username</label>
+              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Email / NIS Ujian</label>
               <div className="relative">
                 <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-12 pr-4 py-4 rounded-2xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold text-gray-900" placeholder="name@sekolah.id" required />
+                <input type="text" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-12 pr-4 py-4 rounded-2xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold text-gray-900" placeholder="Email atau NIS..." required />
               </div>
             </div>
             <div>
@@ -165,7 +165,7 @@ export default function App() {
       if (email === MOCK_TEACHER.email && pwd === 'password') { setCurrentUser(MOCK_TEACHER); setView('TEACHER_DASHBOARD'); return null; }
       return "Guru tidak ditemukan.";
     } else {
-      const found = students.find(s => s.email === email);
+      const found = students.find(s => s.email === email || s.nis === email);
       if (found) { setCurrentUser(found); setView('STUDENT_DASHBOARD'); return null; }
       return "Siswa tidak terdaftar.";
     }
