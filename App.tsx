@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { User, Exam, AppView, ExamResult, Question, ExamLog } from './types';
-import { MOCK_TEACHER, MOCK_STUDENT, MOCK_EXAMS } from './lib/supabase';
+import { MOCK_TEACHER, MOCK_STUDENT, MOCK_EXAMS, supabase, isSupabaseConfigured } from './lib/supabase';
 import { 
   LogOut, LayoutDashboard, ClipboardList, Sparkles, 
   GraduationCap, Book, Award, Users, Clock, Star,
@@ -25,24 +25,33 @@ const formatDate = (iso: string) => new Date(iso).toLocaleDateString('id-ID', {
 });
 
 const LoginView: React.FC<{
-  onLogin: (role: 'teacher' | 'student', email: string, password?: string) => string | null;
+  onLogin: (role: 'teacher' | 'student', email: string, password?: string) => Promise<string | null>;
 }> = ({ onLogin }) => {
   const [role, setRole] = useState<'student' | 'teacher'>('student');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('password');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (role === 'teacher') setEmail(MOCK_TEACHER.email);
-    else setEmail(MOCK_STUDENT.email);
-    setPassword('password');
+    // Only autofill if using mocks
+    if (!isSupabaseConfigured) {
+        if (role === 'teacher') setEmail(MOCK_TEACHER.email);
+        else setEmail(MOCK_STUDENT.email);
+        setPassword('password');
+    } else {
+        setEmail('');
+        setPassword('');
+    }
     setErrorMsg(null);
   }, [role]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const error = onLogin(role, email, password);
+    setIsLoading(true);
+    const error = await onLogin(role, email, password);
+    setIsLoading(false);
     if (error) setErrorMsg(error);
   };
 
@@ -90,8 +99,8 @@ const LoginView: React.FC<{
             </div>
           </div>
 
-          <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-4 rounded-2xl transition shadow-xl shadow-indigo-100 flex items-center justify-center gap-2 group">
-            Masuk Sekarang <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+          <button type="submit" disabled={isLoading} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-4 rounded-2xl transition shadow-xl shadow-indigo-100 flex items-center justify-center gap-2 group disabled:opacity-70">
+            {isLoading ? 'Memproses...' : 'Masuk Sekarang'} <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
           </button>
         </form>
       </div>
@@ -150,10 +159,13 @@ export default function App() {
   const [view, setView] = useState<AppView>('LOGIN');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [exams, setExams] = useState<Exam[]>(MOCK_EXAMS);
-  const [bankQuestions, setBankQuestions] = useState<Question[]>(MOCK_EXAMS.flatMap(e => e.questions));
-  const [students, setStudents] = useState<User[]>([MOCK_STUDENT]);
+
+  // State Initialization: Use Mocks only if Supabase is NOT configured
+  const [exams, setExams] = useState<Exam[]>(isSupabaseConfigured ? [] : MOCK_EXAMS);
+  const [bankQuestions, setBankQuestions] = useState<Question[]>(isSupabaseConfigured ? [] : MOCK_EXAMS.flatMap(e => e.questions));
+  const [students, setStudents] = useState<User[]>(isSupabaseConfigured ? [] : [MOCK_STUDENT]);
   const [results, setResults] = useState<ExamResult[]>([]);
+
   const [activeExam, setActiveExam] = useState<Exam | null>(null);
   const [editingExam, setEditingExam] = useState<Exam | null>(null);
   const [lastResult, setLastResult] = useState<ExamResult | null>(null);
@@ -163,20 +175,105 @@ export default function App() {
   const [dailyScores, setDailyScores] = useState<Record<string, number>>({});
   const [gradeViewMode, setGradeViewMode] = useState<'summary' | 'history'>('summary');
 
-  const handleLogin = (role: 'teacher' | 'student', email: string, password?: string): string | null => {
+  // Load Data from Supabase
+  useEffect(() => {
+    const fetchSupabaseData = async () => {
+        if (!isSupabaseConfigured || !supabase) return;
+
+        try {
+            // 1. Fetch Exams
+            const { data: examsData, error: examsError } = await supabase.from('exams').select('*');
+            if (examsData && !examsError) {
+                const mappedExams: Exam[] = examsData.map((e: any) => ({
+                    ...e,
+                    durationMinutes: e.duration_minutes,
+                    createdAt: e.created_at
+                }));
+                setExams(mappedExams);
+                setBankQuestions(mappedExams.flatMap(e => e.questions));
+            }
+
+            // 2. Fetch Results
+            // Fetching all results might be heavy for production, should limit by teacher/student context
+            // For now, fetch all for simplicity
+            const { data: resultsData, error: resultsError } = await supabase.from('exam_results').select('*');
+            if (resultsData && !resultsError) {
+                const mappedResults: ExamResult[] = resultsData.map((r: any) => ({
+                   ...r,
+                   examId: r.exam_id,
+                   studentId: r.student_id,
+                   studentName: r.student_name || 'Unknown', // Ideally denormalized or joined
+                   totalPointsPossible: r.total_points_possible,
+                   pointsObtained: r.points_obtained,
+                   totalQuestions: r.total_questions,
+                   correctCount: r.correct_count,
+                   incorrectCount: r.incorrect_count,
+                   unansweredCount: r.unanswered_count,
+                   submittedAt: r.submitted_at,
+                   startedAt: r.started_at
+                }));
+                setResults(mappedResults);
+            }
+        } catch (err) {
+            console.error("Failed to fetch data from Supabase:", err);
+        }
+    };
+
+    fetchSupabaseData();
+  }, []);
+
+  // Fetch Students (only if Teacher logged in)
+  useEffect(() => {
+     const fetchStudents = async () => {
+        if (currentUser?.role === 'teacher' && isSupabaseConfigured && supabase) {
+            const { data, error } = await supabase.from('users').select('*').eq('role', 'student');
+            if (data && !error) {
+                setStudents(data as User[]);
+            }
+        }
+     };
+     fetchStudents();
+  }, [currentUser]);
+
+
+  const handleLogin = async (role: 'teacher' | 'student', email: string, password?: string): Promise<string | null> => {
     const pwd = password || 'password';
-    if (role === 'teacher') {
-      if (email === MOCK_TEACHER.email && pwd === 'password') { setCurrentUser(MOCK_TEACHER); setView('TEACHER_DASHBOARD'); return null; }
-      return "Guru tidak ditemukan.";
+
+    if (isSupabaseConfigured && supabase) {
+        // Authenticate via Database
+        const { data, error } = await supabase
+            .from('users')
+            .select('*')
+            .or(`email.eq.${email},nis.eq.${email}`) // Allow Email or NIS
+            .eq('role', role)
+            .single();
+
+        if (error || !data) return `${role === 'teacher' ? 'Guru' : 'Siswa'} tidak ditemukan.`;
+
+        // Simple password check (In production, use bcrypt/argon2 on backend or Supabase Auth)
+        if (data.password && data.password !== pwd) {
+            return "Password salah.";
+        }
+
+        setCurrentUser(data);
+        setView(role === 'teacher' ? 'TEACHER_DASHBOARD' : 'STUDENT_DASHBOARD');
+        return null;
+
     } else {
-      const found = students.find(s => s.email === email || s.nis === email);
-      if (found) {
-          if (found.password && found.password !== pwd) {
-              return "Password salah.";
-          }
-          setCurrentUser(found); setView('STUDENT_DASHBOARD'); return null;
-      }
-      return "Siswa tidak terdaftar.";
+        // Fallback to Mock
+        if (role === 'teacher') {
+            if (email === MOCK_TEACHER.email && pwd === 'password') { setCurrentUser(MOCK_TEACHER); setView('TEACHER_DASHBOARD'); return null; }
+            return "Guru tidak ditemukan.";
+        } else {
+            const found = students.find(s => s.email === email || s.nis === email);
+            if (found) {
+                if (found.password && found.password !== pwd) {
+                    return "Password salah.";
+                }
+                setCurrentUser(found); setView('STUDENT_DASHBOARD'); return null;
+            }
+            return "Siswa tidak terdaftar.";
+        }
     }
   };
 
@@ -200,7 +297,26 @@ export default function App() {
         answers: {},
         logs: []
       };
+
+      // Optimistic Update
       setResults(prev => [newResult, ...prev]);
+
+      // DB Insert
+      if (isSupabaseConfigured && supabase) {
+          supabase.from('exam_results').insert({
+              id: newResult.id, // Use generated ID or let DB generate? If DB generates, we lose sync. Let's use ours or UUID.
+              exam_id: exam.id,
+              student_id: currentUser!.id,
+              student_name: currentUser!.name, // Denormalize for easier CSV/PDF export
+              status: 'in_progress',
+              started_at: newResult.startedAt,
+              total_questions: newResult.totalQuestions,
+              answers: {},
+              logs: []
+          }).then(({ error }) => {
+              if (error) console.error("Failed to start exam in DB:", error);
+          });
+      }
     }
     setActiveExam(exam);
     setView('EXAM_SESSION');
@@ -208,11 +324,24 @@ export default function App() {
 
   const handleAutosave = (answers: Record<string, any>, logs: ExamLog[]) => {
     if (currentUser && activeExam) {
+      // Optimistic
       setResults(prev => prev.map(r => (r.examId === activeExam.id && r.studentId === currentUser.id && r.status === 'in_progress') ? { ...r, answers, logs } : r));
+
+      // DB Sync (Debounced ideally, but here direct)
+      if (isSupabaseConfigured && supabase) {
+          // Find the result ID to update
+          const currentResult = results.find(r => r.examId === activeExam.id && r.studentId === currentUser.id && r.status === 'in_progress');
+          if (currentResult) {
+              supabase.from('exam_results')
+                .update({ answers, logs })
+                .eq('id', currentResult.id)
+                .then(({ error }) => { if (error) console.error("Autosave failed", error); });
+          }
+      }
     }
   };
 
-  const handleExamFinish = (
+  const handleExamFinish = async (
     score: number, 
     obtained: number, 
     total: number, 
@@ -222,7 +351,9 @@ export default function App() {
   ) => {
     if (currentUser && activeExam) {
       let finalRes: ExamResult | null = null;
-      setResults(prev => prev.map(r => {
+
+      // Optimistic Update
+      const updatedResults = results.map(r => {
         if (r.examId === activeExam.id && r.studentId === currentUser.id && r.status === 'in_progress') {
           finalRes = { 
             ...r, 
@@ -241,11 +372,109 @@ export default function App() {
           return finalRes;
         }
         return r;
-      }));
+      });
+      setResults(updatedResults);
       setLastResult(finalRes);
+
+      // DB Update
+      if (isSupabaseConfigured && supabase && finalRes) {
+          await supabase.from('exam_results').update({
+              score,
+              status: 'completed',
+              total_points_possible: total,
+              points_obtained: obtained,
+              total_questions: stats.total,
+              correct_count: stats.correct,
+              incorrect_count: stats.incorrect,
+              unanswered_count: stats.unanswered,
+              submitted_at: finalRes.submittedAt,
+              answers,
+              logs
+          }).eq('id', (finalRes as any).id); // Ensure ID is present
+      }
     }
     setView('RESULT');
   };
+
+  // Wrapper for Student Updates (Sync with DB)
+  const handleStudentUpdate = async (newStudents: User[]) => {
+      // Logic to detect Add/Edit/Delete is complex with just the new array.
+      // For this simplified version, we will assume "Add" or "Edit" works via Upsert if we had proper IDs.
+      // But StudentManager generates random text IDs.
+
+      // If we want to support true Sync, we really should refactor StudentManager.
+      // For now, we will just update local state to keep UI responsive.
+      // And we try to sync the LAST added/modified item if we could identify it.
+
+      // HACK: Check if count increased -> Add.
+      const isAdd = newStudents.length > students.length;
+      if (isAdd && isSupabaseConfigured && supabase) {
+          const addedStudent = newStudents[0]; // StudentManager prepends new students [new, ...old]
+          // Verify it's actually new
+          if (!students.find(s => s.id === addedStudent.id)) {
+              await supabase.from('users').insert({
+                  ...addedStudent,
+                  role: 'student' // Ensure role
+              });
+          }
+      }
+
+      // Check if count decreased -> Delete
+      if (newStudents.length < students.length && isSupabaseConfigured && supabase) {
+          const deleted = students.find(s => !newStudents.find(ns => ns.id === s.id));
+          if (deleted) {
+              await supabase.from('users').delete().eq('id', deleted.id);
+          }
+      }
+
+      setStudents(newStudents);
+  };
+
+  // Wrapper for Exam Updates (Sync with DB)
+  const handleExamSave = async (updatedExam: Exam) => {
+      // Optimistic
+      setExams(prev => prev.map(e => e.id === updatedExam.id ? updatedExam : e));
+
+      // DB
+      if (isSupabaseConfigured && supabase) {
+          const dbExam = {
+              id: updatedExam.id,
+              title: updatedExam.title,
+              description: updatedExam.description,
+              duration_minutes: updatedExam.durationMinutes,
+              category: updatedExam.category,
+              status: updatedExam.status,
+              questions: updatedExam.questions,
+              // created_at: updatedExam.createdAt // Don't update created_at usually
+          };
+
+          const { error } = await supabase.from('exams').upsert(dbExam);
+          if (error) console.error("Failed to save exam:", error);
+      }
+
+      setView('TEACHER_DASHBOARD');
+  };
+
+  const handleExamCreate = async (newExam: Exam) => {
+       // Optimistic
+       setExams([newExam, ...exams]);
+
+       // DB
+       if (isSupabaseConfigured && supabase) {
+           const dbExam = {
+              id: newExam.id,
+              title: newExam.title,
+              description: newExam.description,
+              duration_minutes: newExam.durationMinutes,
+              category: newExam.category,
+              status: newExam.status,
+              questions: newExam.questions,
+              created_by: currentUser?.id
+           };
+           await supabase.from('exams').insert(dbExam);
+       }
+       setView('TEACHER_DASHBOARD');
+  }
 
   const exportGradesToPDF = () => {
     const doc = new jsPDF();
@@ -585,22 +814,16 @@ export default function App() {
             ) : view === 'TEACHER_BANK' ? (
               <QuestionBank questions={bankQuestions} onUpdate={setBankQuestions} />
             ) : view === 'TEACHER_STUDENTS' ? (
-              <StudentManager students={students} onUpdate={setStudents} />
+              <StudentManager students={students} onUpdate={handleStudentUpdate} />
             ) : view === 'AI_GENERATOR' ? (
               <AIGenerator 
-                onExamCreated={(newExam) => {
-                  setExams([newExam, ...exams]);
-                  setView('TEACHER_DASHBOARD');
-                }}
+                onExamCreated={handleExamCreate}
                 onCancel={() => setView('TEACHER_DASHBOARD')}
               />
             ) : view === 'EXAM_EDITOR' && editingExam ? (
               <ExamEditor 
                 exam={editingExam} 
-                onSave={(updatedExam) => {
-                  setExams(prev => prev.map(e => e.id === updatedExam.id ? updatedExam : e));
-                  setView('TEACHER_DASHBOARD');
-                }} 
+                onSave={handleExamSave}
                 onCancel={() => setView('TEACHER_DASHBOARD')}
                 onSaveToBank={(q) => setBankQuestions(prev => [q, ...prev])}
                 onPreview={(exam) => {
