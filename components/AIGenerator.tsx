@@ -129,7 +129,7 @@ const AIGenerator: React.FC<AIGeneratorProps> = ({ onExamCreated, onCancel }) =>
                   className="w-full pl-4 pr-12 py-4 rounded-2xl bg-gray-50 border-2 border-transparent focus:border-indigo-500 focus:bg-white text-gray-900 placeholder-gray-400 outline-none transition-all text-lg font-medium shadow-sm"
                   disabled={isLoading}
                 />
-                <BookOpen className="absolute right-4 top-4.5 w-6 h-6 text-gray-300 group-focus-within:text-indigo-400 transition-colors" />
+                <BookOpen className="absolute right-4 top-1/2 -translate-y-1/2 w-6 h-6 text-gray-300 group-focus-within:text-indigo-400 transition-colors" />
               </div>
             </div>
 

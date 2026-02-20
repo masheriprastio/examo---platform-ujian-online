@@ -250,8 +250,8 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                             {q.options?.map((opt, oIndex) => (
                               <div key={oIndex} className="relative">
                                 <input type="text" value={opt} onChange={(e) => handleOptionChange(qIndex, oIndex, e.target.value)} className={`w-full pl-10 pr-10 py-3 rounded-xl border-2 font-bold text-sm outline-none transition-all ${q.correctAnswerIndex === oIndex ? 'border-green-600 bg-green-50/30' : 'border-gray-50 bg-white'}`} />
-                                <div className="absolute left-3 top-3.5 text-[10px] font-black text-gray-300">{String.fromCharCode(65 + oIndex)}</div>
-                                <button onClick={() => handleQuestionChange(qIndex, 'correctAnswerIndex', oIndex)} className={`absolute right-3 top-2.5 p-1 rounded-lg ${q.correctAnswerIndex === oIndex ? 'bg-green-600 text-white' : 'text-gray-200 hover:text-green-500'}`}><Check className="w-4 h-4" /></button>
+                                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-300">{String.fromCharCode(65 + oIndex)}</div>
+                                <button onClick={() => handleQuestionChange(qIndex, 'correctAnswerIndex', oIndex)} className={`absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg ${q.correctAnswerIndex === oIndex ? 'bg-green-600 text-white' : 'text-gray-200 hover:text-green-500'}`}><Check className="w-4 h-4" /></button>
                               </div>
                             ))}
                           </div>
@@ -271,14 +271,14 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                             {q.options?.map((opt, oIndex) => (
                               <div key={oIndex} className="relative">
                                 <input type="text" value={opt} onChange={(e) => handleOptionChange(qIndex, oIndex, e.target.value)} className={`w-full pl-10 pr-10 py-3 rounded-xl border-2 font-bold text-sm outline-none transition-all ${q.correctAnswerIndices?.includes(oIndex) ? 'border-green-600 bg-green-50/30' : 'border-gray-50 bg-white'}`} />
-                                <div className="absolute left-3 top-3.5 text-[10px] font-black text-gray-300">{String.fromCharCode(65 + oIndex)}</div>
+                                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-300">{String.fromCharCode(65 + oIndex)}</div>
                                 <button onClick={() => {
                                   const currentIndices = q.correctAnswerIndices || [];
                                   const newIndices = currentIndices.includes(oIndex) 
                                     ? currentIndices.filter(i => i !== oIndex) 
                                     : [...currentIndices, oIndex];
                                   handleQuestionChange(qIndex, 'correctAnswerIndices', newIndices);
-                                }} className={`absolute right-3 top-2.5 p-1 rounded-lg ${q.correctAnswerIndices?.includes(oIndex) ? 'bg-green-600 text-white' : 'text-gray-200 hover:text-green-500'}`}><Check className="w-4 h-4" /></button>
+                                }} className={`absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg ${q.correctAnswerIndices?.includes(oIndex) ? 'bg-green-600 text-white' : 'text-gray-200 hover:text-green-500'}`}><Check className="w-4 h-4" /></button>
                               </div>
                             ))}
                           </div>
