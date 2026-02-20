@@ -27,7 +27,8 @@ export const MOCK_STUDENT: User = {
   name: 'Budi Santoso',
   grade: 'XII-IPA-1',
   role: 'student',
-  school: 'SMA Negeri 1 Digital'
+  school: 'SMA Negeri 1 Digital',
+  nis: '12345'
 };
 
 export const MOCK_EXAMS: Exam[] = [
