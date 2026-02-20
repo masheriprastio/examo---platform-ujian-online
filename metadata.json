@@ -1,0 +1,5 @@
+{
+  "name": "Examo - Platform Ujian Online",
+  "description": "Aplikasi ujian online berbasis web dengan integrasi Gemini AI untuk pembuatan soal otomatis dan Supabase untuk manajemen data.",
+  "requestFramePermissions": []
+}
