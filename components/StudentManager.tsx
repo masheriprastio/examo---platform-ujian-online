@@ -4,7 +4,7 @@ import { User } from '../types';
 import { 
   Users, Upload, Download, FileSpreadsheet, Trash2, 
   UserPlus, Search, X, CheckCircle2, AlertCircle, Edit3, Save,
-  BadgeCheck
+  BadgeCheck, Key
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -18,7 +18,7 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
   const [isImporting, setIsImporting] = useState(false);
   const [modalMode, setModalMode] = useState<'add' | 'edit' | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState({ name: '', email: '', grade: '', nis: '' });
+  const [formData, setFormData] = useState({ name: '', email: '', grade: '', nis: '', password: '' });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filteredStudents = students.filter(s => 
@@ -30,13 +30,13 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
 
   const handleDownloadTemplate = () => {
     const templateData = [
-      { Nama: 'Budi Santoso', Email: 'budi@sekolah.id', Kelas: 'X-1', NIS: '12345' },
-      { Nama: 'Siti Aminah', Email: 'siti@sekolah.id', Kelas: 'X-2', NIS: '67890' },
+      { Nama: 'Budi Santoso', Email: 'budi@sekolah.id', Kelas: 'X-1', NIS: '12345', Password: 'rahasia123' },
+      { Nama: 'Siti Aminah', Email: 'siti@sekolah.id', Kelas: 'X-2', NIS: '67890', Password: 'password' },
     ];
     const ws = XLSX.utils.json_to_sheet(templateData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Daftar Siswa");
-    XLSX.writeFile(wb, "Template_Import_Siswa_Examo.xlsx");
+    XLSX.writeFile(wb, "Template_Import_Siswa_Examo_v2.xlsx");
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -62,7 +62,7 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
             grade: row.Kelas || '-',
             nis: row.NIS ? String(row.NIS) : undefined,
             role: 'student',
-            password: 'password' // Password standar
+            password: row.Password ? String(row.Password) : 'password' // Use Excel password or default
           }));
 
         if (importedStudents.length > 0) {
@@ -87,7 +87,8 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
       name: student.name,
       email: student.email,
       grade: student.grade || '',
-      nis: student.nis || ''
+      nis: student.nis || '',
+      password: student.password || ''
     });
     setEditingId(student.id);
     setModalMode('edit');
@@ -102,6 +103,7 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
     
     // Fallback email if empty but NIS provided
     const emailToUse = formData.email || `${formData.nis}@sekolah.id`;
+    const passwordToUse = formData.password || 'password';
 
     if (modalMode === 'add') {
       const student: User = {
@@ -111,14 +113,14 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
         grade: formData.grade,
         nis: formData.nis,
         role: 'student',
-        password: 'password'
+        password: passwordToUse
       };
       onUpdate([student, ...students]);
     } else if (modalMode === 'edit' && editingId) {
-      onUpdate(students.map(s => s.id === editingId ? { ...s, ...formData, email: emailToUse } : s));
+      onUpdate(students.map(s => s.id === editingId ? { ...s, ...formData, email: emailToUse, password: passwordToUse } : s));
     }
     
-    setFormData({ name: '', email: '', grade: '', nis: '' });
+    setFormData({ name: '', email: '', grade: '', nis: '', password: '' });
     setModalMode(null);
     setEditingId(null);
   };
@@ -152,7 +154,7 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
           </button>
           <button 
             onClick={() => {
-              setFormData({ name: '', email: '', grade: '', nis: '' });
+              setFormData({ name: '', email: '', grade: '', nis: '', password: '' });
               setModalMode('add');
             }}
             className="flex-1 md:flex-none bg-indigo-600 text-white px-6 py-4 rounded-[20px] font-black shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 active:scale-95 text-sm"
@@ -291,6 +293,21 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate }) =
                   placeholder="andi@sekolah.id"
                 />
                 <p className="text-[10px] text-gray-400 mt-1 ml-1">Jika kosong, akan diisi otomatis jika NIS tersedia.</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Password</label>
+                <div className="relative">
+                    <Key className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                    <input
+                    type="text"
+                    value={formData.password}
+                    onChange={(e) => setFormData({...formData, password: e.target.value})}
+                    className="w-full pl-11 pr-5 py-4 rounded-2xl bg-gray-50 border-transparent focus:border-indigo-500 focus:bg-white outline-none font-bold transition-all"
+                    placeholder="Set password (default: password)"
+                    />
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1 ml-1">Default: 'password' jika dikosongkan.</p>
               </div>
 
               <button type="submit" className="w-full bg-indigo-600 text-white font-black py-5 rounded-2xl shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 mt-4">

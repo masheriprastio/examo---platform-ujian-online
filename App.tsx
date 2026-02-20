@@ -8,7 +8,7 @@ import {
   TrendingUp, CheckCircle, PlayCircle, FileText, History,
   Mail, Lock, Eye, EyeOff, ArrowRight, AlertTriangle, Database,
   Menu, X as CloseIcon, FileDown, Download, UserPlus, FileSpreadsheet,
-  XCircle, HelpCircle, RotateCcw
+  XCircle, HelpCircle, RotateCcw, PenTool, Save
 } from 'lucide-react';
 
 import ExamRunner from './components/ExamRunner';
@@ -159,6 +159,10 @@ export default function App() {
   const [lastResult, setLastResult] = useState<ExamResult | null>(null);
   const [selectedResult, setSelectedResult] = useState<ExamResult | null>(null);
 
+  // New State for Gradebook
+  const [dailyScores, setDailyScores] = useState<Record<string, number>>({});
+  const [gradeViewMode, setGradeViewMode] = useState<'summary' | 'history'>('summary');
+
   const handleLogin = (role: 'teacher' | 'student', email: string, password?: string): string | null => {
     const pwd = password || 'password';
     if (role === 'teacher') {
@@ -166,7 +170,12 @@ export default function App() {
       return "Guru tidak ditemukan.";
     } else {
       const found = students.find(s => s.email === email || s.nis === email);
-      if (found) { setCurrentUser(found); setView('STUDENT_DASHBOARD'); return null; }
+      if (found) {
+          if (found.password && found.password !== pwd) {
+              return "Password salah.";
+          }
+          setCurrentUser(found); setView('STUDENT_DASHBOARD'); return null;
+      }
       return "Siswa tidak terdaftar.";
     }
   };
@@ -414,52 +423,125 @@ export default function App() {
             view === 'TEACHER_GRADES' ? (
               <div className="max-w-6xl mx-auto animate-in fade-in">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
-                  <div><h1 className="text-3xl font-black text-gray-900 tracking-tight">Buku Nilai Siswa</h1><p className="text-gray-400">Kelola dan ekspor hasil ujian kelas.</p></div>
+                  <div>
+                    <h1 className="text-3xl font-black text-gray-900 tracking-tight">Buku Nilai Siswa</h1>
+                    <p className="text-gray-400">Kelola dan ekspor hasil ujian kelas.</p>
+                  </div>
                   <div className="flex gap-2">
                     <button onClick={exportGradesToCSV} className="bg-white border-2 border-green-600 text-green-600 px-6 py-3 rounded-2xl font-black hover:bg-green-50 transition-all flex items-center gap-2"><FileSpreadsheet className="w-5 h-5" /> CSV</button>
                     <button onClick={exportGradesToPDF} className="bg-white border-2 border-indigo-600 text-indigo-600 px-6 py-3 rounded-2xl font-black hover:bg-indigo-50 transition-all flex items-center gap-2"><FileDown className="w-5 h-5" /> PDF</button>
                     <button onClick={exportFullAnswersToPDF} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black hover:bg-indigo-700 transition-all flex items-center gap-2 shadow-lg shadow-indigo-100"><FileText className="w-5 h-5" /> Cetak Jawaban</button>
                   </div>
                 </div>
+
+                <div className="bg-white p-2 rounded-[25px] border border-gray-100 shadow-sm inline-flex mb-8">
+                    <button
+                        onClick={() => setGradeViewMode('summary')}
+                        className={`px-6 py-3 rounded-[18px] font-bold text-sm transition-all ${gradeViewMode === 'summary' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'text-gray-500 hover:bg-gray-50'}`}
+                    >
+                        Rekap Nilai
+                    </button>
+                    <button
+                        onClick={() => setGradeViewMode('history')}
+                        className={`px-6 py-3 rounded-[18px] font-bold text-sm transition-all ${gradeViewMode === 'history' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'text-gray-500 hover:bg-gray-50'}`}
+                    >
+                        Riwayat Pengerjaan
+                    </button>
+                </div>
+
                 <div className="bg-white rounded-[40px] shadow-sm border border-gray-100 overflow-x-auto">
-                  <table className="w-full min-w-[800px]">
-                    <thead className="bg-gray-50/50 border-b text-left">
-                      <tr>
-                        <th className="px-10 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest">Siswa</th>
-                        <th className="px-10 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest">Ujian</th>
-                        <th className="px-10 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Statistik (B/S/K)</th>
-                        <th className="px-10 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Nilai Akhir</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {results.length === 0 ? <tr><td colSpan={4} className="py-20 text-center text-gray-400 font-medium italic">Belum ada data pengerjaan.</td></tr> : results.map(r => (
-                        <tr key={r.id} className="hover:bg-gray-50 transition-colors">
-                          <td className="px-10 py-8 font-bold text-gray-900">{r.studentName}<p className="text-[10px] font-black text-gray-300 uppercase mt-1">{formatDate(r.startedAt)}</p></td>
-                          <td className="px-10 py-8 text-gray-500 font-medium">{exams.find(e => e.id === r.examId)?.title}</td>
-                          <td className="px-10 py-8">
-                            <div className="flex items-center justify-center gap-2">
-                               <span className="bg-green-50 text-green-600 px-2 py-1 rounded-lg text-[10px] font-black border border-green-100">{r.correctCount}B</span>
-                               <span className="bg-red-50 text-red-500 px-2 py-1 rounded-lg text-[10px] font-black border border-red-100">{r.incorrectCount}S</span>
-                               <span className="bg-gray-50 text-gray-400 px-2 py-1 rounded-lg text-[10px] font-black border border-gray-100">{r.unansweredCount}K</span>
-                            </div>
-                          </td>
-                          <td className="px-10 py-8 text-right">
-                            <div className="flex items-center justify-end gap-4">
-                              <span className={`font-black text-3xl tracking-tighter ${r.status === 'completed' && r.score < 75 ? 'text-red-500' : 'text-indigo-600'}`}>
-                                {r.status === 'completed' ? r.score : '-'}
-                              </span>
-                              <button onClick={() => exportAnswersToPDF([r], `Hasil_${r.studentName.replace(/\s+/g, '_')}.pdf`)} className="p-3 bg-gray-50 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Cetak Hasil Siswa Ini">
-                                <FileDown className="w-5 h-5" />
-                              </button>
-                              <button onClick={() => setSelectedResult(r)} className="p-3 bg-gray-50 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Lihat Log Aktivitas">
-                                <FileText className="w-5 h-5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  {gradeViewMode === 'history' ? (
+                      <table className="w-full min-w-[800px]">
+                        <thead className="bg-gray-50/50 border-b text-left">
+                          <tr>
+                            <th className="px-10 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest">Siswa</th>
+                            <th className="px-10 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest">Ujian</th>
+                            <th className="px-10 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Statistik (B/S/K)</th>
+                            <th className="px-10 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Nilai Akhir</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {results.length === 0 ? <tr><td colSpan={4} className="py-20 text-center text-gray-400 font-medium italic">Belum ada data pengerjaan.</td></tr> : results.map(r => (
+                            <tr key={r.id} className="hover:bg-gray-50 transition-colors">
+                              <td className="px-10 py-8 font-bold text-gray-900">{r.studentName}<p className="text-[10px] font-black text-gray-300 uppercase mt-1">{formatDate(r.startedAt)}</p></td>
+                              <td className="px-10 py-8 text-gray-500 font-medium">{exams.find(e => e.id === r.examId)?.title}</td>
+                              <td className="px-10 py-8">
+                                <div className="flex items-center justify-center gap-2">
+                                  <span className="bg-green-50 text-green-600 px-2 py-1 rounded-lg text-[10px] font-black border border-green-100">{r.correctCount}B</span>
+                                  <span className="bg-red-50 text-red-500 px-2 py-1 rounded-lg text-[10px] font-black border border-red-100">{r.incorrectCount}S</span>
+                                  <span className="bg-gray-50 text-gray-400 px-2 py-1 rounded-lg text-[10px] font-black border border-gray-100">{r.unansweredCount}K</span>
+                                </div>
+                              </td>
+                              <td className="px-10 py-8 text-right">
+                                <div className="flex items-center justify-end gap-4">
+                                  <span className={`font-black text-3xl tracking-tighter ${r.status === 'completed' && r.score < 75 ? 'text-red-500' : 'text-indigo-600'}`}>
+                                    {r.status === 'completed' ? r.score : '-'}
+                                  </span>
+                                  <button onClick={() => exportAnswersToPDF([r], `Hasil_${r.studentName.replace(/\s+/g, '_')}.pdf`)} className="p-3 bg-gray-50 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Cetak Hasil Siswa Ini">
+                                    <FileDown className="w-5 h-5" />
+                                  </button>
+                                  <button onClick={() => setSelectedResult(r)} className="p-3 bg-gray-50 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Lihat Log Aktivitas">
+                                    <FileText className="w-5 h-5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                  ) : (
+                      <table className="w-full min-w-[800px]">
+                        <thead className="bg-gray-50/50 border-b text-left">
+                          <tr>
+                            <th className="px-10 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest">Siswa</th>
+                            <th className="px-10 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Rata-rata Ujian</th>
+                            <th className="px-10 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Nilai Harian</th>
+                            <th className="px-10 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Nilai Akhir (50:50)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {students.length === 0 ? <tr><td colSpan={4} className="py-20 text-center text-gray-400 font-medium italic">Belum ada siswa.</td></tr> : students.map(s => {
+                              const studentResults = results.filter(r => r.studentId === s.id && r.status === 'completed');
+                              const avgExam = studentResults.length > 0 ? Math.round(studentResults.reduce((a, b) => a + b.score, 0) / studentResults.length) : 0;
+                              const dailyScore = dailyScores[s.id] || 0;
+                              const finalScore = Math.round((avgExam + dailyScore) / 2);
+
+                              return (
+                                <tr key={s.id} className="hover:bg-gray-50 transition-colors">
+                                  <td className="px-10 py-8">
+                                      <p className="font-bold text-gray-900">{s.name}</p>
+                                      <p className="text-xs text-gray-400 mt-1">{s.grade || '-'} • {s.nis || s.email}</p>
+                                  </td>
+                                  <td className="px-10 py-8 text-center">
+                                      <span className={`font-black text-xl ${avgExam < 75 ? 'text-amber-500' : 'text-gray-900'}`}>{avgExam}</span>
+                                      <p className="text-[10px] text-gray-400 mt-1">{studentResults.length} Ujian</p>
+                                  </td>
+                                  <td className="px-10 py-8 text-center">
+                                      <div className="flex items-center justify-center gap-2">
+                                          <input
+                                              type="number"
+                                              min="0" max="100"
+                                              value={dailyScores[s.id] || ''}
+                                              onChange={(e) => {
+                                                  const val = parseInt(e.target.value);
+                                                  setDailyScores(prev => ({...prev, [s.id]: isNaN(val) ? 0 : val}));
+                                              }}
+                                              placeholder="0"
+                                              className="w-20 px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 font-bold text-center outline-none"
+                                          />
+                                      </div>
+                                  </td>
+                                  <td className="px-10 py-8 text-right">
+                                      <span className={`font-black text-3xl tracking-tighter ${finalScore < 75 ? 'text-red-500' : 'text-indigo-600'}`}>
+                                          {finalScore}
+                                      </span>
+                                  </td>
+                                </tr>
+                              );
+                          })}
+                        </tbody>
+                      </table>
+                  )}
                 </div>
                 
                 {selectedResult && (
