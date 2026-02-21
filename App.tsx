@@ -186,6 +186,33 @@ export default function App() {
   // New State for Create Exam Dropdown
   const [showCreateMenu, setShowCreateMenu] = useState(false);
 
+  // Auto Logout Logic
+  useEffect(() => {
+    let timeout: NodeJS.Timeout;
+
+    const resetTimer = () => {
+      if (currentUser) {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => {
+          setView('LOGIN');
+          setCurrentUser(null);
+          alert('Sesi Anda telah berakhir karena tidak ada aktivitas selama 3 menit.');
+        }, 3 * 60 * 1000); // 3 minutes
+      }
+    };
+
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart'];
+    if (currentUser) {
+      resetTimer();
+      events.forEach(event => document.addEventListener(event, resetTimer));
+    }
+
+    return () => {
+      clearTimeout(timeout);
+      events.forEach(event => document.removeEventListener(event, resetTimer));
+    };
+  }, [currentUser]);
+
   // Load Data from Supabase
   const fetchData = async () => {
         if (!isSupabaseConfigured || !supabase) return;
@@ -405,9 +432,13 @@ export default function App() {
       setResults(updatedResults);
       setLastResult(finalRes);
 
-      // DB Update
+      // DB Update (Upsert to be safe)
       if (isSupabaseConfigured && supabase && finalRes) {
-          await supabase.from('exam_results').update({
+          const { error } = await supabase.from('exam_results').upsert({
+              id: (finalRes as any).id,
+              exam_id: activeExam.id,
+              student_id: currentUser.id,
+              student_name: currentUser.name,
               score,
               status: 'completed',
               total_points_possible: total,
@@ -417,9 +448,15 @@ export default function App() {
               incorrect_count: stats.incorrect,
               unanswered_count: stats.unanswered,
               submitted_at: finalRes.submittedAt,
+              started_at: finalRes.startedAt, // Ensure started_at is preserved
               answers,
               logs
-          }).eq('id', (finalRes as any).id); // Ensure ID is present
+          });
+          
+          if (error) {
+            console.error('Failed to save exam result:', error);
+            alert('Gagal menyimpan hasil ujian ke database. Mohon screenshot hasil ini.');
+          }
       }
     }
     setView('RESULT');
