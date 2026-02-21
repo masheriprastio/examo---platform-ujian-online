@@ -1,9 +1,25 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
 import { Question } from "../types";
 
-// NOTE: API_KEY is obtained exclusively from process.env.API_KEY
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Lazy initialization to prevent immediate side-effects or crashes if key is missing
+let aiClient: any = null;
+let GenAITypes: any = null;
+
+const getAiClient = async () => {
+  if (!aiClient) {
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) {
+      console.warn("Gemini API Key is missing!");
+      throw new Error("API Key Gemini tidak ditemukan. Pastikan konfigurasi environment benar.");
+    }
+    
+    // Dynamic import to avoid load-time side effects (like fetch polyfill issues)
+    const { GoogleGenAI, Type } = await import("@google/genai");
+    GenAITypes = Type;
+    aiClient = new GoogleGenAI({ apiKey });
+  }
+  return { client: aiClient, Type: GenAITypes };
+};
 
 export interface FileData {
   mimeType: string;
@@ -18,6 +34,8 @@ export const generateQuestionsWithAI = async (
 ): Promise<Question[]> => {
   // Use gemini-3-pro-preview for complex reasoning tasks (educational content generation)
   const model = "gemini-3-pro-preview";
+  
+  const { client, Type } = await getAiClient();
   
   let typeInstruction = "";
   if (questionType === 'mcq') {
@@ -82,7 +100,7 @@ export const generateQuestionsWithAI = async (
   }
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await client.models.generateContent({
       model: model,
       contents: { parts },
       config: {

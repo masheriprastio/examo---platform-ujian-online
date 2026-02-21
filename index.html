@@ -9,6 +9,26 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script>
+      window.global = new Proxy(window, {
+        get: function(target, prop) {
+          const value = target[prop];
+          if (typeof value === 'function') {
+            return value.bind(target);
+          }
+          return value;
+        },
+        set: function(target, prop, value) {
+          if (prop === 'fetch') return true;
+          try {
+            target[prop] = value;
+          } catch (e) {
+            console.warn('Failed to set property on global proxy:', prop, e);
+          }
+          return true;
+        }
+      });
+    </script>
+    <script>
       tailwind.config = {
         theme: {
           extend: {

@@ -3,7 +3,8 @@ import React, { useState } from 'react';
 import { Exam, Question, QuestionType } from '../types';
 import { 
   Save, Plus, Trash2, Check, Clock, Type, Star, X, 
-  ChevronDown, ChevronUp, Database, GripVertical, Shuffle, Tag, AlertCircle, Eye
+  ChevronDown, ChevronUp, Database, GripVertical, Shuffle, Tag, AlertCircle, Eye,
+  Image as ImageIcon, Upload
 } from 'lucide-react';
 
 interface ExamEditorProps {
@@ -36,6 +37,31 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     newOptions[oIndex] = value;
     newQuestions[qIndex] = { ...newQuestions[qIndex], options: newOptions };
     setFormData(prev => ({ ...prev, questions: newQuestions }));
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, qIndex: number) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      alert("Ukuran gambar maksimal 2MB");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      const newQuestions = [...formData.questions];
+      newQuestions[qIndex] = {
+        ...newQuestions[qIndex],
+        attachment: {
+          type: 'image',
+          url: base64
+        }
+      };
+      setFormData(prev => ({ ...prev, questions: newQuestions }));
+    };
+    reader.readAsDataURL(file);
   };
 
   const addQuestion = (type: QuestionType = 'mcq') => {
@@ -210,6 +236,33 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
 
                   {activeQuestionId === q.id && (
                     <div className="p-6 md:p-8 bg-gray-50/30 border-t border-gray-50 space-y-6 animate-in slide-in-from-top-2">
+                      <div>
+                        <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Lampiran Gambar (Opsional)</label>
+                        {q.attachment ? (
+                          <div className="relative rounded-xl overflow-hidden border border-gray-200 group w-full md:w-1/2">
+                            <img src={q.attachment.url} alt="Lampiran" className="w-full h-48 object-cover bg-gray-100" />
+                            <button 
+                              onClick={() => handleQuestionChange(qIndex, 'attachment', undefined)}
+                              className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center hover:bg-gray-50 transition-colors cursor-pointer w-full md:w-1/2" onClick={() => document.getElementById(`file-upload-${q.id}`)?.click()}>
+                            <ImageIcon className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                            <p className="text-xs font-bold text-gray-500">Klik untuk unggah gambar</p>
+                            <input 
+                              id={`file-upload-${q.id}`}
+                              type="file" 
+                              accept="image/*" 
+                              className="hidden"
+                              onChange={(e) => handleImageUpload(e, qIndex)}
+                            />
+                          </div>
+                        )}
+                      </div>
+
                       <div>
                         <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Pertanyaan</label>
                         <textarea value={q.text} onChange={(e) => handleQuestionChange(qIndex, 'text', e.target.value)} className="w-full px-4 py-3 rounded-xl border border-gray-100 focus:ring-2 focus:ring-indigo-500 h-20 font-bold outline-none" />
