@@ -1024,7 +1024,15 @@ export default function App() {
                   ) : (
                       exams.map(e => (
                         <div key={e.id} className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm flex items-center justify-between group">
-                          <div><h3 className="font-bold text-gray-900 text-lg md:text-xl">{e.title}</h3><div className="flex gap-4 mt-2 text-[10px] font-black text-gray-400 uppercase tracking-widest"><span>{e.category}</span><span>{e.questions.length} Soal</span></div></div>
+                          <div>
+                            <div className="flex items-center gap-3 mb-2">
+                              <h3 className="font-bold text-gray-900 text-lg md:text-xl">{e.title}</h3>
+                              <span className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${e.status === 'published' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                                {e.status === 'published' ? 'Publikasi' : 'Draft'}
+                              </span>
+                            </div>
+                            <div className="flex gap-4 mt-2 text-[10px] font-black text-gray-400 uppercase tracking-widest"><span>{e.category}</span><span>{e.questions.length} Soal</span></div>
+                          </div>
                           <button onClick={() => { setEditingExam(e); setView('EXAM_EDITOR'); }} className="p-5 bg-gray-50 text-gray-400 rounded-3xl hover:bg-indigo-600 hover:text-white transition-all"><FileText /></button>
                         </div>
                       ))
