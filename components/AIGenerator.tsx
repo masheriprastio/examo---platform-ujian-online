@@ -13,6 +13,7 @@ interface AIGeneratorProps {
 const AIGenerator: React.FC<AIGeneratorProps> = ({ onExamCreated, onCancel }) => {
   const [topic, setTopic] = useState('');
   const [questionType, setQuestionType] = useState<'mcq' | 'true_false' | 'short_answer' | 'essay' | 'mixed'>('mixed');
+  const [questionCount, setQuestionCount] = useState(5);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [selectedFile, setSelectedFile] = useState<{ name: string; type: string; data: string } | null>(null);
