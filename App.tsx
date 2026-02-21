@@ -594,7 +594,7 @@ export default function App() {
       description: '',
       durationMinutes: 60,
       category: 'Umum',
-      status: 'draft',
+      status: 'published',
       createdAt: new Date().toISOString(),
       questions: []
     };
@@ -1025,12 +1025,7 @@ export default function App() {
                       exams.map(e => (
                         <div key={e.id} className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm flex items-center justify-between group">
                           <div>
-                            <div className="flex items-center gap-3 mb-2">
-                              <h3 className="font-bold text-gray-900 text-lg md:text-xl">{e.title}</h3>
-                              <span className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${e.status === 'published' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                                {e.status === 'published' ? 'Publikasi' : 'Draft'}
-                              </span>
-                            </div>
+                            <h3 className="font-bold text-gray-900 text-lg md:text-xl">{e.title}</h3>
                             <div className="flex gap-4 mt-2 text-[10px] font-black text-gray-400 uppercase tracking-widest"><span>{e.category}</span><span>{e.questions.length} Soal</span></div>
                           </div>
                           <button onClick={() => { setEditingExam(e); setView('EXAM_EDITOR'); }} className="p-5 bg-gray-50 text-gray-400 rounded-3xl hover:bg-indigo-600 hover:text-white transition-all"><FileText /></button>
@@ -1211,12 +1206,12 @@ export default function App() {
                 </div>
                 <h2 className="text-2xl font-black text-gray-900 mb-8 tracking-tight">Ujian Tersedia</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
-                  {exams.filter(e => e.status === 'published').length === 0 ? (
+                  {exams.length === 0 ? (
                     <div className="col-span-full text-center py-20 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
                       <p className="text-gray-400 font-medium">Belum ada ujian yang tersedia saat ini.</p>
                       <button onClick={fetchData} className="mt-4 text-indigo-600 font-bold hover:underline">Coba Segarkan</button>
                     </div>
-                  ) : exams.filter(e => e.status === 'published').map(e => {
+                  ) : exams.map(e => {
                     const progress = results.find(r => r.examId === e.id && r.studentId === currentUser?.id);
                     const isTaken = progress?.status === 'completed';
                     const isInProgress = progress?.status === 'in_progress';
