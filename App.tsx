@@ -17,6 +17,7 @@ import AIGenerator from './components/AIGenerator';
 import ExamEditor from './components/ExamEditor';
 import QuestionBank from './components/QuestionBank';
 import StudentManager from './components/StudentManager';
+import MaterialManager from './components/MaterialManager';
 
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -124,6 +125,7 @@ const Sidebar: React.FC<{
     { id: 'TEACHER_BANK', label: 'Bank Soal', icon: Database },
     { id: 'TEACHER_STUDENTS', label: 'Manajemen Siswa', icon: Users },
     { id: 'AI_GENERATOR', label: 'Generator AI', icon: Sparkles },
+    { id: 'MATERIAL_MANAGER', label: 'Manajemen Materi', icon: FileText },
   ] : [
     { id: 'STUDENT_DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'STUDENT_HISTORY', label: 'Riwayat Ujian', icon: History },
@@ -947,6 +949,8 @@ export default function App() {
                   onAddStudent={handleAddStudent}
                   onDeleteStudent={handleDeleteStudent}
               />
+            ) : view === 'MATERIAL_MANAGER' ? (
+              <MaterialManager />
             ) : view === 'AI_GENERATOR' ? (
               <AIGenerator 
                 onExamCreated={handleExamCreate}

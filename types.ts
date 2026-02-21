@@ -71,4 +71,20 @@ export interface ExamResult {
   logs: ExamLog[];
 }
 
-export type AppView = 'LOGIN' | 'TEACHER_DASHBOARD' | 'TEACHER_GRADES' | 'TEACHER_BANK' | 'TEACHER_STUDENTS' | 'STUDENT_DASHBOARD' | 'STUDENT_HISTORY' | 'EXAM_SESSION' | 'RESULT' | 'AI_GENERATOR' | 'EXAM_EDITOR' | 'CHANGE_PASSWORD';
+export interface Material {
+  id: string;
+  title: string;
+  description: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  fileUrl: string;
+  uploadedBy: string;
+  uploadedAt: string;
+  category: string;
+  grade?: string;
+  subject?: string;
+  isPublic: boolean;
+}
+
+export type AppView = 'LOGIN' | 'TEACHER_DASHBOARD' | 'TEACHER_GRADES' | 'TEACHER_BANK' | 'TEACHER_STUDENTS' | 'STUDENT_DASHBOARD' | 'STUDENT_HISTORY' | 'EXAM_SESSION' | 'RESULT' | 'AI_GENERATOR' | 'EXAM_EDITOR' | 'CHANGE_PASSWORD' | 'MATERIAL_MANAGER';
