@@ -312,10 +312,21 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
           <div className="max-w-3xl mx-auto pb-24 text-left">
             <div className="mb-10">
               <span className="inline-block bg-gray-900 text-white px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] mb-3">PERTANYAAN {currentQuestionIndex + 1}</span>
-              
+
+              {/* Added Image Display Here */}
               {currentQuestion.attachment && currentQuestion.attachment.type === 'image' && (
-                <div className="mb-6 rounded-2xl overflow-hidden border border-gray-100 shadow-sm max-w-2xl">
-                  <img src={currentQuestion.attachment.url} alt="Lampiran Soal" className="w-full max-h-[400px] object-contain bg-gray-50" />
+                <div className="mb-6 rounded-2xl overflow-hidden border border-gray-200 shadow-sm">
+                    <img
+                        src={currentQuestion.attachment.url}
+                        alt="Lampiran Soal"
+                        className="w-full max-h-[400px] object-contain bg-gray-50"
+                        onError={(e) => (e.currentTarget.style.display = 'none')}
+                    />
+                    {currentQuestion.attachment.caption && (
+                        <p className="p-2 text-center text-xs text-gray-500 bg-gray-50 border-t border-gray-100 italic">
+                            {currentQuestion.attachment.caption}
+                        </p>
+                    )}
                 </div>
               )}
 
