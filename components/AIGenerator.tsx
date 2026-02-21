@@ -60,7 +60,7 @@ const AIGenerator: React.FC<AIGeneratorProps> = ({ onExamCreated, onCancel }) =>
         data: selectedFile.data
       } : undefined;
 
-      const questions = await generateQuestionsWithAI(topic, 5, fileData, questionType);
+      const questions = await generateQuestionsWithAI(topic, questionCount, fileData, questionType);
       
       const newExam: Exam = {
         id: generateUUID(),
@@ -135,11 +135,31 @@ const AIGenerator: React.FC<AIGeneratorProps> = ({ onExamCreated, onCancel }) =>
               </div>
             </div>
 
-            {/* STEP 1.5: QUESTION TYPE */}
+            {/* STEP 1.5: QUESTION COUNT */}
             <div className="space-y-3">
               <label className="text-sm font-black text-gray-700 uppercase tracking-wider flex items-center gap-2">
                 <ListChecks className="w-4 h-4 text-indigo-600" />
-                2. Pilih Tipe Soal
+                2. Jumlah Soal
+              </label>
+              <div className="relative group">
+                <input
+                  type="number"
+                  value={questionCount}
+                  onChange={(e) => setQuestionCount(Math.max(1, parseInt(e.target.value) || 1))}
+                  min="1"
+                  max="50"
+                  className="w-full pl-4 pr-12 py-4 rounded-2xl bg-gray-50 border-2 border-transparent focus:border-indigo-500 focus:bg-white text-gray-900 placeholder-gray-400 outline-none transition-all text-lg font-medium shadow-sm"
+                  disabled={isLoading}
+                />
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-300 group-focus-within:text-indigo-400 transition-colors font-bold">Soal</span>
+              </div>
+            </div>
+
+            {/* STEP 2: QUESTION TYPE */}
+            <div className="space-y-3">
+              <label className="text-sm font-black text-gray-700 uppercase tracking-wider flex items-center gap-2">
+                <ListChecks className="w-4 h-4 text-indigo-600" />
+                3. Pilih Tipe Soal
               </label>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 {[
