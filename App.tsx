@@ -527,13 +527,28 @@ export default function App() {
               created_at: exists ? undefined : updatedExam.createdAt
           };
 
-          const { error } = await supabase.from('exams').upsert(dbExam);
-          if (error) {
-              console.error("Failed to save exam:", error);
-              alert("Gagal menyimpan ke database: " + error.message);
+          if (exists) {
+              // Update existing exam
+              const { error } = await supabase.from('exams').update(dbExam).eq('id', updatedExam.id);
+              if (error) {
+                  console.error("Failed to update exam:", error);
+                  alert("Gagal menyimpan ujian ke database: " + error.message);
+                  // Rollback optimistic update
+                  await fetchData();
+              } else {
+                  await fetchData();
+              }
           } else {
-              // Re-fetch to confirm save and get updated timestamps/IDs if any
-              await fetchData();
+              // Insert new exam
+              const { error } = await supabase.from('exams').insert(dbExam);
+              if (error) {
+                  console.error("Failed to create exam:", error);
+                  alert("Gagal membuat ujian di database: " + error.message);
+                  // Rollback optimistic insert
+                  setExams(prev => prev.filter(e => e.id !== updatedExam.id));
+              } else {
+                  await fetchData();
+              }
           }
       }
 
@@ -554,9 +569,19 @@ export default function App() {
               category: newExam.category,
               status: newExam.status,
               questions: newExam.questions,
-              created_by: currentUser?.id
+              created_by: currentUser?.id,
+              created_at: newExam.createdAt
            };
-           await supabase.from('exams').insert(dbExam);
+           const { error } = await supabase.from('exams').insert(dbExam);
+           if (error) {
+               console.error("Failed to create exam in database:", error);
+               alert("Gagal menyimpan ujian ke database: " + error.message);
+               // Rollback optimistic insert
+               setExams(prev => prev.filter(e => e.id !== newExam.id));
+           } else {
+               // Verify data was saved by refetching
+               await fetchData();
+           }
        }
        setView('TEACHER_DASHBOARD');
   }
