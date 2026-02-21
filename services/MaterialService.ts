@@ -19,6 +19,24 @@ export interface Material {
 export class MaterialService {
   private static readonly BUCKET_NAME = 'materials';
 
+  private static normalizeMaterial(record: any): Material {
+    return {
+      id: record.id,
+      title: record.title,
+      description: record.description,
+      fileName: record.file_name ?? record.fileName,
+      mimeType: record.mime_type ?? record.mimeType ?? 'application/octet-stream',
+      fileSize: record.file_size ?? record.fileSize ?? 0,
+      fileUrl: record.file_url ?? record.fileUrl,
+      uploadedBy: record.uploaded_by ?? record.uploadedBy,
+      uploadedAt: record.uploaded_at ?? record.uploadedAt,
+      category: record.category,
+      grade: record.grade ?? undefined,
+      subject: record.subject ?? undefined,
+      isPublic: record.is_public ?? record.isPublic ?? false
+    };
+  }
+
   static async getAllMaterials(): Promise<Material[]> {
     const { data, error } = await supabase
       .from('materials')
@@ -30,7 +48,11 @@ export class MaterialService {
       return [];
     }
 
-    return data || [];
+    if (!data) {
+      return [];
+    }
+
+    return data.map(this.normalizeMaterial);
   }
 
   static async uploadMaterial(
@@ -94,7 +116,7 @@ export class MaterialService {
       throw new Error('Failed to save material metadata: ' + error.message);
     }
 
-    return data;
+    return this.normalizeMaterial(data);
   }
 
   static async deleteMaterial(materialId: string): Promise<void> {

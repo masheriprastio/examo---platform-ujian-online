@@ -122,14 +122,15 @@ const MaterialUpload: React.FC<MaterialUploadProps> = ({ onUploadSuccess }) => {
     }
   };
 
-  const getFileIcon = (mimeType: string) => {
-    if (mimeType.includes('pdf')) return FileText;
-    if (mimeType.includes('spreadsheet') || mimeType.includes('excel')) return FileSpreadsheet;
-    if (mimeType.includes('audio')) return FileAudio;
-    if (mimeType.includes('video')) return FileVideo;
-    if (mimeType.includes('image')) return FileImage;
-    if (mimeType.includes('zip') || mimeType.includes('archive')) return FileArchive;
-    if (mimeType.includes('code') || mimeType.includes('text')) return FileCode;
+  const getFileIcon = (mimeType: string | null | undefined) => {
+    const safeMime = mimeType ?? '';
+    if (safeMime.includes('pdf')) return FileText;
+    if (safeMime.includes('spreadsheet') || safeMime.includes('excel')) return FileSpreadsheet;
+    if (safeMime.includes('audio')) return FileAudio;
+    if (safeMime.includes('video')) return FileVideo;
+    if (safeMime.includes('image')) return FileImage;
+    if (safeMime.includes('zip') || safeMime.includes('archive')) return FileArchive;
+    if (safeMime.includes('code') || safeMime.includes('text')) return FileCode;
     return FileText;
   };
 
