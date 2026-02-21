@@ -8,7 +8,7 @@ import {
   TrendingUp, CheckCircle, PlayCircle, FileText, History,
   Mail, Lock, Eye, EyeOff, ArrowRight, AlertTriangle, Database,
   Menu, X as CloseIcon, FileDown, Download, UserPlus, FileSpreadsheet,
-  XCircle, HelpCircle, RotateCcw, PenTool, Save
+  XCircle, HelpCircle, RotateCcw, PenTool, Save, Plus, ChevronDown
 } from 'lucide-react';
 
 import ExamRunner from './components/ExamRunner';
@@ -174,6 +174,9 @@ export default function App() {
   // New State for Gradebook
   const [dailyScores, setDailyScores] = useState<Record<string, number>>({});
   const [gradeViewMode, setGradeViewMode] = useState<'summary' | 'history'>('summary');
+
+  // New State for Create Exam Dropdown
+  const [showCreateMenu, setShowCreateMenu] = useState(false);
 
   // Load Data from Supabase
   useEffect(() => {
@@ -537,6 +540,22 @@ export default function App() {
        }
        setView('TEACHER_DASHBOARD');
   }
+
+  const handleCreateManual = () => {
+    const newExam: Exam = {
+      id: `exam-${Date.now()}`,
+      title: 'Ujian Baru Tanpa Judul',
+      description: '',
+      durationMinutes: 60,
+      category: 'Umum',
+      status: 'draft',
+      createdAt: new Date().toISOString(),
+      questions: []
+    };
+    setEditingExam(newExam);
+    setView('EXAM_EDITOR');
+    setShowCreateMenu(false);
+  };
 
   const exportGradesToPDF = () => {
     const doc = new jsPDF();
@@ -909,7 +928,7 @@ export default function App() {
                 isPreview={true}
               />
             ) : (
-              <div className="max-w-6xl mx-auto animate-in fade-in">
+              <div className="max-w-6xl mx-auto animate-in fade-in pb-20">
                 <h1 className="text-3xl font-black text-gray-900 mb-8">Dashboard Guru</h1>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
                   <StatCard label="Ujian Aktif" value={exams.length} icon={Book} color="blue" />
@@ -917,14 +936,53 @@ export default function App() {
                   <StatCard label="Total Siswa" value={students.length} icon={Users} color="indigo" />
                   <StatCard label="Hasil Masuk" value={results.filter(r => r.status === 'completed').length} icon={CheckCircle} color="blue" />
                 </div>
-                <h2 className="text-2xl font-black text-gray-900 mb-6 tracking-tight">Ujian Terkini</h2>
-                <div className="grid grid-cols-1 gap-5">
-                  {exams.map(e => (
-                    <div key={e.id} className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm flex items-center justify-between group">
-                      <div><h3 className="font-bold text-gray-900 text-lg md:text-xl">{e.title}</h3><div className="flex gap-4 mt-2 text-[10px] font-black text-gray-400 uppercase tracking-widest"><span>{e.category}</span><span>{e.questions.length} Soal</span></div></div>
-                      <button onClick={() => { setEditingExam(e); setView('EXAM_EDITOR'); }} className="p-5 bg-gray-50 text-gray-400 rounded-3xl hover:bg-indigo-600 hover:text-white transition-all"><FileText /></button>
+
+                <div className="flex flex-col md:flex-row justify-between items-end mb-6 gap-4">
+                    <h2 className="text-2xl font-black text-gray-900 tracking-tight">Ujian Terkini</h2>
+
+                    <div className="relative">
+                        <button
+                            onClick={() => setShowCreateMenu(!showCreateMenu)}
+                            className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center gap-2 active:scale-95"
+                        >
+                            <Plus className="w-5 h-5" /> Buat Ujian Baru <ChevronDown className={`w-4 h-4 transition-transform ${showCreateMenu ? 'rotate-180' : ''}`} />
+                        </button>
+
+                        {showCreateMenu && (
+                            <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden z-20 animate-in fade-in slide-in-from-top-2">
+                                <button
+                                    onClick={handleCreateManual}
+                                    className="w-full text-left px-5 py-4 hover:bg-gray-50 flex items-center gap-3 font-bold text-gray-700 transition-colors border-b border-gray-50"
+                                >
+                                    <PenTool className="w-4 h-4 text-indigo-500" />
+                                    Buat Manual
+                                </button>
+                                <button
+                                    onClick={() => { setView('AI_GENERATOR'); setShowCreateMenu(false); }}
+                                    className="w-full text-left px-5 py-4 hover:bg-indigo-50 flex items-center gap-3 font-bold text-indigo-700 transition-colors"
+                                >
+                                    <Sparkles className="w-4 h-4 text-indigo-600" />
+                                    Generate dengan AI
+                                </button>
+                            </div>
+                        )}
+                        {showCreateMenu && <div className="fixed inset-0 z-10" onClick={() => setShowCreateMenu(false)}></div>}
                     </div>
-                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 gap-5">
+                  {exams.length === 0 ? (
+                      <div className="text-center py-16 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
+                          <p className="text-gray-400 font-medium">Belum ada ujian yang dibuat.</p>
+                      </div>
+                  ) : (
+                      exams.map(e => (
+                        <div key={e.id} className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm flex items-center justify-between group">
+                          <div><h3 className="font-bold text-gray-900 text-lg md:text-xl">{e.title}</h3><div className="flex gap-4 mt-2 text-[10px] font-black text-gray-400 uppercase tracking-widest"><span>{e.category}</span><span>{e.questions.length} Soal</span></div></div>
+                          <button onClick={() => { setEditingExam(e); setView('EXAM_EDITOR'); }} className="p-5 bg-gray-50 text-gray-400 rounded-3xl hover:bg-indigo-600 hover:text-white transition-all"><FileText /></button>
+                        </div>
+                      ))
+                  )}
                 </div>
               </div>
             )

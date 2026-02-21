@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Exam, Question, QuestionType } from '../types';
 import { 
   Save, Plus, Trash2, Check, Clock, Type, Star, X, 
-  ChevronDown, ChevronUp, Database, GripVertical, Shuffle, Tag, AlertCircle, Eye
+  ChevronDown, ChevronUp, Database, GripVertical, Shuffle, Tag, AlertCircle, Eye, Image as ImageIcon
 } from 'lucide-react';
 
 interface ExamEditorProps {
@@ -27,6 +27,20 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   const handleQuestionChange = (qIndex: number, field: keyof Question, value: any) => {
     const newQuestions = [...formData.questions];
     newQuestions[qIndex] = { ...newQuestions[qIndex], [field]: value };
+    setFormData(prev => ({ ...prev, questions: newQuestions }));
+  };
+
+  const handleAttachmentChange = (qIndex: number, url: string) => {
+    const newQuestions = [...formData.questions];
+    if (url) {
+        newQuestions[qIndex] = {
+            ...newQuestions[qIndex],
+            attachment: { type: 'image', url: url, caption: '' }
+        };
+    } else {
+        const { attachment, ...rest } = newQuestions[qIndex];
+        newQuestions[qIndex] = rest;
+    }
     setFormData(prev => ({ ...prev, questions: newQuestions }));
   };
 
@@ -188,6 +202,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                       <div className="hidden md:block p-1 text-gray-300 cursor-grab active:cursor-grabbing"><GripVertical className="w-5 h-5"/></div>
                       <span className="w-8 h-8 rounded-lg bg-gray-900 text-white flex items-center justify-center font-black text-xs shrink-0">{qIndex + 1}</span>
                       <span className="text-gray-700 font-bold truncate text-sm">{q.text}</span>
+                      {q.attachment?.url && <ImageIcon className="w-4 h-4 text-indigo-500 ml-2" />}
                     </div>
                     <div className="flex items-center gap-1">
                       {onSaveToBank && (
@@ -213,6 +228,28 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                       <div>
                         <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Pertanyaan</label>
                         <textarea value={q.text} onChange={(e) => handleQuestionChange(qIndex, 'text', e.target.value)} className="w-full px-4 py-3 rounded-xl border border-gray-100 focus:ring-2 focus:ring-indigo-500 h-20 font-bold outline-none" />
+                      </div>
+
+                      {/* Image Attachment Input */}
+                      <div>
+                        <label className="block text-[10px] font-black text-gray-400 uppercase mb-2 flex items-center gap-2">
+                            <ImageIcon className="w-3 h-3" /> Lampiran Gambar (URL)
+                        </label>
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                value={q.attachment?.url || ''}
+                                onChange={(e) => handleAttachmentChange(qIndex, e.target.value)}
+                                placeholder="https://example.com/image.jpg"
+                                className="flex-1 px-4 py-2.5 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-sm font-bold outline-none"
+                            />
+                            {q.attachment?.url && (
+                                <div className="w-10 h-10 rounded-lg bg-gray-200 border border-gray-300 overflow-hidden flex-shrink-0">
+                                    <img src={q.attachment.url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
+                                </div>
+                            )}
+                        </div>
+                        <p className="text-[10px] text-gray-400 mt-1">Masukkan URL gambar langsung.</p>
                       </div>
                       
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
