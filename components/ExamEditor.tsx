@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Exam, Question, QuestionType } from '../types';
 import { 
   Save, Plus, Trash2, Check, Clock, Type, Star, X, 
-  ChevronDown, ChevronUp, Database, GripVertical, Shuffle, Tag, AlertCircle, Eye, Image as ImageIcon
+  ChevronDown, ChevronUp, Database, GripVertical, Shuffle, Tag, AlertCircle, Eye, Image as ImageIcon, Upload, Link as LinkIcon
 } from 'lucide-react';
 
 interface ExamEditorProps {
@@ -19,6 +19,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(formData.questions[0]?.id || null);
   const [questionToDelete, setQuestionToDelete] = useState<string | null>(null);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [uploadMode, setUploadMode] = useState<Record<string, 'url' | 'file'>>({});
   
   const handleExamChange = (field: keyof Exam, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -42,6 +43,26 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         newQuestions[qIndex] = rest;
     }
     setFormData(prev => ({ ...prev, questions: newQuestions }));
+  };
+
+  const handleFileUpload = (qIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) { // 5MB limit
+        alert("Ukuran file maksimal 5MB");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        handleAttachmentChange(qIndex, reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const toggleUploadMode = (qId: string, mode: 'url' | 'file') => {
+      setUploadMode(prev => ({ ...prev, [qId]: mode }));
   };
 
   const handleOptionChange = (qIndex: number, oIndex: number, value: string) => {
@@ -232,24 +253,68 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
 
                       {/* Image Attachment Input */}
                       <div>
-                        <label className="block text-[10px] font-black text-gray-400 uppercase mb-2 flex items-center gap-2">
-                            <ImageIcon className="w-3 h-3" /> Lampiran Gambar (URL)
-                        </label>
-                        <div className="flex gap-2">
-                            <input
-                                type="text"
-                                value={q.attachment?.url || ''}
-                                onChange={(e) => handleAttachmentChange(qIndex, e.target.value)}
-                                placeholder="https://example.com/image.jpg"
-                                className="flex-1 px-4 py-2.5 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-sm font-bold outline-none"
-                            />
+                        <div className="flex justify-between items-center mb-2">
+                          <label className="text-[10px] font-black text-gray-400 uppercase flex items-center gap-2">
+                              <ImageIcon className="w-3 h-3" /> Lampiran Gambar
+                          </label>
+                          <div className="flex bg-gray-100 rounded-lg p-0.5">
+                              <button
+                                onClick={() => toggleUploadMode(q.id, 'url')}
+                                className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${(!uploadMode[q.id] || uploadMode[q.id] === 'url') ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                              >
+                                <LinkIcon className="w-3 h-3" /> URL
+                              </button>
+                              <button
+                                onClick={() => toggleUploadMode(q.id, 'file')}
+                                className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${uploadMode[q.id] === 'file' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                              >
+                                <Upload className="w-3 h-3" /> Upload
+                              </button>
+                          </div>
+                        </div>
+
+                        <div className="flex gap-2 items-start">
+                            {(!uploadMode[q.id] || uploadMode[q.id] === 'url') ? (
+                                <input
+                                    type="text"
+                                    value={q.attachment?.url || ''}
+                                    onChange={(e) => handleAttachmentChange(qIndex, e.target.value)}
+                                    placeholder="https://example.com/image.jpg"
+                                    className="flex-1 px-4 py-2.5 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-sm font-bold outline-none"
+                                />
+                            ) : (
+                                <div className="flex-1 relative">
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={(e) => handleFileUpload(qIndex, e)}
+                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                    />
+                                    <div className="w-full px-4 py-2.5 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-center hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-gray-400 font-bold text-xs">
+                                        <Upload className="w-3 h-3" />
+                                        {q.attachment?.url?.startsWith('data:') ? 'Ganti File...' : 'Klik untuk Upload'}
+                                    </div>
+                                </div>
+                            )}
+
                             {q.attachment?.url && (
-                                <div className="w-10 h-10 rounded-lg bg-gray-200 border border-gray-300 overflow-hidden flex-shrink-0">
-                                    <img src={q.attachment.url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
+                                <div className="relative group shrink-0">
+                                    <div className="w-10 h-10 rounded-lg bg-gray-200 border border-gray-300 overflow-hidden">
+                                        <img src={q.attachment.url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
+                                    </div>
+                                    <button
+                                      onClick={() => handleAttachmentChange(qIndex, '')}
+                                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                      title="Hapus Gambar"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
                                 </div>
                             )}
                         </div>
-                        <p className="text-[10px] text-gray-400 mt-1">Masukkan URL gambar langsung.</p>
+                        <p className="text-[10px] text-gray-400 mt-1">
+                          {(!uploadMode[q.id] || uploadMode[q.id] === 'url') ? 'Masukkan URL gambar langsung.' : 'Maksimal ukuran file 5MB.'}
+                        </p>
                       </div>
                       
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

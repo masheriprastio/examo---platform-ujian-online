@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Question, QuestionType } from '../types';
 import { 
   Plus, Search, Filter, Trash2, Edit2, Check, X,
-  ChevronDown, ChevronUp, Database, Tag, AlertCircle, Save, ArrowLeft, GripVertical, Image as ImageIcon
+  ChevronDown, ChevronUp, Database, Tag, AlertCircle, Save, ArrowLeft, GripVertical, Image as ImageIcon, Upload, Link as LinkIcon
 } from 'lucide-react';
 
 interface QuestionBankProps {
@@ -228,6 +228,7 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions = [], onUpdate })
 
 const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => void, onCancel: () => void }> = ({ question, onSave, onCancel }) => {
   const [formData, setFormData] = useState<Question>({ ...question });
+  const [uploadMode, setUploadMode] = useState<'url' | 'file'>('url');
 
   const handleChange = (field: keyof Question, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -250,6 +251,22 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
             const { attachment, ...rest } = prev;
             return rest;
         });
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) { // 5MB limit
+        alert("Ukuran file maksimal 5MB");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        handleAttachmentChange(reader.result as string);
+      };
+      reader.readAsDataURL(file);
     }
   };
 
@@ -315,24 +332,70 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
 
             {/* Image Attachment Input */}
             <div>
-              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1 flex items-center gap-2">
-                  <ImageIcon className="w-3 h-3" /> Lampiran Gambar (URL)
-              </label>
-              <div className="flex gap-2">
-                  <input
-                      type="text"
-                      value={formData.attachment?.url || ''}
-                      onChange={(e) => handleAttachmentChange(e.target.value)}
-                      placeholder="https://example.com/image.jpg"
-                      className="flex-1 px-4 py-3 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-sm font-bold outline-none"
-                  />
-                  {formData.attachment?.url && (
-                      <div className="w-12 h-12 rounded-xl bg-gray-200 border border-gray-300 overflow-hidden flex-shrink-0">
-                          <img src={formData.attachment.url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
+              <div className="flex justify-between items-center mb-2">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                      <ImageIcon className="w-3 h-3" /> Lampiran Gambar
+                  </label>
+                  <div className="flex bg-gray-100 rounded-lg p-0.5">
+                      <button
+                        onClick={() => setUploadMode('url')}
+                        className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${uploadMode === 'url' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                      >
+                        <LinkIcon className="w-3 h-3" /> URL
+                      </button>
+                      <button
+                        onClick={() => setUploadMode('file')}
+                        className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${uploadMode === 'file' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                      >
+                        <Upload className="w-3 h-3" /> Upload
+                      </button>
+                  </div>
+              </div>
+
+              <div className="flex gap-2 items-start">
+                  {uploadMode === 'url' ? (
+                      <input
+                          type="text"
+                          value={formData.attachment?.url || ''}
+                          onChange={(e) => handleAttachmentChange(e.target.value)}
+                          placeholder="https://example.com/image.jpg"
+                          className="flex-1 px-4 py-3 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-sm font-bold outline-none"
+                      />
+                  ) : (
+                      <div className="flex-1 relative">
+                          <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleFileUpload}
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                          />
+                          <div className="w-full px-4 py-3 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-center hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-gray-400 font-bold text-sm">
+                              <Upload className="w-4 h-4" />
+                              {formData.attachment?.url?.startsWith('data:') ? 'Ganti File Gambar...' : 'Klik untuk Upload Gambar'}
+                          </div>
                       </div>
                   )}
               </div>
-              <p className="text-[10px] text-gray-400 mt-1 ml-1">Masukkan URL gambar langsung.</p>
+
+              <div className="flex justify-start mt-2">
+                  {formData.attachment?.url && (
+                      <div className="relative group shrink-0">
+                          <div className="w-12 h-12 rounded-xl bg-gray-200 border border-gray-300 overflow-hidden">
+                              <img src={formData.attachment.url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
+                          </div>
+                          <button
+                            onClick={() => handleAttachmentChange('')}
+                            className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                            title="Hapus Gambar"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                      </div>
+                  )}
+              </div>
+              <p className="text-[10px] text-gray-400 mt-1 ml-1">
+                {uploadMode === 'url' ? 'Masukkan URL gambar langsung.' : 'Maksimal ukuran file 5MB.'}
+              </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
