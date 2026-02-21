@@ -11,7 +11,7 @@ interface QuestionBankProps {
   onUpdate: (questions: Question[]) => void;
 }
 
-const QuestionBank: React.FC<QuestionBankProps> = ({ questions, onUpdate }) => {
+const QuestionBank: React.FC<QuestionBankProps> = ({ questions = [], onUpdate }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<QuestionType | 'all'>('all');
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
@@ -21,8 +21,9 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions, onUpdate }) => {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
-  const filteredQuestions = questions.filter(q => {
-    const matchesSearch = q.text.toLowerCase().includes(searchTerm.toLowerCase()) ||
+  const filteredQuestions = (questions || []).filter(q => {
+    if (!q) return false;
+    const matchesSearch = (q.text || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                           (q.topic && q.topic.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesType = filterType === 'all' || q.type === filterType;
     return matchesSearch && matchesType;
@@ -31,16 +32,16 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions, onUpdate }) => {
   const isReorderable = !searchTerm && filterType === 'all';
 
   const handleSaveQuestion = (updatedQ: Question) => {
-    if (questions.some(q => q.id === updatedQ.id)) {
-      onUpdate(questions.map(q => q.id === updatedQ.id ? updatedQ : q));
+    if ((questions || []).some(q => q && q.id === updatedQ.id)) {
+      onUpdate((questions || []).map(q => (q && q.id === updatedQ.id) ? updatedQ : q));
     } else {
-      onUpdate([updatedQ, ...questions]);
+      onUpdate([updatedQ, ...(questions || [])]);
     }
     setEditingQuestion(null);
   };
 
   const handleDeleteQuestion = (id: string) => {
-    onUpdate(questions.filter(q => q.id !== id));
+    onUpdate((questions || []).filter(q => q && q.id !== id));
     setQuestionToDelete(null);
   };
 
@@ -78,7 +79,7 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions, onUpdate }) => {
 
     if (draggedIndex === null || draggedIndex === targetIndex) return;
 
-    const newQuestions = [...questions];
+    const newQuestions = [...(questions || [])];
     const [movedItem] = newQuestions.splice(draggedIndex, 1);
     newQuestions.splice(targetIndex, 0, movedItem);
 
