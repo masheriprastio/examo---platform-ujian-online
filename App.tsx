@@ -18,6 +18,8 @@ import ExamEditor from './components/ExamEditor';
 import QuestionBank from './components/QuestionBank';
 import StudentManager from './components/StudentManager';
 import MaterialManager from './components/MaterialManager';
+import StudentMaterialList from './components/StudentMaterialList';
+import { MaterialService, Material } from './services/MaterialService';
 
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -128,6 +130,7 @@ const Sidebar: React.FC<{
     { id: 'MATERIAL_MANAGER', label: 'Manajemen Materi', icon: FileText },
   ] : [
     { id: 'STUDENT_DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'STUDENT_MATERIALS', label: 'Materi Belajar', icon: Book },
     { id: 'STUDENT_HISTORY', label: 'Riwayat Ujian', icon: History },
   ];
 
@@ -168,11 +171,13 @@ export default function App() {
   const [bankQuestions, setBankQuestions] = useState<Question[]>(isSupabaseConfigured ? [] : MOCK_EXAMS.flatMap(e => e.questions));
   const [students, setStudents] = useState<User[]>(isSupabaseConfigured ? [] : [MOCK_STUDENT]);
   const [results, setResults] = useState<ExamResult[]>([]);
+  const [studentMaterials, setStudentMaterials] = useState<Material[]>([]);
 
   const [activeExam, setActiveExam] = useState<Exam | null>(null);
   const [editingExam, setEditingExam] = useState<Exam | null>(null);
   const [lastResult, setLastResult] = useState<ExamResult | null>(null);
   const [selectedResult, setSelectedResult] = useState<ExamResult | null>(null);
+  const [previewMaterial, setPreviewMaterial] = useState<Material | null>(null);
 
   // New State for Gradebook
   const [dailyScores, setDailyScores] = useState<Record<string, number>>({});
