@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Question, QuestionType } from '../types';
 import { 
   Plus, Search, Filter, Trash2, Edit2, Check, X,
-  ChevronDown, ChevronUp, Database, Tag, AlertCircle, Save, ArrowLeft, GripVertical
+  ChevronDown, ChevronUp, Database, Tag, AlertCircle, Save, ArrowLeft, GripVertical, Image as ImageIcon
 } from 'lucide-react';
 
 interface QuestionBankProps {
@@ -239,6 +239,20 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
     setFormData(prev => ({ ...prev, options: newOpts }));
   };
 
+  const handleAttachmentChange = (url: string) => {
+    if (url) {
+        setFormData(prev => ({
+            ...prev,
+            attachment: { type: 'image', url: url, caption: '' }
+        }));
+    } else {
+        setFormData(prev => {
+            const { attachment, ...rest } = prev;
+            return rest;
+        });
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-white z-[60] flex flex-col font-sans text-left overflow-hidden animate-in slide-in-from-bottom-10">
       <header className="px-6 md:px-8 py-4 border-b border-gray-100 flex justify-between items-center bg-white shadow-sm shrink-0">
@@ -297,6 +311,28 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                 placeholder="Tulis pertanyaan di sini..."
                 className="w-full px-5 py-4 rounded-xl border border-gray-100 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold text-gray-900 min-h-[120px] resize-y"
               />
+            </div>
+
+            {/* Image Attachment Input */}
+            <div>
+              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1 flex items-center gap-2">
+                  <ImageIcon className="w-3 h-3" /> Lampiran Gambar (URL)
+              </label>
+              <div className="flex gap-2">
+                  <input
+                      type="text"
+                      value={formData.attachment?.url || ''}
+                      onChange={(e) => handleAttachmentChange(e.target.value)}
+                      placeholder="https://example.com/image.jpg"
+                      className="flex-1 px-4 py-3 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-sm font-bold outline-none"
+                  />
+                  {formData.attachment?.url && (
+                      <div className="w-12 h-12 rounded-xl bg-gray-200 border border-gray-300 overflow-hidden flex-shrink-0">
+                          <img src={formData.attachment.url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
+                      </div>
+                  )}
+              </div>
+              <p className="text-[10px] text-gray-400 mt-1 ml-1">Masukkan URL gambar langsung.</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
