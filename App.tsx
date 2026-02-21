@@ -179,13 +179,12 @@ export default function App() {
   const [showCreateMenu, setShowCreateMenu] = useState(false);
 
   // Load Data from Supabase
-  useEffect(() => {
-    const fetchSupabaseData = async () => {
+  const fetchData = async () => {
         if (!isSupabaseConfigured || !supabase) return;
 
         try {
             // 1. Fetch Exams
-            const { data: examsData, error: examsError } = await supabase.from('exams').select('*');
+            const { data: examsData, error: examsError } = await supabase.from('exams').select('*').order('created_at', { ascending: false });
             if (examsData && !examsError) {
                 const mappedExams: Exam[] = examsData.map((e: any) => ({
                     ...e,
@@ -197,8 +196,6 @@ export default function App() {
             }
 
             // 2. Fetch Results
-            // Fetching all results might be heavy for production, should limit by teacher/student context
-            // For now, fetch all for simplicity
             const { data: resultsData, error: resultsError } = await supabase.from('exam_results').select('*');
             if (resultsData && !resultsError) {
                 const mappedResults: ExamResult[] = resultsData.map((r: any) => ({
@@ -220,9 +217,10 @@ export default function App() {
         } catch (err) {
             console.error("Failed to fetch data from Supabase:", err);
         }
-    };
+  };
 
-    fetchSupabaseData();
+  useEffect(() => {
+    fetchData();
   }, []);
 
   // Fetch Students (only if Teacher logged in)
@@ -260,6 +258,7 @@ export default function App() {
 
         setCurrentUser(data);
         setView(role === 'teacher' ? 'TEACHER_DASHBOARD' : 'STUDENT_DASHBOARD');
+        await fetchData(); // Force refresh data on login
         return null;
 
     } else {
@@ -497,8 +496,15 @@ export default function App() {
 
   // Wrapper for Exam Updates (Sync with DB)
   const handleExamSave = async (updatedExam: Exam) => {
+      // Check if exam exists in local state
+      const exists = exams.some(e => e.id === updatedExam.id);
+
       // Optimistic
-      setExams(prev => prev.map(e => e.id === updatedExam.id ? updatedExam : e));
+      if (exists) {
+          setExams(prev => prev.map(e => e.id === updatedExam.id ? updatedExam : e));
+      } else {
+          setExams(prev => [updatedExam, ...prev]);
+      }
 
       // DB
       if (isSupabaseConfigured && supabase) {
@@ -510,11 +516,15 @@ export default function App() {
               category: updatedExam.category,
               status: updatedExam.status,
               questions: updatedExam.questions,
-              // created_at: updatedExam.createdAt // Don't update created_at usually
+              created_by: currentUser?.id,
+              created_at: exists ? undefined : updatedExam.createdAt
           };
 
           const { error } = await supabase.from('exams').upsert(dbExam);
-          if (error) console.error("Failed to save exam:", error);
+          if (error) {
+              console.error("Failed to save exam:", error);
+              alert("Gagal menyimpan ke database: " + error.message);
+          }
       }
 
       setView('TEACHER_DASHBOARD');

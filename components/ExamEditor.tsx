@@ -161,18 +161,34 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Durasi (Menit)</label>
                 <input type="number" value={formData.durationMinutes} onChange={(e) => handleExamChange('durationMinutes', parseInt(e.target.value))} className="w-full px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white outline-none transition font-bold" />
               </div>
-              <div className="md:col-span-2 flex items-center gap-3 mt-2">
-                <input 
-                  type="checkbox" 
-                  id="randomizeQuestions" 
-                  checked={formData.randomizeQuestions || false} 
-                  onChange={(e) => handleExamChange('randomizeQuestions', e.target.checked)}
-                  className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500"
-                />
-                <label htmlFor="randomizeQuestions" className="text-sm font-bold text-gray-700 flex items-center gap-2">
-                  <Shuffle className="w-4 h-4 text-gray-400" />
-                  Acak Urutan Soal untuk Siswa
-                </label>
+              <div className="md:col-span-2 flex flex-col md:flex-row gap-4 mt-2">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    id="randomizeQuestions"
+                    checked={formData.randomizeQuestions || false}
+                    onChange={(e) => handleExamChange('randomizeQuestions', e.target.checked)}
+                    className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500"
+                  />
+                  <label htmlFor="randomizeQuestions" className="text-sm font-bold text-gray-700 flex items-center gap-2">
+                    <Shuffle className="w-4 h-4 text-gray-400" />
+                    Acak Urutan Soal
+                  </label>
+                </div>
+
+                <div className="flex items-center gap-3">
+                   <input
+                      type="checkbox"
+                      id="publishExam"
+                      checked={formData.status === 'published'}
+                      onChange={(e) => handleExamChange('status', e.target.checked ? 'published' : 'draft')}
+                      className="w-5 h-5 text-green-600 rounded focus:ring-green-500"
+                    />
+                    <label htmlFor="publishExam" className="text-sm font-bold text-gray-700 flex items-center gap-2">
+                      <Check className="w-4 h-4 text-green-500" />
+                      Publikasikan Ujian (Tampil ke Siswa)
+                    </label>
+                </div>
               </div>
             </div>
           </section>
