@@ -193,7 +193,7 @@ export default function App() {
                     createdAt: e.created_at
                 }));
                 setExams(mappedExams);
-                setBankQuestions(mappedExams.flatMap(e => e.questions));
+                setBankQuestions(mappedExams.flatMap(e => e.questions || []));
             }
 
             // 2. Fetch Results
