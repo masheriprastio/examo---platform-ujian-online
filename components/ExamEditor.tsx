@@ -3,7 +3,8 @@ import React, { useState } from 'react';
 import { Exam, Question, QuestionType } from '../types';
 import { 
   Save, Plus, Trash2, Check, Clock, Type, Star, X, 
-  ChevronDown, ChevronUp, Database, GripVertical, Shuffle, Tag, AlertCircle, Eye
+  ChevronDown, ChevronUp, Database, GripVertical, Shuffle, Tag, AlertCircle, Eye,
+  Upload, FileText
 } from 'lucide-react';
 
 interface ExamEditorProps {
@@ -81,6 +82,24 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     
     setDraggedIndex(index);
     setFormData(prev => ({ ...prev, questions: newQs }));
+  };
+
+  const handleFileUpload = (qIndex: number, file: File) => {
+    if (file.type !== 'application/pdf') {
+      alert('Hanya file PDF yang diperbolehkan!');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      const newAttachment = {
+        type: 'pdf' as const,
+        url: result,
+        caption: file.name
+      };
+      handleQuestionChange(qIndex, 'attachment', newAttachment);
+    };
+    reader.readAsDataURL(file);
   };
 
   return (
@@ -215,6 +234,43 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                         <textarea value={q.text} onChange={(e) => handleQuestionChange(qIndex, 'text', e.target.value)} className="w-full px-4 py-3 rounded-xl border border-gray-100 focus:ring-2 focus:ring-indigo-500 h-20 font-bold outline-none" />
                       </div>
                       
+                      <div className="mt-4">
+                        <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Lampiran Dokumen</label>
+                        {q.attachment && q.attachment.type === 'pdf' ? (
+                          <div className="flex items-center justify-between p-3 rounded-xl border border-indigo-100 bg-indigo-50/50">
+                             <div className="flex items-center gap-3">
+                               <div className="bg-red-100 p-2 rounded-lg text-red-600">
+                                 <FileText className="w-5 h-5" />
+                               </div>
+                               <span className="font-bold text-sm text-gray-700 truncate max-w-[200px]">{q.attachment.caption || 'Dokumen PDF'}</span>
+                             </div>
+                             <button
+                               onClick={() => handleQuestionChange(qIndex, 'attachment', undefined)}
+                               className="p-2 text-gray-400 hover:text-red-500 transition-colors"
+                             >
+                               <X className="w-5 h-5" />
+                             </button>
+                          </div>
+                        ) : (
+                          <div className="relative">
+                            <input
+                              type="file"
+                              accept="application/pdf"
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                              onChange={(e) => {
+                                if (e.target.files?.[0]) {
+                                  handleFileUpload(qIndex, e.target.files[0]);
+                                }
+                              }}
+                            />
+                            <div className="w-full border-2 border-dashed border-gray-200 rounded-xl p-4 flex items-center justify-center gap-3 text-gray-400 hover:border-indigo-400 hover:text-indigo-500 hover:bg-indigo-50/30 transition-all">
+                               <Upload className="w-5 h-5" />
+                               <span className="font-bold text-xs uppercase tracking-wider">Upload PDF</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
                           <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Topik (Blueprint)</label>

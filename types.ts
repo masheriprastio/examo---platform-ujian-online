@@ -27,7 +27,7 @@ export interface Question {
   difficulty?: 'easy' | 'medium' | 'hard';
   randomizeOptions?: boolean;
   attachment?: {
-    type: 'image' | 'video' | 'audio';
+    type: 'image' | 'video' | 'audio' | 'pdf';
     url: string;
     caption?: string;
   };
