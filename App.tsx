@@ -223,6 +223,13 @@ export default function App() {
     fetchData();
   }, []);
 
+  // Fetch Data on view change (specifically when switching to Dashboard)
+  useEffect(() => {
+    if (view === 'STUDENT_DASHBOARD' || view === 'TEACHER_DASHBOARD') {
+      fetchData();
+    }
+  }, [view]);
+
   // Fetch Students (only if Teacher logged in)
   useEffect(() => {
      const fetchStudents = async () => {
@@ -524,6 +531,9 @@ export default function App() {
           if (error) {
               console.error("Failed to save exam:", error);
               alert("Gagal menyimpan ke database: " + error.message);
+          } else {
+              // Re-fetch to confirm save and get updated timestamps/IDs if any
+              await fetchData();
           }
       }
 
@@ -1151,7 +1161,10 @@ export default function App() {
               </div>
             ) : (
               <div className="max-w-6xl mx-auto animate-in fade-in">
-                <h1 className="text-3xl font-black text-gray-900 mb-8">Dashboard Siswa</h1>
+                <div className="flex justify-between items-center mb-8">
+                  <h1 className="text-3xl font-black text-gray-900">Dashboard Siswa</h1>
+                  <button onClick={fetchData} className="p-3 bg-gray-50 text-gray-400 hover:text-indigo-600 rounded-2xl transition-all" title="Segarkan Data"><RotateCcw className="w-5 h-5" /></button>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-14">
                    <div className="bg-indigo-600 p-10 rounded-[50px] text-white shadow-2xl relative overflow-hidden">
                      <div className="relative z-10"><p className="text-indigo-100 font-black uppercase tracking-widest text-[10px] mb-2">Ujian Selesai</p><h3 className="text-7xl font-black tracking-tighter">{results.filter(r => r.studentId === currentUser?.id && r.status === 'completed').length}</h3></div>
@@ -1164,7 +1177,12 @@ export default function App() {
                 </div>
                 <h2 className="text-2xl font-black text-gray-900 mb-8 tracking-tight">Ujian Tersedia</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
-                  {exams.map(e => {
+                  {exams.filter(e => e.status === 'published').length === 0 ? (
+                    <div className="col-span-full text-center py-20 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
+                      <p className="text-gray-400 font-medium">Belum ada ujian yang tersedia saat ini.</p>
+                      <button onClick={fetchData} className="mt-4 text-indigo-600 font-bold hover:underline">Coba Segarkan</button>
+                    </div>
+                  ) : exams.filter(e => e.status === 'published').map(e => {
                     const progress = results.find(r => r.examId === e.id && r.studentId === currentUser?.id);
                     const isTaken = progress?.status === 'completed';
                     const isInProgress = progress?.status === 'in_progress';
