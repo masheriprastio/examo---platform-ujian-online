@@ -236,6 +236,18 @@ export default function App() {
     if (view === 'STUDENT_DASHBOARD' || view === 'TEACHER_DASHBOARD') {
       fetchData();
     }
+
+    if (view === 'STUDENT_MATERIALS') {
+      const fetchMaterials = async () => {
+        try {
+          const data = await MaterialService.getAllMaterials();
+          setStudentMaterials(data);
+        } catch (err) {
+          console.error('Failed to fetch materials:', err);
+        }
+      };
+      fetchMaterials();
+    }
   }, [view]);
 
   // Fetch Students (only if Teacher logged in)
@@ -1045,7 +1057,65 @@ export default function App() {
               </div>
             )
           ) : (
-            view === 'STUDENT_HISTORY' ? (
+            view === 'STUDENT_MATERIALS' ? (
+              <div className="max-w-6xl mx-auto animate-in fade-in">
+                <div className="flex justify-between items-center mb-8">
+                  <h1 className="text-3xl font-black text-gray-900">Materi Pembelajaran</h1>
+                  <button 
+                    onClick={async () => {
+                      try {
+                        const data = await MaterialService.getAllMaterials();
+                        setStudentMaterials(data);
+                      } catch (err) { console.error(err); }
+                    }} 
+                    className="p-3 bg-gray-50 text-gray-400 hover:text-indigo-600 rounded-2xl transition-all"
+                    title="Segarkan"
+                  >
+                    <RotateCcw className="w-5 h-5" />
+                  </button>
+                </div>
+                <StudentMaterialList 
+                  materials={studentMaterials}
+                  onPreview={setPreviewMaterial}
+                />
+                
+                {previewMaterial && (
+                  <div className="fixed inset-0 bg-gray-900/80 backdrop-blur-sm z-[100] flex items-center justify-center p-6 animate-in fade-in" onClick={() => setPreviewMaterial(null)}>
+                    <div className="bg-white w-full max-w-5xl h-[85vh] rounded-[30px] shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+                      <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 shrink-0">
+                        <h3 className="font-bold text-gray-900 truncate max-w-md">{previewMaterial.title}</h3>
+                        <div className="flex gap-2">
+                           <a 
+                             href={previewMaterial.fileUrl} 
+                             download={previewMaterial.fileName}
+                             className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 transition"
+                             title="Download"
+                           >
+                             <Download className="w-5 h-5" />
+                           </a>
+                           <button onClick={() => setPreviewMaterial(null)} className="p-2 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-xl transition"><CloseIcon /></button>
+                        </div>
+                      </div>
+                      <div className="flex-1 bg-gray-100 overflow-hidden relative">
+                         {previewMaterial.mimeType?.includes('pdf') ? (
+                           <iframe src={`${previewMaterial.fileUrl}#toolbar=0`} className="w-full h-full" title="PDF Preview" />
+                         ) : previewMaterial.mimeType?.includes('image') ? (
+                           <div className="w-full h-full flex items-center justify-center p-4">
+                             <img src={previewMaterial.fileUrl} alt={previewMaterial.title} className="max-w-full max-h-full object-contain rounded-lg shadow-lg" />
+                           </div>
+                         ) : (
+                           <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                             <FileText className="w-20 h-20 mb-4 opacity-20" />
+                             <p className="font-medium">Preview tidak tersedia untuk tipe file ini.</p>
+                             <a href={previewMaterial.fileUrl} download={previewMaterial.fileName} className="mt-4 text-indigo-600 font-bold hover:underline">Download File</a>
+                           </div>
+                         )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : view === 'STUDENT_HISTORY' ? (
               <div className="max-w-5xl mx-auto animate-in fade-in">
                 <h1 className="text-3xl font-black text-gray-900 mb-8">Riwayat Ujian Saya</h1>
                 
