@@ -1,6 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { generateQuestionsWithAI, FileData } from '../services/aiService';
+import { generateUUID } from '../lib/uuid';
 import { Exam, Question } from '../types';
 import { Sparkles, Brain, Loader2, BookOpen, ArrowLeft, Upload, FileText, X, AlertCircle, FileCheck, ListChecks } from 'lucide-react';
 
@@ -61,7 +62,7 @@ const AIGenerator: React.FC<AIGeneratorProps> = ({ onExamCreated, onCancel }) =>
       const questions = await generateQuestionsWithAI(topic, 5, fileData, questionType);
       
       const newExam: Exam = {
-        id: `ai-exam-${Date.now()}`,
+        id: generateUUID(),
         title: `Ujian: ${topic}`,
         description: selectedFile 
           ? `Evaluasi otomatis berdasarkan dokumen "${selectedFile.name}" mengenai topik ${topic}`

@@ -1,5 +1,6 @@
 
 import React, { useState, useRef } from 'react';
+import { generateUUID } from '../lib/uuid';
 import { User } from '../types';
 import { 
   Users, Upload, Download, FileSpreadsheet, Trash2, 
@@ -113,7 +114,7 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
     try {
         if (modalMode === 'add') {
         const student: User = {
-            id: `temp-add-${Date.now()}`, // Temporary ID
+            id: generateUUID(), // Will be replaced with DB ID after insert
             name: formData.name,
             email: emailToUse,
             grade: formData.grade,

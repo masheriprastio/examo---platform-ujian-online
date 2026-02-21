@@ -1,5 +1,6 @@
 
 import React, { useState } from 'react';
+import { generateUUID } from '../lib/uuid';
 import { Exam, Question, QuestionType } from '../types';
 import { 
   Save, Plus, Trash2, Check, Clock, Type, Star, X, 
@@ -75,7 +76,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
 
   const addQuestion = (type: QuestionType = 'mcq') => {
     const newQuestion: Question = {
-      id: `new-q-${Date.now()}`,
+      id: generateUUID(),
       type,
       text: 'Pertanyaan Baru',
       points: 10,

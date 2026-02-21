@@ -1,5 +1,6 @@
 
 import React, { useState } from 'react';
+import { generateUUID } from '../lib/uuid';
 import { Question, QuestionType } from '../types';
 import { 
   Plus, Search, Filter, Trash2, Edit2, Check, X,
@@ -47,7 +48,7 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions = [], onUpdate })
 
   const createNewQuestion = () => {
     const newQ: Question = {
-      id: `q-${Date.now()}`,
+      id: generateUUID(),
       type: 'mcq',
       text: '',
       points: 10,

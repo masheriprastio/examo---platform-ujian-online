@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Exam, AppView, ExamResult, Question, ExamLog } from './types';
 import { MOCK_TEACHER, MOCK_STUDENT, MOCK_EXAMS, supabase, isSupabaseConfigured } from './lib/supabase';
+import { generateUUID } from './lib/uuid';
 import { 
   LogOut, LayoutDashboard, ClipboardList, Sparkles, 
   GraduationCap, Book, Award, Users, Clock, Star,
@@ -290,7 +291,7 @@ export default function App() {
     const existing = results.find(r => r.examId === exam.id && r.studentId === currentUser?.id && r.status === 'in_progress');
     if (!existing) {
       const newResult: ExamResult = {
-        id: `res-${Date.now()}`,
+        id: generateUUID(),
         examId: exam.id,
         studentId: currentUser!.id,
         studentName: currentUser!.name,
@@ -588,7 +589,7 @@ export default function App() {
 
   const handleCreateManual = () => {
     const newExam: Exam = {
-      id: `exam-${Date.now()}`,
+      id: generateUUID(),
       title: 'Ujian Baru Tanpa Judul',
       description: '',
       durationMinutes: 60,
