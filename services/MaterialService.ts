@@ -165,4 +165,29 @@ export class MaterialService {
 
     return data.file_url;
   }
+
+  static async updateMaterial(
+    id: string,
+    updates: Partial<Omit<Material, 'id' | 'uploadedBy' | 'uploadedAt' | 'fileUrl' | 'fileName' | 'fileSize' | 'mimeType'>>
+  ): Promise<Material> {
+    const { data, error } = await supabase
+      .from('materials')
+      .update({
+        title: updates.title,
+        description: updates.description,
+        category: updates.category,
+        grade: updates.grade,
+        subject: updates.subject,
+        is_public: updates.isPublic
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error('Failed to update material: ' + error.message);
+    }
+
+    return this.normalizeMaterial(data);
+  }
 }

@@ -9,6 +9,7 @@ const MaterialManager: React.FC = () => {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
 
   useEffect(() => {
     fetchMaterials();
@@ -36,6 +37,7 @@ const MaterialManager: React.FC = () => {
     try {
       await MaterialService.deleteMaterial(materialId);
       setMaterials(prev => prev.filter(m => m.id !== materialId));
+      if (editingMaterial?.id === materialId) setEditingMaterial(null);
     } catch (err) {
       console.error('Failed to delete material:', err);
       setError('Gagal menghapus materi. Silakan coba lagi.');
@@ -43,7 +45,13 @@ const MaterialManager: React.FC = () => {
   };
 
   const handleUploadSuccess = () => {
+    setEditingMaterial(null);
     fetchMaterials();
+  };
+
+  const handleEdit = (material: Material) => {
+    setEditingMaterial(material);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const getFileIcon = (mimeType: string) => {
@@ -64,7 +72,11 @@ const MaterialManager: React.FC = () => {
           <h1 className="text-3xl font-black text-gray-900 tracking-tight">Manajemen Materi</h1>
           <p className="text-gray-400">Kelola materi pembelajaran untuk siswa Anda.</p>
         </div>
-        <MaterialUpload onUploadSuccess={handleUploadSuccess} />
+        <MaterialUpload 
+          onUploadSuccess={handleUploadSuccess} 
+          initialData={editingMaterial}
+          onCancel={() => setEditingMaterial(null)}
+        />
       </div>
 
       {error && (
@@ -84,6 +96,7 @@ const MaterialManager: React.FC = () => {
           materials={materials} 
           onDelete={handleDelete}
           onRefresh={fetchMaterials}
+          onEdit={handleEdit}
         />
       )}
     </div>

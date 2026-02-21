@@ -1,14 +1,15 @@
 import React from 'react';
-import { FileText, Download, Trash2, File, FileSpreadsheet, FileAudio, FileVideo, FileImage, FileArchive, FileCode, RefreshCw } from 'lucide-react';
+import { FileText, Download, Trash2, File, FileSpreadsheet, FileAudio, FileVideo, FileImage, FileArchive, FileCode, RefreshCw, Edit3 } from 'lucide-react';
 import { Material } from '../types';
 
 interface MaterialListProps {
   materials: Material[];
   onDelete: (materialId: string) => void;
   onRefresh: () => void;
+  onEdit: (material: Material) => void;
 }
 
-const MaterialList: React.FC<MaterialListProps> = ({ materials, onDelete, onRefresh }) => {
+const MaterialList: React.FC<MaterialListProps> = ({ materials, onDelete, onRefresh, onEdit }) => {
   const getFileIcon = (mimeType: string | null | undefined) => {
     const safeMime = mimeType ?? '';
     if (safeMime.includes('pdf')) return FileText;
@@ -98,6 +99,13 @@ const MaterialList: React.FC<MaterialListProps> = ({ materials, onDelete, onRefr
                     </td>
                     <td className="px-6 py-6 text-right">
                       <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => onEdit(material)}
+                          className="p-3 bg-gray-50 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
+                          title="Edit Materi"
+                        >
+                          <Edit3 className="w-5 h-5" />
+                        </button>
                         <a
                           href={material.fileUrl}
                           download={material.fileName}
