@@ -137,12 +137,12 @@ const Sidebar: React.FC<{
   return (
     <>
       {isOpen && <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-40 md:hidden" onClick={onClose} />}
-      <aside className={`fixed md:sticky top-0 left-0 h-screen bg-white border-r border-gray-100 flex flex-col z-50 transition-transform duration-300 w-72 ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+      <aside className={`fixed md:sticky top-0 left-0 h-screen bg-white border-r border-gray-100 flex flex-col z-50 transition-transform duration-300 w-72 max-h-screen overflow-hidden ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
         <div className="p-8 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3"><div className="bg-indigo-600 p-2.5 rounded-xl text-white shadow-lg shadow-indigo-100"><GraduationCap className="w-6 h-6" /></div><span className="font-black text-2xl text-indigo-900 tracking-tight">Examo</span></div>
           <button onClick={onClose} className="md:hidden p-2 text-gray-400 hover:bg-gray-50 rounded-xl"><CloseIcon /></button>
         </div>
-        <nav className="flex-1 px-4 space-y-2 overflow-y-auto py-2">
+        <nav className="flex-1 px-4 space-y-2 overflow-y-auto py-2 scrollbar-hide">
           {menuItems.map((item) => (
             <button key={item.id} onClick={() => { onNavigate(item.id as AppView); onClose(); }} className={`w-full flex items-center gap-3 px-5 py-4 rounded-2xl font-bold transition-all ${activeView === item.id ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-100' : 'text-gray-400 hover:bg-gray-50'}`}>
               <item.icon className="w-5 h-5" />{item.label}
@@ -1157,17 +1157,18 @@ export default function App() {
                 <h1 className="text-3xl font-black text-gray-900 mb-8">Riwayat Ujian Saya</h1>
                 
                 <div className="bg-white rounded-[20px] shadow-sm border border-gray-200 overflow-hidden">
-                  <table className="w-full text-left border-collapse">
-                    <thead className="bg-gray-100 border-b border-gray-200">
-                      <tr>
-                        <th className="px-6 py-4 text-sm font-bold text-gray-600 uppercase tracking-wider">Ujian</th>
-                        <th className="px-6 py-4 text-sm font-bold text-gray-600 uppercase tracking-wider">Tanggal</th>
-                        <th className="px-6 py-4 text-sm font-bold text-gray-600 uppercase tracking-wider">Nilai</th>
-                        <th className="px-6 py-4 text-sm font-bold text-gray-600 uppercase tracking-wider">Status</th>
-                        <th className="px-6 py-4 text-sm font-bold text-gray-600 uppercase tracking-wider text-right">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse min-w-[700px]">
+                      <thead className="bg-gray-100 border-b border-gray-200">
+                        <tr>
+                          <th className="px-6 py-4 text-sm font-bold text-gray-600 uppercase tracking-wider">Ujian</th>
+                          <th className="px-6 py-4 text-sm font-bold text-gray-600 uppercase tracking-wider">Tanggal</th>
+                          <th className="px-6 py-4 text-sm font-bold text-gray-600 uppercase tracking-wider">Nilai</th>
+                          <th className="px-6 py-4 text-sm font-bold text-gray-600 uppercase tracking-wider">Status</th>
+                          <th className="px-6 py-4 text-sm font-bold text-gray-600 uppercase tracking-wider text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
                       {results.filter(r => r.studentId === currentUser?.id && r.status === 'completed').map(r => {
                         const exam = exams.find(e => e.id === r.examId);
                         const isPassed = r.score >= 75;
@@ -1199,6 +1200,7 @@ export default function App() {
                       )}
                     </tbody>
                   </table>
+                  </div>
                 </div>
 
                 {selectedResult && (
