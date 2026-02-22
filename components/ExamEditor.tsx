@@ -16,6 +16,7 @@ interface ExamEditorProps {
 }
 
 const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveToBank, onPreview }) => {
+  // Parse initial dates if they exist, or keep them empty/null
   const [formData, setFormData] = useState<Exam>({ ...exam });
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(formData.questions[0]?.id || null);
   const [questionToDelete, setQuestionToDelete] = useState<string | null>(null);
@@ -161,6 +162,24 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
               <div>
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Durasi (Menit)</label>
                 <input type="number" value={formData.durationMinutes} onChange={(e) => handleExamChange('durationMinutes', parseInt(e.target.value))} className="w-full px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white outline-none transition font-bold" />
+              </div>
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Mulai Ujian</label>
+                <input 
+                  type="datetime-local" 
+                  value={formData.startDate ? new Date(formData.startDate).toISOString().slice(0, 16) : ''}
+                  onChange={(e) => handleExamChange('startDate', e.target.value ? new Date(e.target.value).toISOString() : undefined)}
+                  className="w-full px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white outline-none transition font-bold text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Selesai Ujian</label>
+                <input 
+                  type="datetime-local" 
+                  value={formData.endDate ? new Date(formData.endDate).toISOString().slice(0, 16) : ''}
+                  onChange={(e) => handleExamChange('endDate', e.target.value ? new Date(e.target.value).toISOString() : undefined)}
+                  className="w-full px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white outline-none transition font-bold text-sm"
+                />
               </div>
               <div className="md:col-span-2 flex flex-col md:flex-row gap-4 mt-2">
                 <div className="flex items-center gap-3">

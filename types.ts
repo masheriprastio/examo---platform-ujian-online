@@ -44,6 +44,8 @@ export interface Exam {
   status: 'draft' | 'published';
   createdAt: string;
   randomizeQuestions?: boolean;
+  startDate?: string;
+  endDate?: string;
 }
 
 export interface ExamLog {

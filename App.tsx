@@ -225,7 +225,9 @@ export default function App() {
                 const mappedExams: Exam[] = examsData.map((e: any) => ({
                     ...e,
                     durationMinutes: e.duration_minutes,
-                    createdAt: e.created_at
+                    createdAt: e.created_at,
+                    startDate: e.start_date,
+                    endDate: e.end_date
                 }));
                 setExams(mappedExams);
                 setBankQuestions(mappedExams.flatMap(e => e.questions || []));
@@ -581,6 +583,8 @@ export default function App() {
               category: updatedExam.category,
               status: updatedExam.status,
               questions: updatedExam.questions,
+              start_date: updatedExam.startDate,
+              end_date: updatedExam.endDate,
               created_by: currentUser?.id,
               created_at: exists ? undefined : updatedExam.createdAt
           };
@@ -627,6 +631,8 @@ export default function App() {
               category: newExam.category,
               status: newExam.status,
               questions: newExam.questions,
+              start_date: newExam.startDate,
+              end_date: newExam.endDate,
               created_by: currentUser?.id,
               created_at: newExam.createdAt
            };
@@ -1386,11 +1392,66 @@ export default function App() {
                     const progress = results.find(r => r.examId === e.id && r.studentId === currentUser?.id);
                     const isTaken = progress?.status === 'completed';
                     const isInProgress = progress?.status === 'in_progress';
+                    
+                    const now = new Date().getTime();
+                    const start = e.startDate ? new Date(e.startDate).getTime() : 0;
+                    const end = e.endDate ? new Date(e.endDate).getTime() : Infinity;
+                    
+                    const isNotStarted = start > now;
+                    const isExpired = end < now;
+                    const isActive = !isNotStarted && !isExpired;
+
+                    let btnText = 'Mulai Sekarang';
+                    let btnClass = 'bg-indigo-600 text-white shadow-indigo-100';
+                    let btnIcon = <PlayCircle className="w-5 h-5" />;
+                    let isDisabled = false;
+
+                    if (isNotStarted) {
+                        btnText = `Belum Dimulai (${new Date(start).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })})`;
+                        btnClass = 'bg-gray-100 text-gray-400 cursor-not-allowed';
+                        isDisabled = true;
+                        btnIcon = <Clock className="w-5 h-5" />;
+                    } else if (isExpired) {
+                        btnText = 'Ujian Berakhir';
+                        btnClass = 'bg-red-50 text-red-500 cursor-not-allowed border border-red-100';
+                        isDisabled = true;
+                        btnIcon = <XCircle className="w-5 h-5" />;
+                    } else if (isTaken) {
+                        btnText = 'Ulangi Ujian';
+                        btnClass = 'bg-white border-2 border-indigo-600 text-indigo-600 shadow-none hover:bg-indigo-50';
+                        btnIcon = <RotateCcw className="w-5 h-5" />;
+                    } else if (isInProgress) {
+                        btnText = 'Lanjutkan';
+                        btnClass = 'bg-amber-500 text-white';
+                        btnIcon = <Clock className="w-5 h-5" />;
+                    }
+
                     return (
                       <div key={e.id} className="bg-white p-10 rounded-[50px] border border-gray-100 shadow-sm hover:shadow-2xl transition-all flex flex-col group">
-                        <div className="flex justify-between items-center mb-8"><span className="bg-indigo-50 text-indigo-600 text-[10px] font-black uppercase px-4 py-1.5 rounded-full border border-indigo-100 tracking-widest">{e.category}</span>{isTaken && <CheckCircle className="text-green-500" />}{isInProgress && <Clock className="text-amber-500" />}</div>
-                        <h3 className="text-2xl font-bold text-gray-900 mb-4 leading-tight group-hover:text-indigo-600 transition-colors">{e.title}</h3>
-                        <div className="mt-auto pt-6 border-t border-gray-50"><button onClick={() => handleStartExam(e)} className={`w-full font-black py-4 rounded-[20px] shadow-xl transition-all flex items-center justify-center gap-3 active:scale-95 ${isTaken ? 'bg-white border-2 border-indigo-600 text-indigo-600 shadow-none hover:bg-indigo-50' : isInProgress ? 'bg-amber-500 text-white' : 'bg-indigo-600 text-white shadow-indigo-100'}`}>{isTaken ? 'Ulangi Ujian' : isInProgress ? 'Lanjutkan' : 'Mulai Sekarang'} {isTaken ? <RotateCcw className="w-5 h-5" /> : <PlayCircle />}</button></div>
+                        <div className="flex justify-between items-center mb-8">
+                            <span className="bg-indigo-50 text-indigo-600 text-[10px] font-black uppercase px-4 py-1.5 rounded-full border border-indigo-100 tracking-widest">{e.category}</span>
+                            {isTaken && <CheckCircle className="text-green-500" />}
+                            {isInProgress && !isExpired && <Clock className="text-amber-500" />}
+                            {isExpired && <span className="text-[10px] font-black uppercase bg-red-100 text-red-600 px-2 py-1 rounded">Expired</span>}
+                        </div>
+                        <h3 className="text-2xl font-bold text-gray-900 mb-2 leading-tight group-hover:text-indigo-600 transition-colors">{e.title}</h3>
+                        
+                        {(e.startDate || e.endDate) && (
+                            <div className="mb-4 text-xs text-gray-500 font-medium space-y-1 bg-gray-50 p-3 rounded-xl border border-gray-100">
+                                {e.startDate && <div>Mulai: {new Date(e.startDate).toLocaleString('id-ID')}</div>}
+                                {e.endDate && <div>Selesai: {new Date(e.endDate).toLocaleString('id-ID')}</div>}
+                            </div>
+                        )}
+
+                        <div className="mt-auto pt-6 border-t border-gray-50">
+                            <button 
+                                onClick={() => !isDisabled && handleStartExam(e)} 
+                                disabled={isDisabled}
+                                className={`w-full font-black py-4 rounded-[20px] shadow-xl transition-all flex items-center justify-center gap-3 active:scale-95 ${btnClass} ${isDisabled ? 'shadow-none active:scale-100' : ''}`}
+                            >
+                                {btnText} {btnIcon}
+                            </button>
+                        </div>
                       </div>
                     );
                   })}
