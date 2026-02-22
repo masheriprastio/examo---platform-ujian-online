@@ -180,7 +180,8 @@ export default function App() {
   const [previewMaterial, setPreviewMaterial] = useState<Material | null>(null);
 
   // New State for Gradebook
-  const [dailyScores, setDailyScores] = useState<Record<string, number>>({});
+  const [dailyScoreColumns, setDailyScoreColumns] = useState<string[]>(['Capaian 1']);
+  const [dailyScores, setDailyScores] = useState<Record<string, Record<number, number>>>({}); // studentId -> colIndex -> score
   const [gradeViewMode, setGradeViewMode] = useState<'summary' | 'history'>('summary');
 
   // New State for Create Exam Dropdown
@@ -902,49 +903,99 @@ export default function App() {
                         </tbody>
                       </table>
                   ) : (
+                    <div>
+                      <div className="flex justify-end p-4 border-b border-gray-50 gap-2">
+                         <button 
+                           onClick={() => setDailyScoreColumns(prev => [...prev, `Capaian ${prev.length + 1}`])}
+                           className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-2 rounded-lg hover:bg-indigo-100 transition-all flex items-center gap-1"
+                         >
+                           <Plus className="w-3 h-3" /> Tambah Kolom Nilai
+                         </button>
+                         {dailyScoreColumns.length > 1 && (
+                           <button 
+                             onClick={() => {
+                               setDailyScoreColumns(prev => prev.slice(0, -1));
+                               // Cleanup deleted column data could be here but optional for ephemeral state
+                             }}
+                             className="text-xs font-bold text-red-600 bg-red-50 px-3 py-2 rounded-lg hover:bg-red-100 transition-all"
+                           >
+                             Hapus Kolom
+                           </button>
+                         )}
+                      </div>
+                      <div className="overflow-x-auto">
                       <table className="w-full min-w-[800px]">
                         <thead className="bg-gray-50/50 border-b text-left">
                           <tr>
-                            <th className="px-10 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest">Siswa</th>
-                            <th className="px-10 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Rata-rata Ujian</th>
-                            <th className="px-10 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Nilai Harian</th>
-                            <th className="px-10 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Nilai Akhir (50:50)</th>
+                            <th className="px-6 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest sticky left-0 bg-gray-50 z-10">Siswa</th>
+                            <th className="px-4 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center border-l border-gray-100">Rata-rata Ujian</th>
+                            {dailyScoreColumns.map((col, idx) => (
+                              <th key={idx} className="px-4 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center border-l border-gray-100">
+                                {col}
+                              </th>
+                            ))}
+                            <th className="px-4 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center border-l border-gray-100">Rata-rata Harian</th>
+                            <th className="px-6 py-6 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right border-l border-gray-100 bg-indigo-50/30">Nilai Akhir (50:50)</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50">
-                          {students.length === 0 ? <tr><td colSpan={4} className="py-20 text-center text-gray-400 font-medium italic">Belum ada siswa.</td></tr> : students.map(s => {
+                          {students.length === 0 ? <tr><td colSpan={4 + dailyScoreColumns.length} className="py-20 text-center text-gray-400 font-medium italic">Belum ada siswa.</td></tr> : students.map(s => {
                               const studentResults = results.filter(r => r.studentId === s.id && r.status === 'completed');
                               const avgExam = studentResults.length > 0 ? Math.round(studentResults.reduce((a, b) => a + b.score, 0) / studentResults.length) : 0;
-                              const dailyScore = dailyScores[s.id] || 0;
-                              const finalScore = Math.round((avgExam + dailyScore) / 2);
+                              
+                              const studentDailyScores = dailyScores[s.id] || {};
+                              let dailyTotal = 0;
+                              let dailyCount = 0;
+                              
+                              dailyScoreColumns.forEach((_, idx) => {
+                                const val = studentDailyScores[idx];
+                                if (val !== undefined && !isNaN(val)) {
+                                  dailyTotal += val;
+                                  dailyCount++;
+                                }
+                              });
+                              
+                              const avgDaily = dailyCount > 0 ? Math.round(dailyTotal / dailyCount) : 0;
+                              const finalScore = Math.round((avgExam + avgDaily) / 2);
 
                               return (
                                 <tr key={s.id} className="hover:bg-gray-50 transition-colors">
-                                  <td className="px-10 py-8">
+                                  <td className="px-6 py-6 sticky left-0 bg-white group-hover:bg-gray-50 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
                                       <p className="font-bold text-gray-900">{s.name}</p>
                                       <p className="text-xs text-gray-400 mt-1">{s.grade || '-'} • {s.nis || s.email}</p>
                                   </td>
-                                  <td className="px-10 py-8 text-center">
-                                      <span className={`font-black text-xl ${avgExam < 75 ? 'text-amber-500' : 'text-gray-900'}`}>{avgExam}</span>
+                                  <td className="px-4 py-6 text-center border-l border-gray-50">
+                                      <span className={`font-black text-lg ${avgExam < 75 ? 'text-amber-500' : 'text-gray-900'}`}>{avgExam}</span>
                                       <p className="text-[10px] text-gray-400 mt-1">{studentResults.length} Ujian</p>
                                   </td>
-                                  <td className="px-10 py-8 text-center">
-                                      <div className="flex items-center justify-center gap-2">
-                                          <input
-                                              type="number"
-                                              min="0" max="100"
-                                              value={dailyScores[s.id] || ''}
-                                              onChange={(e) => {
-                                                  const val = parseInt(e.target.value);
-                                                  setDailyScores(prev => ({...prev, [s.id]: isNaN(val) ? 0 : val}));
-                                              }}
-                                              placeholder="0"
-                                              className="w-20 px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 font-bold text-center outline-none"
-                                          />
-                                      </div>
+                                  {dailyScoreColumns.map((_, idx) => (
+                                    <td key={idx} className="px-4 py-6 text-center border-l border-gray-50">
+                                        <div className="flex items-center justify-center">
+                                            <input
+                                                type="number"
+                                                min="0" max="100"
+                                                value={dailyScores[s.id]?.[idx] ?? ''}
+                                                onChange={(e) => {
+                                                    const val = e.target.value === '' ? undefined : parseInt(e.target.value);
+                                                    setDailyScores(prev => ({
+                                                      ...prev,
+                                                      [s.id]: {
+                                                        ...(prev[s.id] || {}),
+                                                        [idx]: val as number
+                                                      }
+                                                    }));
+                                                }}
+                                                placeholder="0"
+                                                className="w-16 px-2 py-2 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 font-bold text-center outline-none text-sm"
+                                            />
+                                        </div>
+                                    </td>
+                                  ))}
+                                  <td className="px-4 py-6 text-center border-l border-gray-50">
+                                     <span className="font-bold text-gray-600">{avgDaily}</span>
                                   </td>
-                                  <td className="px-10 py-8 text-right">
-                                      <span className={`font-black text-3xl tracking-tighter ${finalScore < 75 ? 'text-red-500' : 'text-indigo-600'}`}>
+                                  <td className="px-6 py-6 text-right border-l border-gray-50 bg-indigo-50/10">
+                                      <span className={`font-black text-2xl tracking-tighter ${finalScore < 75 ? 'text-red-500' : 'text-indigo-600'}`}>
                                           {finalScore}
                                       </span>
                                   </td>
@@ -953,6 +1004,8 @@ export default function App() {
                           })}
                         </tbody>
                       </table>
+                      </div>
+                    </div>
                   )}
                 </div>
                 
@@ -1318,7 +1371,7 @@ export default function App() {
                      <CheckCircle className="absolute -right-6 -bottom-6 w-52 h-52 text-white/10" />
                    </div>
                    <div className="bg-white p-10 rounded-[50px] border border-gray-100 shadow-sm flex items-center justify-between">
-                     <div><p className="text-gray-400 font-black uppercase tracking-widest text-[10px] mb-2">Rata-rata Skor</p><h3 className="text-7xl font-black text-gray-900 tracking-tighter">{results.filter(r => r.status === 'completed').length > 0 ? Math.round(results.filter(r => r.status === 'completed').reduce((a, b) => a + b.score, 0) / results.filter(r => r.status === 'completed').length) : 0}</h3></div>
+                     <div><p className="text-gray-400 font-black uppercase tracking-widest text-[10px] mb-2">Rata-rata Skor</p><h3 className="text-7xl font-black text-gray-900 tracking-tighter">{results.filter(r => r.studentId === currentUser?.id && r.status === 'completed').length > 0 ? Math.round(results.filter(r => r.studentId === currentUser?.id && r.status === 'completed').reduce((a, b) => a + b.score, 0) / results.filter(r => r.studentId === currentUser?.id && r.status === 'completed').length) : 0}</h3></div>
                      <div className="bg-green-50 p-8 rounded-[35px] border border-green-100"><TrendingUp className="w-12 h-12 text-green-600" /></div>
                    </div>
                 </div>
