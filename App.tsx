@@ -169,6 +169,38 @@ export default function App() {
 
   const { addAlert } = useNotification();
 
+  // Notification helper (uses NotificationContext which handles dedupe by key)
+  const notify = (message: string, type: 'info' | 'error' | 'success' = 'info', key?: string) => {
+    addAlert(message, type, key);
+  };
+
+  // Restore session from localStorage so refresh keeps user logged in
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('examo_session');
+      if (raw) {
+        const sess = JSON.parse(raw);
+        if (sess?.user) setCurrentUser(sess.user);
+        if (sess?.view) setView(sess.view as AppView);
+      }
+    } catch (err) {
+      console.error('Failed to restore session', err);
+    }
+  }, []);
+
+  // Persist session when user/view changes
+  useEffect(() => {
+    if (currentUser) {
+      try {
+        localStorage.setItem('examo_session', JSON.stringify({ user: currentUser, view }));
+      } catch (err) {
+        console.error('Failed to persist session', err);
+      }
+    } else {
+      localStorage.removeItem('examo_session');
+    }
+  }, [currentUser, view]);
+
   // State Initialization: Use Mocks only if Supabase is NOT configured
   const [exams, setExams] = useState<Exam[]>(isSupabaseConfigured ? [] : MOCK_EXAMS);
   const [bankQuestions, setBankQuestions] = useState<Question[]>(isSupabaseConfigured ? [] : MOCK_EXAMS.flatMap(e => e.questions));
@@ -231,48 +263,54 @@ export default function App() {
     };
   }, [currentUser]);
 
-  // Load Data from Supabase
-  const fetchData = async () => {
-        if (!isSupabaseConfigured || !supabase) return;
+    // Load Data from Supabase. Returns fetched exams and results for callers to act on.
+    const fetchData = async () => {
+      if (!isSupabaseConfigured || !supabase) return { exams: null as any, results: null as any };
 
-        try {
-            // 1. Fetch Exams
-            const { data: examsData, error: examsError } = await supabase.from('exams').select('*').order('created_at', { ascending: false });
-            if (examsData && !examsError) {
-                const mappedExams: Exam[] = examsData.map((e: any) => ({
-                    ...e,
-                    durationMinutes: e.duration_minutes,
-                    createdAt: e.created_at,
-                    startDate: e.start_date,
-                    endDate: e.end_date
-                }));
-                setExams(mappedExams);
-                setBankQuestions(mappedExams.flatMap(e => e.questions || []));
-            }
-
-            // 2. Fetch Results
-            const { data: resultsData, error: resultsError } = await supabase.from('exam_results').select('*');
-            if (resultsData && !resultsError) {
-                const mappedResults: ExamResult[] = resultsData.map((r: any) => ({
-                   ...r,
-                   examId: r.exam_id,
-                   studentId: r.student_id,
-                   studentName: r.student_name || 'Unknown', // Ideally denormalized or joined
-                   totalPointsPossible: r.total_points_possible,
-                   pointsObtained: r.points_obtained,
-                   totalQuestions: r.total_questions,
-                   correctCount: r.correct_count,
-                   incorrectCount: r.incorrect_count,
-                   unansweredCount: r.unanswered_count,
-                   submittedAt: r.submitted_at,
-                   startedAt: r.started_at
-                }));
-                setResults(mappedResults);
-            }
-        } catch (err) {
-            console.error("Failed to fetch data from Supabase:", err);
+      try {
+        // 1. Fetch Exams
+        const { data: examsData, error: examsError } = await supabase.from('exams').select('*').order('created_at', { ascending: false });
+        let mappedExams: Exam[] = [];
+        if (examsData && !examsError) {
+          mappedExams = examsData.map((e: any) => ({
+            ...e,
+            durationMinutes: e.duration_minutes,
+            createdAt: e.created_at,
+            startDate: e.start_date,
+            endDate: e.end_date
+          }));
+          setExams(mappedExams);
+          setBankQuestions(mappedExams.flatMap(e => e.questions || []));
         }
-  };
+
+        // 2. Fetch Results
+        const { data: resultsData, error: resultsError } = await supabase.from('exam_results').select('*');
+        let mappedResults: ExamResult[] = [];
+        if (resultsData && !resultsError) {
+          mappedResults = resultsData.map((r: any) => ({
+             ...r,
+             examId: r.exam_id,
+             studentId: r.student_id,
+             studentName: r.student_name || 'Unknown',
+             totalPointsPossible: r.total_points_possible,
+             pointsObtained: r.points_obtained,
+             totalQuestions: r.total_questions,
+             correctCount: r.correct_count,
+             incorrectCount: r.incorrect_count,
+             unansweredCount: r.unanswered_count,
+             submittedAt: r.submitted_at,
+             startedAt: r.started_at,
+             violation_alert: Array.isArray(r.logs) && r.logs.some((l: any) => l.event === 'tab_blur' || l.event === 'violation_disqualified')
+          }));
+          setResults(mappedResults);
+        }
+
+        return { exams: mappedExams, results: mappedResults };
+      } catch (err) {
+        console.error("Failed to fetch data from Supabase:", err);
+        return { exams: null as any, results: null as any };
+      }
+    };
 
   useEffect(() => {
     fetchData();
@@ -347,7 +385,7 @@ export default function App() {
                 if (prev.find(r => r.id === mapped.id)) return prev;
                 return [mapped, ...prev];
             });
-            addAlert(`Siswa ${mapped.studentName} mulai mengerjakan ujian.`, 'info');
+            notify(`Siswa ${mapped.studentName} mulai mengerjakan ujian.`, 'info', `start:${mapped.id}`);
           } 
           else if (payload.event === 'UPDATE') {
             const newRecord = payload.new as any;
@@ -373,17 +411,17 @@ export default function App() {
                const latestLog = newLogs[newLogs.length - 1];
                
                if (latestLog && latestLog.event === 'violation_disqualified') {
-                  addAlert(`PELANGGARAN BERAT: Siswa ${newRecord.student_name} didiskualifikasi (3x keluar tab)!`, 'error');
+                  notify(`PELANGGARAN BERAT: Siswa ${newRecord.student_name} didiskualifikasi (3x keluar tab)!`, 'error', `violation:${newRecord.id}`);
                   if (Notification.permission === 'granted') {
                      new Notification('Pelanggaran Berat!', { body: `Siswa ${newRecord.student_name} didiskualifikasi!`, icon: '/vite.svg' });
                   }
                } else if (latestLog && latestLog.event === 'tab_blur') {
-                  addAlert(`Peringatan: Siswa ${newRecord.student_name} keluar dari tab ujian!`, 'error');
+                  notify(`Peringatan: Siswa ${newRecord.student_name} keluar dari tab ujian!`, 'error', `tabblur:${newRecord.id}`);
                   if (Notification.permission === 'granted') {
                      new Notification('Pelanggaran!', { body: `Siswa ${newRecord.student_name} keluar tab!`, icon: '/vite.svg' });
                   }
                } else if (latestLog && latestLog.event === 'submit') {
-                  addAlert(`Siswa ${newRecord.student_name} telah mengirimkan ujian.`, 'success');
+                  notify(`Siswa ${newRecord.student_name} telah mengirimkan ujian.`, 'success', `submit:${newRecord.id}`);
                }
             }
           }
@@ -421,13 +459,37 @@ export default function App() {
 
         setCurrentUser(data);
         setView(role === 'teacher' ? 'TEACHER_DASHBOARD' : 'STUDENT_DASHBOARD');
-        await fetchData(); // Force refresh data on login
+        // Fetch fresh data and notify existing violations to teacher
+        const fetched = await fetchData();
+        if (role === 'teacher' && fetched.results) {
+          fetched.results.forEach(r => {
+            if (r.violation_alert) {
+              const msg = r.logs && Array.isArray(r.logs) && r.logs.some((l: any) => l.event === 'violation_disqualified')
+                ? `PELANGGARAN BERAT: Siswa ${r.studentName} didiskualifikasikan!`
+                : `Peringatan: Siswa ${r.studentName} terdeteksi keluar tab ujian.`;
+              notify(msg, 'error', `violation:${r.id}`);
+              // mark in state so UI shows highlight
+              setResults(prev => prev.map(p => p.id === r.id ? { ...p, violation_alert: true } : p));
+            }
+          });
+        }
         return null;
 
     } else {
         // Fallback to Mock
         if (role === 'teacher') {
-            if (email === MOCK_TEACHER.email && pwd === 'password') { setCurrentUser(MOCK_TEACHER); setView('TEACHER_DASHBOARD'); return null; }
+            if (email === MOCK_TEACHER.email && pwd === 'password') {
+                setCurrentUser(MOCK_TEACHER);
+                setView('TEACHER_DASHBOARD');
+                // For mock mode, check any existing results in state and notify
+                results.forEach(r => {
+                  if (r.logs && Array.isArray(r.logs) && r.logs.some(l => l.event === 'tab_blur' || l.event === 'violation_disqualified')) {
+                    const isDisq = r.logs.some((l: any) => l.event === 'violation_disqualified');
+                    notify(isDisq ? `PELANGGARAN BERAT: Siswa ${r.studentName} didiskualifikasikan!` : `Peringatan: Siswa ${r.studentName} terdeteksi keluar tab ujian.`, 'error', `violation:${r.id}`);
+                    setResults(prev => prev.map(p => p.id === r.id ? { ...p, violation_alert: true } : p));
+                  }
+                });
+                return null; }
             return "Guru tidak ditemukan.";
         } else {
             const found = students.find(s => s.email === email || s.nis === email);
