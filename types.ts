@@ -49,7 +49,7 @@ export interface Exam {
 }
 
 export interface ExamLog {
-  event: 'start' | 'tab_blur' | 'tab_focus' | 'autosave' | 'submit';
+  event: 'start' | 'tab_blur' | 'tab_focus' | 'autosave' | 'submit' | 'violation_disqualified';
   timestamp: string;
   detail?: string;
 }
@@ -71,6 +71,7 @@ export interface ExamResult {
   submittedAt?: string;
   answers: Record<string, any>;
   logs: ExamLog[];
+  violation_alert?: boolean;
 }
 
 export interface Material {

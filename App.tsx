@@ -9,7 +9,7 @@ import {
   TrendingUp, CheckCircle, PlayCircle, FileText, History,
   Mail, Lock, Eye, EyeOff, ArrowRight, AlertTriangle, Database,
   Menu, X as CloseIcon, FileDown, Download, UserPlus, FileSpreadsheet,
-  XCircle, HelpCircle, RotateCcw, PenTool, Save, Plus, ChevronDown
+  XCircle, HelpCircle, RotateCcw, PenTool, Save, Plus, ChevronDown, Trash2
 } from 'lucide-react';
 
 import ExamRunner from './components/ExamRunner';
@@ -309,30 +309,28 @@ export default function App() {
         { event: 'UPDATE', schema: 'public', table: 'exam_results' },
         (payload) => {
           const newRecord = payload.new as any;
-          const oldRecord = payload.old as any;
-          
-          // Check if logs changed and added a tab_blur
-          // Note: payload.old.logs might be empty/null, need careful check
-          // Since we can't easily deep compare without lodash, let's just check length if array
-          // or strictly if new log is tab_blur.
           
           if (newRecord.logs && Array.isArray(newRecord.logs)) {
              const newLogs = newRecord.logs as ExamLog[];
-             const oldLogs = (oldRecord.logs || []) as ExamLog[];
-
-             if (newLogs.length > oldLogs.length) {
-                const latestLog = newLogs[newLogs.length - 1];
-                if (latestLog.event === 'tab_blur') {
-                   // Show Notification
-                   if (Notification.permission === 'granted') {
-                      new Notification('Peringatan Pelanggaran Ujian', {
-                         body: `Siswa ${newRecord.student_name || 'Unknown'} terdeteksi keluar dari tab ujian!`,
-                         icon: '/vite.svg' // Placeholder icon
-                      });
-                   }
-                   // Optionally update local state to reflect change immediately
-                   setResults(prev => prev.map(r => r.id === newRecord.id ? { ...r, ...newRecord, studentName: r.studentName } : r));
+             const latestLog = newLogs[newLogs.length - 1];
+             
+             if (latestLog && latestLog.event === 'violation_disqualified') {
+                if (Notification.permission === 'granted') {
+                   new Notification('Pelanggaran Berat!', {
+                      body: `Siswa ${newRecord.student_name || 'Unknown'} telah melakukan 3x pelanggaran dan didiskualifikasi!`,
+                      icon: '/vite.svg'
+                   });
                 }
+                // Mark for alert in UI
+                setResults(prev => prev.map(r => r.id === newRecord.id ? { ...r, violation_alert: true } : r));
+             } else if (latestLog && latestLog.event === 'tab_blur') {
+                if (Notification.permission === 'granted') {
+                   new Notification('Peringatan Pelanggaran', {
+                      body: `Siswa ${newRecord.student_name || 'Unknown'} keluar dari tab ujian!`,
+                      icon: '/vite.svg'
+                   });
+                }
+                setResults(prev => prev.map(r => r.id === newRecord.id ? { ...r, ...newRecord, studentName: r.studentName } : r));
              }
           }
         }
@@ -887,6 +885,24 @@ export default function App() {
     }
   };
 
+  const handleDeleteResult = async (resultId: string) => {
+    if (!confirm("Hapus data nilai ini? Tindakan ini akan menghapus riwayat pengerjaan dan membatalkan status pelanggaran.")) return;
+
+    // Optimistic Update
+    setResults(prev => prev.filter(r => r.id !== resultId));
+
+    // DB Update
+    if (isSupabaseConfigured && supabase) {
+        const { error } = await supabase.from('exam_results').delete().eq('id', resultId);
+        
+        if (error) {
+            console.error("Failed to delete result:", error);
+            alert("Gagal menghapus data dari database.");
+            fetchData();
+        }
+    }
+  };
+
   if (view === 'LOGIN') return <LoginView onLogin={handleLogin} />;
   
   if (view === 'EXAM_SESSION' && activeExam) {
@@ -967,11 +983,12 @@ export default function App() {
                         </thead>
                         <tbody className="divide-y divide-gray-50">
                           {results.length === 0 ? <tr><td colSpan={4} className="py-20 text-center text-gray-400 font-medium italic">Belum ada data pengerjaan.</td></tr> : results.map(r => (
-                            <tr key={r.id} className={`hover:bg-gray-50 transition-colors ${r.status === 'disqualified' ? 'bg-red-50/30' : ''}`}>
+                            <tr key={r.id} className={`hover:bg-gray-50 transition-colors ${r.status === 'disqualified' ? 'bg-red-50/30' : ''} ${r.violation_alert ? 'animate-pulse bg-red-100' : ''}`}>
                               <td className="px-10 py-8 font-bold text-gray-900">
                                 {r.studentName}
                                 <p className="text-[10px] font-black text-gray-300 uppercase mt-1">{formatDate(r.startedAt)}</p>
                                 {r.status === 'disqualified' && <span className="inline-block mt-2 px-2 py-0.5 bg-red-600 text-white text-[10px] font-bold rounded">DISKUALIFIKASI</span>}
+                                {r.violation_alert && <div className="mt-2 text-[10px] font-black text-red-600 animate-bounce">🚨 TERJADI PELANGGARAN 🚨</div>}
                               </td>
                               <td className="px-10 py-8 text-gray-500 font-medium">{exams.find(e => e.id === r.examId)?.title}</td>
                               <td className="px-10 py-8">
@@ -999,6 +1016,14 @@ export default function App() {
                                         <CloseIcon className="w-5 h-5" />
                                     </button>
                                   )}
+                                  
+                                  <button 
+                                    onClick={() => handleDeleteResult(r.id)} 
+                                    className="p-3 bg-red-50 text-red-600 hover:bg-red-600 hover:text-white rounded-xl transition-all" 
+                                    title="Hapus Nilai / Reset Pelanggaran"
+                                  >
+                                    <Trash2 className="w-5 h-5" />
+                                  </button>
                                   
                                   <button onClick={() => exportAnswersToPDF([r], `Hasil_${r.studentName.replace(/\s+/g, '_')}.pdf`)} className="p-3 bg-gray-50 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Cetak Hasil Siswa Ini">
                                     <FileDown className="w-5 h-5" />

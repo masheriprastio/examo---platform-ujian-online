@@ -245,8 +245,12 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
         setViolationCount(v => {
           const next = v + 1;
           addLog('tab_blur', `Violation #${next}`);
-          if (next >= MAX_VIOLATIONS) handleSubmit(true);
-          else setShowWarning(true);
+          if (next >= MAX_VIOLATIONS) {
+            addLog('violation_disqualified', 'Disqualified due to 3 violations');
+            handleSubmit(true);
+          } else {
+            setShowWarning(true);
+          }
           return next;
         });
       }
