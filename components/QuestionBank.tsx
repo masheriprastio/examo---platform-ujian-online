@@ -258,8 +258,8 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 5 * 1024 * 1024) { // 5MB limit
-        alert("Ukuran file maksimal 5MB");
+      if (file.size > 15 * 1024 * 1024) { // 15MB limit
+        alert("Ukuran file maksimal 15MB");
         return;
       }
 
@@ -395,7 +395,7 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                   )}
               </div>
               <p className="text-[10px] text-gray-400 mt-1 ml-1">
-                {uploadMode === 'url' ? 'Masukkan URL gambar langsung.' : 'Maksimal ukuran file 5MB.'}
+                {uploadMode === 'url' ? 'Masukkan URL gambar langsung.' : 'Maksimal ukuran file 15MB.'}
               </p>
             </div>
 

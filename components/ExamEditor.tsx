@@ -15,6 +15,21 @@ interface ExamEditorProps {
   onPreview?: (exam: Exam) => void;
 }
 
+// Helper function untuk format datetime-local input dengan timezone awareness
+const formatDateTimeLocal = (dateString: string): string => {
+  try {
+    const date = new Date(dateString);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  } catch {
+    return '';
+  }
+};
+
 const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveToBank, onPreview }) => {
   // Parse initial dates if they exist, or keep them empty/null
   const [formData, setFormData] = useState<Exam>({ ...exam });
@@ -50,8 +65,8 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   const handleFileUpload = (qIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 5 * 1024 * 1024) { // 5MB limit
-        alert("Ukuran file maksimal 5MB");
+      if (file.size > 15 * 1024 * 1024) { // 15MB limit
+        alert("Ukuran file maksimal 15MB");
         return;
       }
 
@@ -167,7 +182,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Mulai Ujian</label>
                 <input 
                   type="datetime-local" 
-                  value={formData.startDate ? new Date(formData.startDate).toISOString().slice(0, 16) : ''}
+                  value={formData.startDate ? formatDateTimeLocal(formData.startDate) : ''}
                   onChange={(e) => handleExamChange('startDate', e.target.value ? new Date(e.target.value).toISOString() : undefined)}
                   className="w-full px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white outline-none transition font-bold text-sm"
                 />
@@ -176,7 +191,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Selesai Ujian</label>
                 <input 
                   type="datetime-local" 
-                  value={formData.endDate ? new Date(formData.endDate).toISOString().slice(0, 16) : ''}
+                  value={formData.endDate ? formatDateTimeLocal(formData.endDate) : ''}
                   onChange={(e) => handleExamChange('endDate', e.target.value ? new Date(e.target.value).toISOString() : undefined)}
                   className="w-full px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white outline-none transition font-bold text-sm"
                 />
@@ -335,7 +350,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                             )}
                         </div>
                         <p className="text-[10px] text-gray-400 mt-1">
-                          {(!uploadMode[q.id] || uploadMode[q.id] === 'url') ? 'Masukkan URL gambar langsung.' : 'Maksimal ukuran file 5MB.'}
+                          {(!uploadMode[q.id] || uploadMode[q.id] === 'url') ? 'Masukkan URL gambar langsung.' : 'Maksimal ukuran file 15MB.'}
                         </p>
                       </div>
                       

@@ -30,8 +30,8 @@ const AIGenerator: React.FC<AIGeneratorProps> = ({ onExamCreated, onCancel }) =>
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      setError('Ukuran file terlalu besar (Maksimal 5MB).');
+    if (file.size > 15 * 1024 * 1024) {
+      setError('Ukuran file terlalu besar (Maksimal 15MB).');
       return;
     }
 
@@ -210,7 +210,7 @@ const AIGenerator: React.FC<AIGeneratorProps> = ({ onExamCreated, onCancel }) =>
                     <FileText className="w-8 h-8 text-gray-300 group-hover:text-indigo-500 transition-colors" />
                   </div>
                   <p className="text-gray-900 font-bold mb-1">Klik untuk Unggah Dokumen</p>
-                  <p className="text-xs text-gray-400">PDF atau Teks (Maks 5MB)</p>
+                  <p className="text-xs text-gray-400">PDF atau Teks (Maks 15MB)</p>
                 </div>
               ) : (
                 <div className="bg-indigo-50 border-2 border-indigo-200 rounded-2xl p-4 flex items-center justify-between animate-in zoom-in-95 duration-200">
