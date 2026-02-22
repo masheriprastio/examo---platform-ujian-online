@@ -1,16 +1,16 @@
-
 import React, { useState, useEffect } from 'react';
 import { User, Exam, AppView, ExamResult, Question, ExamLog } from './types';
 import { MOCK_TEACHER, MOCK_STUDENT, MOCK_EXAMS, supabase, isSupabaseConfigured } from './lib/supabase';
 import { generateUUID } from './lib/uuid';
-import { 
-  LogOut, LayoutDashboard, ClipboardList, Sparkles, 
+import {
+  LogOut, LayoutDashboard, ClipboardList, Sparkles,
   GraduationCap, Book, Award, Users, Clock, Star,
   TrendingUp, CheckCircle, PlayCircle, FileText, History,
   Mail, Lock, Eye, EyeOff, ArrowRight, AlertTriangle, Database,
   Menu, X as CloseIcon, FileDown, Download, UserPlus, FileSpreadsheet,
-  XCircle, HelpCircle, RotateCcw, PenTool, Save, Plus, ChevronDown, Trash2
+  XCircle, HelpCircle, RotateCcw, PenTool, Save, Plus, ChevronDown, Trash2, ShieldCheck
 } from 'lucide-react';
+import { useNotification } from './context/NotificationContext';
 
 import ExamRunner from './components/ExamRunner';
 import AIGenerator from './components/AIGenerator';
@@ -166,6 +166,8 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
+  const { addAlert } = useNotification();
+
   // State Initialization: Use Mocks only if Supabase is NOT configured
   const [exams, setExams] = useState<Exam[]>(isSupabaseConfigured ? [] : MOCK_EXAMS);
   const [bankQuestions, setBankQuestions] = useState<Question[]>(isSupabaseConfigured ? [] : MOCK_EXAMS.flatMap(e => e.questions));
@@ -197,7 +199,7 @@ export default function App() {
         timeout = setTimeout(() => {
           setView('LOGIN');
           setCurrentUser(null);
-          alert('Sesi Anda telah berakhir karena tidak ada aktivitas selama 3 menit.');
+          addAlert('Sesi Anda telah berakhir karena tidak ada aktivitas selama 3 menit.', 'info');
         }, 3 * 60 * 1000); // 3 minutes
       }
     };
@@ -302,43 +304,83 @@ export default function App() {
       Notification.requestPermission();
     }
 
-    const subscription = supabase
-      .channel('exam-violations')
+    const channel = supabase
+      .channel('schema-db-changes')
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'exam_results' },
-        (payload) => {
-          const newRecord = payload.new as any;
+        { event: '*', schema: 'public', table: 'exam_results' },
+        (payload: any) => { // Cast payload to any to resolve TS errors temporarily
+          console.log('Realtime update received:', payload);
           
-          if (newRecord.logs && Array.isArray(newRecord.logs)) {
-             const newLogs = newRecord.logs as ExamLog[];
-             const latestLog = newLogs[newLogs.length - 1];
-             
-             if (latestLog && latestLog.event === 'violation_disqualified') {
-                if (Notification.permission === 'granted') {
-                   new Notification('Pelanggaran Berat!', {
-                      body: `Siswa ${newRecord.student_name || 'Unknown'} telah melakukan 3x pelanggaran dan didiskualifikasi!`,
-                      icon: '/vite.svg'
-                   });
-                }
-                // Mark for alert in UI
-                setResults(prev => prev.map(r => r.id === newRecord.id ? { ...r, violation_alert: true } : r));
-             } else if (latestLog && latestLog.event === 'tab_blur') {
-                if (Notification.permission === 'granted') {
-                   new Notification('Peringatan Pelanggaran', {
-                      body: `Siswa ${newRecord.student_name || 'Unknown'} keluar dari tab ujian!`,
-                      icon: '/vite.svg'
-                   });
-                }
-                setResults(prev => prev.map(r => r.id === newRecord.id ? { ...r, ...newRecord, studentName: r.studentName } : r));
-             }
+          if (payload.event === 'INSERT') {
+            const newRes = payload.new as any;
+            const mapped = {
+               ...newRes,
+               examId: newRes.exam_id,
+               studentId: newRes.student_id,
+               studentName: newRes.student_name,
+               totalPointsPossible: newRes.total_points_possible,
+               pointsObtained: newRes.points_obtained,
+               totalQuestions: newRes.total_questions,
+               correctCount: newRes.correct_count,
+               incorrectCount: newRes.incorrect_count,
+               unansweredCount: newRes.unanswered_count,
+               submittedAt: newRes.submitted_at,
+               startedAt: newRes.started_at
+            };
+            setResults(prev => {
+                if (prev.find(r => r.id === mapped.id)) return prev;
+                return [mapped, ...prev];
+            });
+            addAlert(`Siswa ${mapped.studentName} mulai mengerjakan ujian.`, 'info');
+          } 
+          else if (payload.event === 'UPDATE') {
+            const newRecord = payload.new as any;
+            const mapped = {
+               ...newRecord,
+               examId: newRecord.exam_id,
+               studentId: newRecord.student_id,
+               studentName: newRecord.student_name,
+               totalPointsPossible: newRecord.total_points_possible,
+               pointsObtained: newRecord.points_obtained,
+               totalQuestions: newRecord.total_questions,
+               correctCount: newRecord.correct_count,
+               incorrectCount: newRecord.incorrect_count,
+               unansweredCount: newRecord.unanswered_count,
+               submittedAt: newRecord.submitted_at,
+               startedAt: newRecord.started_at
+            };
+
+            setResults(prev => prev.map(r => r.id === mapped.id ? mapped : r));
+
+            if (newRecord.logs && Array.isArray(newRecord.logs)) {
+               const newLogs = newRecord.logs as ExamLog[];
+               const latestLog = newLogs[newLogs.length - 1];
+               
+               if (latestLog && latestLog.event === 'violation_disqualified') {
+                  addAlert(`PELANGGARAN BERAT: Siswa ${newRecord.student_name} didiskualifikasi (3x keluar tab)!`, 'error');
+                  if (Notification.permission === 'granted') {
+                     new Notification('Pelanggaran Berat!', { body: `Siswa ${newRecord.student_name} didiskualifikasi!`, icon: '/vite.svg' });
+                  }
+               } else if (latestLog && latestLog.event === 'tab_blur') {
+                  addAlert(`Peringatan: Siswa ${newRecord.student_name} keluar dari tab ujian!`, 'error');
+                  if (Notification.permission === 'granted') {
+                     new Notification('Pelanggaran!', { body: `Siswa ${newRecord.student_name} keluar tab!`, icon: '/vite.svg' });
+                  }
+               } else if (latestLog && latestLog.event === 'submit') {
+                  addAlert(`Siswa ${newRecord.student_name} telah mengirimkan ujian.`, 'success');
+               }
+            }
+          }
+          else if (payload.event === 'DELETE') {
+            setResults(prev => prev.filter(r => r.id !== payload.old.id));
           }
         }
       )
       .subscribe();
 
     return () => {
-      supabase.removeChannel(subscription);
+      supabase.removeChannel(channel);
     };
   }, [currentUser]);
 
@@ -351,7 +393,7 @@ export default function App() {
         const { data, error } = await supabase
             .from('users')
             .select('*')
-            .or(`email.eq.${email},nis.eq.${email}`) // Allow Email or NIS
+            .or(`email.eq.${email},nis.eq.${email}`)
             .eq('role', role)
             .single();
 
@@ -507,7 +549,7 @@ export default function App() {
           
           if (error) {
             console.error('SUPABASE_SAVE_ERROR:', JSON.stringify(error, null, 2));
-            alert(`Gagal menyimpan: ${error.message} (${error.code || 'Unknown Code'})`);
+            addAlert(`Gagal menyimpan: ${error.message} (${error.code || 'Unknown Code'})`, 'error');
           }
       }
     }
@@ -535,7 +577,7 @@ export default function App() {
       if (error) {
         console.error("Failed to insert student:", error);
         // Rollback? Alert? For now, alert.
-        alert("Gagal menyimpan ke database: " + error.message);
+        addAlert("Gagal menyimpan ke database: " + error.message, 'error');
         // Remove optimistic update
         setStudents(prev => prev.filter(s => s.id !== newStudent.id));
       } else if (data) {
@@ -561,7 +603,7 @@ export default function App() {
       const { error } = await supabase.from('users').delete().eq('id', id);
       if (error) {
         console.error("Failed to delete student:", error);
-        alert("Gagal menghapus dari database: " + error.message);
+        addAlert("Gagal menghapus dari database: " + error.message, 'error');
         // Rollback
         setStudents(originalStudents);
       }
@@ -598,7 +640,7 @@ export default function App() {
           const { error } = await supabase.from('users').insert(rowsToInsert);
           if (error) {
               console.error("Bulk insert failed:", error);
-              alert("Gagal import ke database: " + error.message);
+              addAlert("Gagal import ke database: " + error.message, 'error');
               // Rollback optimistic
               setStudents(students);
           } else {
@@ -643,7 +685,7 @@ export default function App() {
               const { error } = await supabase.from('exams').update(dbExam).eq('id', updatedExam.id);
               if (error) {
                   console.error("Failed to update exam:", error);
-                  alert("Gagal menyimpan ujian ke database: " + error.message);
+                  addAlert("Gagal menyimpan ujian ke database: " + error.message, 'error');
                   // Rollback optimistic update
                   await fetchData();
               } else {
@@ -654,7 +696,7 @@ export default function App() {
               const { error } = await supabase.from('exams').insert(dbExam);
               if (error) {
                   console.error("Failed to create exam:", error);
-                  alert("Gagal membuat ujian di database: " + error.message);
+                  addAlert("Gagal membuat ujian di database: " + error.message, 'error');
                   // Rollback optimistic insert
                   setExams(prev => prev.filter(e => e.id !== updatedExam.id));
               } else {
@@ -688,7 +730,7 @@ export default function App() {
            const { error } = await supabase.from('exams').insert(dbExam);
            if (error) {
                console.error("Failed to create exam in database:", error);
-               alert("Gagal menyimpan ujian ke database: " + error.message);
+               addAlert("Gagal menyimpan ujian ke database: " + error.message, 'error');
                // Rollback optimistic insert
                setExams(prev => prev.filter(e => e.id !== newExam.id));
            } else {
@@ -751,7 +793,7 @@ export default function App() {
     const doc = new jsPDF();
     
     if (resultsToExport.length === 0) {
-      alert("Tidak ada data untuk diekspor.");
+      addAlert("Tidak ada data untuk diekspor.", 'info');
       return;
     }
 
@@ -859,7 +901,7 @@ export default function App() {
   const exportFullAnswersToPDF = () => {
     const completedResults = results.filter(r => r.status === 'completed' || r.status === 'disqualified');
     if (completedResults.length === 0) {
-      alert("Belum ada data ujian yang selesai.");
+      addAlert("Belum ada data ujian yang selesai.", 'info');
       return;
     }
     exportAnswersToPDF(completedResults, 'Rekap_Jawaban_Lengkap.pdf');
@@ -880,7 +922,7 @@ export default function App() {
         
         if (error) {
             console.error("Failed to disqualify:", error);
-            alert("Gagal update status di database.");
+            addAlert("Gagal update status di database.", 'error');
         }
     }
   };
@@ -897,7 +939,7 @@ export default function App() {
         
         if (error) {
             console.error("Failed to delete result:", error);
-            alert("Gagal menghapus data dari database.");
+            addAlert("Gagal menghapus data dari database.", 'error');
             fetchData();
         }
     }
@@ -936,6 +978,7 @@ export default function App() {
 
   return (
     <div className="flex bg-[#fcfdfe] min-h-screen font-sans relative">
+
       <Sidebar user={currentUser!} activeView={view} isOpen={isSidebarOpen} onNavigate={setView} onLogout={() => setView('LOGIN')} onClose={() => setIsSidebarOpen(false)} />
       <div className="flex-1 flex flex-col h-screen overflow-hidden text-left">
         <header className="md:hidden bg-white border-b border-gray-100 p-4 flex items-center justify-between"><button onClick={() => setIsSidebarOpen(true)} className="p-2 text-indigo-600 bg-indigo-50 rounded-xl"><Menu /></button><div className="flex items-center gap-2"><GraduationCap className="text-indigo-600" /><span className="font-black">Examo</span></div><div className="w-10" /></header>
@@ -1264,7 +1307,7 @@ export default function App() {
 
                 <div className="grid grid-cols-1 gap-5">
                   {exams.length === 0 ? (
-                      <div className="text-center py-16 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
+                      <div className="col-span-full text-center py-16 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
                           <p className="text-gray-400 font-medium">Belum ada ujian yang dibuat.</p>
                       </div>
                   ) : (

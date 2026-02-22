@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Exam, Question, ExamLog } from '../types';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { 
   Clock, CheckCircle, ChevronLeft, ChevronRight, 
   AlertTriangle, Star, Shuffle, LayoutGrid, 
@@ -48,10 +49,13 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
   const [violationCount, setViolationCount] = useState(0);
   const [showWarning, setShowWarning] = useState(false);
   const [isReady, setIsReady] = useState(false);
+  const [violationAlert, setViolationAlert] = useState(false);
 
   const timerRef = useRef<any>(null);
   const answersRef = useRef<Record<string, any>>(answers);
   const logsRef = useRef<ExamLog[]>(logs);
+  const violationCountRef = useRef<number>(0);
+  const [browserNotificationRequested, setBrowserNotificationRequested] = useState(false);
 
   useEffect(() => {
     let questionsToRun = [...exam.questions];
@@ -238,18 +242,62 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
     }
   }, [isReady, isSubmitting, handleSubmit, onAutosave, addLog, isPreview]);
 
+  // Function to send violation alert to Supabase in real-time
+  const sendViolationAlert = useCallback(async (violationNum: number, isDisqualified: boolean) => {
+    if (!isSupabaseConfigured || !supabase || isPreview) return;
+    
+    try {
+      // Find the current exam result for this student
+      const { data: existingResults, error: fetchError } = await supabase
+        .from('exam_results')
+        .select('id')
+        .eq('exam_id', exam.id)
+        .eq('student_id', userId)
+        .eq('status', 'in_progress')
+        .limit(1);
+
+      if (fetchError || !existingResults || existingResults.length === 0) {
+        console.error('Could not find exam result to update:', fetchError);
+        return;
+      }
+
+      const resultId = existingResults[0].id;
+
+      // Update the exam result with violation info
+      await supabase
+        .from('exam_results')
+        .update({
+          violation_alert: true,
+          violation_count: violationNum,
+          status: isDisqualified ? 'disqualified' : 'in_progress',
+          logs: logsRef.current
+        })
+        .eq('id', resultId);
+
+      console.log(`Violation alert sent: ${violationNum} violations${isDisqualified ? ' - DISQUALIFIED' : ''}`);
+    } catch (err) {
+      console.error('Failed to send violation alert:', err);
+    }
+  }, [exam.id, userId, supabase, isSupabaseConfigured, isPreview]);
+
   useEffect(() => {
     const handleVisibility = () => {
       if (isPreview) return; // Don't track violations in preview mode
       if (document.visibilityState === 'hidden' && isReady && !isSubmitting) {
         setViolationCount(v => {
           const next = v + 1;
+          violationCountRef.current = next;
           addLog('tab_blur', `Violation #${next}`);
+          
+          // Send real-time alert to teacher
           if (next >= MAX_VIOLATIONS) {
             addLog('violation_disqualified', 'Disqualified due to 3 violations');
+            sendViolationAlert(next, true);
             handleSubmit(true);
           } else {
             setShowWarning(true);
+            // Send violation alert to teacher (not disqualified yet)
+            sendViolationAlert(next, false);
           }
           return next;
         });
@@ -257,7 +305,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [isReady, isSubmitting, addLog, handleSubmit, isPreview]);
+  }, [isReady, isSubmitting, addLog, handleSubmit, isPreview, sendViolationAlert]);
 
   const formatTime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
