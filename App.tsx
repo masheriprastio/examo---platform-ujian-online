@@ -845,14 +845,17 @@ export default function App() {
       // Check if exam exists in local state
       const exists = exams.some(e => e.id === updatedExam.id);
 
-      // Optimistic
+      // Optimistic update - immediate UI update
       if (exists) {
           setExams(prev => prev.map(e => e.id === updatedExam.id ? updatedExam : e));
       } else {
           setExams(prev => [updatedExam, ...prev]);
       }
 
-      // DB
+      // Show success message immediately (optimistic)
+      addAlert('Ujian berhasil disimpan!', 'success', 'save:' + updatedExam.id);
+
+      // DB save in background - don't wait for it
       if (isSupabaseConfigured && supabase) {
           const dbExam = {
               id: updatedExam.id,
@@ -868,32 +871,35 @@ export default function App() {
               created_at: exists ? undefined : updatedExam.createdAt
           };
 
-          if (exists) {
-              // Update existing exam
-              const { error } = await supabase.from('exams').update(dbExam).eq('id', updatedExam.id);
-              if (error) {
-                  console.error("Failed to update exam:", error);
-                  addAlert("Gagal menyimpan ujian ke database: " + error.message, 'error');
-                  // Rollback optimistic update
-                  await fetchData();
-              } else {
-                  await fetchData();
+          // Fire and forget - don't await
+          (async () => {
+              try {
+                  if (exists) {
+                      // Update existing exam
+                      const { error } = await supabase.from('exams').update(dbExam).eq('id', updatedExam.id);
+                      if (error) {
+                          console.error("Failed to update exam in database:", error);
+                          // Only show error if DB save fails
+                          addAlert("Database save gagal (tapi data lokal tersimpan): " + error.message, 'warning');
+                      }
+                  } else {
+                      // Insert new exam
+                      const { error } = await supabase.from('exams').insert(dbExam);
+                      if (error) {
+                          console.error("Failed to create exam in database:", error);
+                          addAlert("Database save gagal (tapi data lokal tersimpan): " + error.message, 'warning');
+                      }
+                  }
+              } catch (err) {
+                  console.error("Database operation error:", err);
               }
-          } else {
-              // Insert new exam
-              const { error } = await supabase.from('exams').insert(dbExam);
-              if (error) {
-                  console.error("Failed to create exam:", error);
-                  addAlert("Gagal membuat ujian di database: " + error.message, 'error');
-                  // Rollback optimistic insert
-                  setExams(prev => prev.filter(e => e.id !== updatedExam.id));
-              } else {
-                  await fetchData();
-              }
-          }
+          })();
       }
 
-      setView('TEACHER_DASHBOARD');
+      // Navigate immediately - don't wait for DB
+      setTimeout(() => {
+          setView('TEACHER_DASHBOARD');
+      }, 300); // Small delay for notification to show
   };
 
   const handleExamCreate = async (newExam: Exam) => {

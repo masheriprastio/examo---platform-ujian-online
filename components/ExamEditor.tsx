@@ -37,6 +37,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   const [questionToDelete, setQuestionToDelete] = useState<string | null>(null);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [uploadMode, setUploadMode] = useState<Record<string, 'url' | 'file'>>({});
+  const [isSaving, setIsSaving] = useState(false);
   
   const handleExamChange = (field: keyof Exam, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -156,8 +157,28 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
             </button>
           )}
           <button onClick={onCancel} className="px-4 py-2 text-gray-500 font-bold hover:bg-gray-50 rounded-xl transition text-sm">Batal</button>
-          <button onClick={() => onSave(formData)} className="px-6 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-black shadow-lg shadow-indigo-100 flex items-center gap-2 transition-all active:scale-95 text-sm">
-            <Save className="w-4 h-4" /> Simpan
+          <button 
+            onClick={async () => {
+              setIsSaving(true);
+              try {
+                await Promise.resolve(onSave(formData));
+              } finally {
+                setIsSaving(false);
+              }
+            }} 
+            disabled={isSaving}
+            className="px-6 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-black shadow-lg shadow-indigo-100 flex items-center gap-2 transition-all active:scale-95 text-sm disabled:opacity-70 disabled:cursor-not-allowed"
+          >
+            {isSaving ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Menyimpan...
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4" /> Simpan
+              </>
+            )}
           </button>
         </div>
       </header>
