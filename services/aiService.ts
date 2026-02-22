@@ -7,16 +7,21 @@ let GenAITypes: any = null;
 
 const getAiClient = async () => {
   if (!aiClient) {
-    const apiKey = process.env.API_KEY;
+    const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
     if (!apiKey) {
       console.warn("Gemini API Key is missing!");
       throw new Error("API Key Gemini tidak ditemukan. Pastikan konfigurasi environment benar.");
     }
     
-    // Dynamic import to avoid load-time side effects (like fetch polyfill issues)
-    const { GoogleGenAI, Type } = await import("@google/genai");
-    GenAITypes = Type;
-    aiClient = new GoogleGenAI({ apiKey });
+    try {
+      // Dynamic import to avoid load-time side effects (like fetch polyfill issues)
+      const { GoogleGenAI, Type } = await import("@google/genai");
+      GenAITypes = Type;
+      aiClient = new GoogleGenAI({ apiKey });
+    } catch (error) {
+      console.error("Failed to import @google/genai:", error);
+      throw new Error("Gagal memuat library AI. Silakan refresh halaman dan coba lagi.");
+    }
   }
   return { client: aiClient, Type: GenAITypes };
 };

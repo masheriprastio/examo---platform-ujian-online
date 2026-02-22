@@ -17,6 +17,15 @@ export default defineConfig(({ mode }) => {
         port: 3000,
         host: '0.0.0.0',
       },
+      build: {
+        rollupOptions: {
+          output: {
+            manualChunks: {
+              'google-genai': ['@google/genai']
+            }
+          }
+        }
+      },
       plugins: [react()],
       define: {
         // Explicitly bake environment variables into process.env for robust fallback
