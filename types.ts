@@ -46,6 +46,8 @@ export interface Exam {
   randomizeQuestions?: boolean;
   startDate?: string;
   endDate?: string;
+  examToken?: string; // Token untuk memulai ujian
+  requireToken?: boolean; // Apakah ujian memerlukan token
 }
 
 export interface ExamLog {

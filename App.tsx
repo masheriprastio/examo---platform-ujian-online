@@ -8,7 +8,8 @@ import {
   TrendingUp, CheckCircle, PlayCircle, FileText, History,
   Mail, Lock, Eye, EyeOff, ArrowRight, AlertTriangle, Database,
   Menu, X as CloseIcon, FileDown, Download, UserPlus, FileSpreadsheet,
-  XCircle, HelpCircle, RotateCcw, PenTool, Save, Plus, ChevronDown, Trash2, ShieldCheck
+  XCircle, HelpCircle, RotateCcw, PenTool, Save, Plus, ChevronDown, Trash2, ShieldCheck,
+  ArrowUpDown, ArrowUp, ArrowDown, Key, AlertCircle, RefreshCw, WifiOff
 } from 'lucide-react';
 import { useNotification } from './context/NotificationContext';
 
@@ -188,6 +189,20 @@ export default function App() {
 
   // New State for Create Exam Dropdown
   const [showCreateMenu, setShowCreateMenu] = useState(false);
+
+  // State for sorting riwayat pengerjaan
+  const [sortField, setSortField] = useState<'date' | 'score' | 'name'>('date');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+
+  // State for token modal
+  const [showTokenModal, setShowTokenModal] = useState(false);
+  const [tokenExam, setTokenExam] = useState<Exam | null>(null);
+  const [inputToken, setInputToken] = useState('');
+  const [tokenError, setTokenError] = useState<string | null>(null);
+
+  // State for server error handling
+  const [isOffline, setIsOffline] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
 
   // Auto Logout Logic (Students Only)
   useEffect(() => {
@@ -427,6 +442,77 @@ export default function App() {
     }
   };
 
+  // Generate random token
+  const generateExamToken = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let token = '';
+    for (let i = 0; i < 6; i++) {
+      token += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return token;
+  };
+
+  // Function to handle exam start with token check
+  const handleStartExamWithToken = (exam: Exam) => {
+    // Check if exam requires token
+    if (exam.requireToken && exam.examToken) {
+      setTokenExam(exam);
+      setShowTokenModal(true);
+      setInputToken('');
+      setTokenError(null);
+    } else {
+      handleStartExam(exam);
+    }
+  };
+
+  // Verify token and start exam
+  const verifyTokenAndStartExam = () => {
+    if (!tokenExam) return;
+    
+    if (inputToken.toUpperCase() === tokenExam.examToken?.toUpperCase()) {
+      setShowTokenModal(false);
+      handleStartExam(tokenExam);
+      setTokenExam(null);
+      setInputToken('');
+      setTokenError(null);
+    } else {
+      setTokenError('Token salah! Pastikan Anda memasukkan token yang benar.');
+    }
+  };
+
+  // Sorting function for results
+  const getSortedResults = (resultsToSort: ExamResult[]) => {
+    return [...resultsToSort].sort((a, b) => {
+      let comparison = 0;
+      
+      switch (sortField) {
+        case 'date':
+          comparison = new Date(a.submittedAt || a.startedAt).getTime() - new Date(b.submittedAt || b.startedAt).getTime();
+          break;
+        case 'score':
+          comparison = a.score - b.score;
+          break;
+        case 'name':
+          comparison = a.studentName.localeCompare(b.studentName);
+          break;
+        default:
+          comparison = 0;
+      }
+      
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+  };
+
+  // Toggle sort direction
+  const toggleSort = (field: 'date' | 'score' | 'name') => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('desc');
+    }
+  };
+
   const handleStartExam = (exam: Exam) => {
     const existing = results.find(r => r.examId === exam.id && r.studentId === currentUser?.id && r.status === 'in_progress');
     if (!existing) {
@@ -451,20 +537,27 @@ export default function App() {
       // Optimistic Update
       setResults(prev => [newResult, ...prev]);
 
-      // DB Insert
+      // DB Insert with error handling (don't logout on error)
       if (isSupabaseConfigured && supabase) {
           supabase.from('exam_results').insert({
-              id: newResult.id, // Use generated ID or let DB generate? If DB generates, we lose sync. Let's use ours or UUID.
+              id: newResult.id,
               exam_id: exam.id,
               student_id: currentUser!.id,
-              student_name: currentUser!.name, // Denormalize for easier CSV/PDF export
+              student_name: currentUser!.name,
               status: 'in_progress',
               started_at: newResult.startedAt,
               total_questions: newResult.totalQuestions,
               answers: {},
               logs: []
           }).then(({ error }) => {
-              if (error) console.error("Failed to start exam in DB:", error);
+              if (error) {
+                console.error("Failed to start exam in DB:", error);
+                // Check if it's a server/connection error
+                if (error.code === 'PGRST301' || error.code === '5XX' || error.message?.includes('network')) {
+                  setIsOffline(true);
+                  addAlert('Koneksi ke server terputus. Data akan disimpan secara lokal.', 'error');
+                }
+              }
           });
       }
     }
@@ -976,8 +1069,73 @@ export default function App() {
     </div>
   );
 
+  // Token Modal Component
+  const TokenModal = () => (
+    <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6 animate-in fade-in" onClick={() => { setShowTokenModal(false); setTokenExam(null); }}>
+      <div className="bg-white w-full max-w-md rounded-[30px] shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="p-8 border-b border-gray-100 bg-gradient-to-br from-indigo-600 to-indigo-700 text-white">
+          <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <Key className="w-8 h-8 text-white" />
+          </div>
+          <h3 className="text-2xl font-black text-center tracking-tight">Token Diperlukan</h3>
+          <p className="text-indigo-100 text-center mt-2 text-sm">Ujian ini memerlukan token untuk memulai</p>
+        </div>
+        <div className="p-8">
+          {tokenError && (
+            <div className="bg-red-50 border border-red-100 text-red-600 px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-2 mb-4">
+              <AlertCircle className="w-4 h-4" />
+              {tokenError}
+            </div>
+          )}
+          <div className="mb-6">
+            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Masukkan Token</label>
+            <input
+              type="text"
+              value={inputToken}
+              onChange={(e) => { setInputToken(e.target.value.toUpperCase()); setTokenError(null); }}
+              placeholder="XXXXXX"
+              maxLength={6}
+              className="w-full px-6 py-4 rounded-2xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold text-center text-2xl tracking-[0.5em] text-gray-900 uppercase"
+              autoFocus
+            />
+          </div>
+          <div className="flex gap-3">
+            <button 
+              onClick={() => { setShowTokenModal(false); setTokenExam(null); }} 
+              className="flex-1 py-4 text-gray-400 font-black hover:text-gray-600 transition"
+            >
+              Batal
+            </button>
+            <button 
+              onClick={verifyTokenAndStartExam}
+              disabled={inputToken.length < 4}
+              className="flex-1 bg-indigo-600 text-white py-4 rounded-2xl font-black hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Verifikasi
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Offline Indicator Component
+  const OfflineIndicator = () => isOffline ? (
+    <div className="fixed top-0 left-0 right-0 bg-red-600 text-white py-3 px-6 z-[200] flex items-center justify-center gap-3 font-bold text-sm">
+      <WifiOff className="w-5 h-5" />
+      Mode Offline - Data akan disimpan secara lokal
+      <button onClick={() => { setIsOffline(false); fetchData(); }} className="ml-4 bg-white text-red-600 px-3 py-1 rounded-lg text-xs font-black">
+        Coba Koneksi Ulang
+      </button>
+    </div>
+  ) : null;
+
   return (
     <div className="flex bg-[#fcfdfe] min-h-screen font-sans relative">
+      <OfflineIndicator />
+
+      {/* Token Modal */}
+      {showTokenModal && <TokenModal />}
 
       <Sidebar user={currentUser!} activeView={view} isOpen={isSidebarOpen} onNavigate={setView} onLogout={() => setView('LOGIN')} onClose={() => setIsSidebarOpen(false)} />
       <div className="flex-1 flex flex-col h-screen overflow-hidden text-left">
@@ -1387,6 +1545,28 @@ export default function App() {
               <div className="max-w-5xl mx-auto animate-in fade-in">
                 <h1 className="text-3xl font-black text-gray-900 mb-8">Riwayat Ujian Saya</h1>
                 
+                {/* Sorting Controls */}
+                <div className="flex gap-2 mb-4">
+                  <button
+                    onClick={() => toggleSort('date')}
+                    className={`px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 transition-all ${sortField === 'date' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                  >
+                    Tanggal {sortField === 'date' && (sortDirection === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />)}
+                  </button>
+                  <button
+                    onClick={() => toggleSort('score')}
+                    className={`px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 transition-all ${sortField === 'score' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                  >
+                    Nilai {sortField === 'score' && (sortDirection === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />)}
+                  </button>
+                  <button
+                    onClick={() => toggleSort('name')}
+                    className={`px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 transition-all ${sortField === 'name' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                  >
+                    Nama Ujian {sortField === 'name' && (sortDirection === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />)}
+                  </button>
+                </div>
+                
                 <div className="bg-white rounded-[20px] shadow-sm border border-gray-200 overflow-hidden">
                   <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse min-w-[700px]">
@@ -1400,7 +1580,7 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                      {results.filter(r => r.studentId === currentUser?.id && r.status === 'completed').map(r => {
+                      {getSortedResults(results.filter(r => r.studentId === currentUser?.id && r.status === 'completed')).map(r => {
                         const exam = exams.find(e => e.id === r.examId);
                         const isPassed = r.score >= 75;
                         return (
@@ -1617,11 +1797,12 @@ export default function App() {
 
                         <div className="mt-auto pt-6 border-t border-gray-50">
                             <button 
-                                onClick={() => !isDisabled && handleStartExam(e)} 
+                                onClick={() => !isDisabled && handleStartExamWithToken(e)} 
                                 disabled={isDisabled}
                                 className={`w-full font-black py-4 rounded-[20px] shadow-xl transition-all flex items-center justify-center gap-3 active:scale-95 ${btnClass} ${isDisabled ? 'shadow-none active:scale-100' : ''}`}
                             >
                                 {btnText} {btnIcon}
+                                {e.requireToken && !isDisabled && <Key className="w-4 h-4 ml-1" />}
                             </button>
                         </div>
                       </div>
