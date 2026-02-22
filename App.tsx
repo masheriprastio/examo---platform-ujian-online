@@ -236,18 +236,49 @@ export default function App() {
   const [isOffline, setIsOffline] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
-  // Auto Logout Logic (Students Only)
+  // Session Timeout & Warning State
+  const [showTimeoutWarning, setShowTimeoutWarning] = useState(false);
+  const [timeoutWarningSeconds, setTimeoutWarningSeconds] = useState(0);
+  const SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+  const WARNING_BEFORE_LOGOUT_MS = 60 * 1000; // Show warning 1 minute before logout
+
+  // Auto Logout Logic (Students Only) - 5 minutes with warning at 4 minutes
   useEffect(() => {
-    let timeout: NodeJS.Timeout;
+    let mainTimeout: NodeJS.Timeout;
+    let warningTimeout: NodeJS.Timeout;
+    let warningCountdownInterval: NodeJS.Timeout;
 
     const resetTimer = () => {
       if (currentUser && currentUser.role === 'student') {
-        clearTimeout(timeout);
-        timeout = setTimeout(() => {
+        clearTimeout(mainTimeout);
+        clearTimeout(warningTimeout);
+        clearInterval(warningCountdownInterval);
+        setShowTimeoutWarning(false);
+
+        // Warning at 4 minutes (1 minute before logout)
+        warningTimeout = setTimeout(() => {
+          setShowTimeoutWarning(true);
+          setTimeoutWarningSeconds(60);
+
+          // Countdown from 60 to 0
+          warningCountdownInterval = setInterval(() => {
+            setTimeoutWarningSeconds(prev => {
+              if (prev <= 1) {
+                clearInterval(warningCountdownInterval);
+                return 0;
+              }
+              return prev - 1;
+            });
+          }, 1000);
+        }, SESSION_TIMEOUT_MS - WARNING_BEFORE_LOGOUT_MS);
+
+        // Logout at 5 minutes
+        mainTimeout = setTimeout(() => {
           setView('LOGIN');
           setCurrentUser(null);
-          addAlert('Sesi Anda telah berakhir karena tidak ada aktivitas selama 3 menit.', 'info');
-        }, 3 * 60 * 1000); // 3 minutes
+          localStorage.removeItem('examo_session');
+          addAlert('Sesi Anda telah berakhir karena tidak ada aktivitas selama 5 menit.', 'info', 'session-timeout');
+        }, SESSION_TIMEOUT_MS);
       }
     };
 
@@ -258,10 +289,12 @@ export default function App() {
     }
 
     return () => {
-      clearTimeout(timeout);
+      clearTimeout(mainTimeout);
+      clearTimeout(warningTimeout);
+      clearInterval(warningCountdownInterval);
       events.forEach(event => document.removeEventListener(event, resetTimer));
     };
-  }, [currentUser]);
+  }, [currentUser, addAlert]);
 
     // Load Data from Supabase. Returns fetched exams and results for callers to act on.
     const fetchData = async () => {
@@ -1192,9 +1225,46 @@ export default function App() {
     </div>
   ) : null;
 
+  // Session Timeout Warning Modal
+  const SessionTimeoutWarning = () => showTimeoutWarning ? (
+    <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[500] flex items-center justify-center p-6 animate-in fade-in">
+      <div className="bg-white w-full max-w-md rounded-[30px] shadow-2xl overflow-hidden animate-in zoom-in-95">
+        <div className="p-8 border-b border-gray-100 bg-gradient-to-br from-amber-50 to-orange-50">
+          <div className="w-16 h-16 bg-orange-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <Clock className="w-8 h-8 text-orange-600" />
+          </div>
+          <h3 className="text-2xl font-black text-center text-gray-900 tracking-tight">Sesi Akan Berakhir</h3>
+          <p className="text-gray-500 text-center mt-2 text-sm">Anda tidak aktif selama beberapa saat.</p>
+        </div>
+        <div className="p-8">
+          <div className="bg-orange-50 border border-orange-100 rounded-2xl p-6 mb-6 text-center">
+            <p className="text-xs font-black text-orange-600 uppercase tracking-widest mb-2">Waktu tersisa</p>
+            <p className="text-5xl font-black text-orange-600 tracking-tighter">{timeoutWarningSeconds}</p>
+            <p className="text-xs text-orange-500 mt-2">detik</p>
+          </div>
+          <p className="text-sm text-gray-600 text-center mb-6 font-medium">
+            Sistem akan logout otomatis jika tidak ada aktivitas. Klik tombol di bawah untuk melanjutkan sesi.
+          </p>
+          <button
+            onClick={() => {
+              setShowTimeoutWarning(false);
+              setTimeoutWarningSeconds(0);
+            }}
+            className="w-full bg-orange-600 text-white py-4 rounded-2xl font-black hover:bg-orange-700 transition-all shadow-lg shadow-orange-100"
+          >
+            Lanjutkan Sesi
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className="flex bg-[#fcfdfe] min-h-screen font-sans relative">
       <OfflineIndicator />
+
+      {/* Session Timeout Warning */}
+      {<SessionTimeoutWarning />}
 
       {/* Token Modal */}
       {showTokenModal && <TokenModal />}

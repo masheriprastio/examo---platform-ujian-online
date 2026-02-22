@@ -12,6 +12,7 @@
   "dependencies": {
     "@google/genai": "^1.41.0",
     "@supabase/supabase-js": "^2.97.0",
+    "idle-js": "^1.2.0",
     "jspdf": "2.5.1",
     "jspdf-autotable": "3.5.25",
     "lucide-react": "^0.574.0",
