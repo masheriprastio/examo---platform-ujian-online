@@ -1549,7 +1549,11 @@ export default function App() {
                 userName={currentUser!.name} 
                 onAutosave={() => {}} 
                 onFinish={() => {}} 
-                onExit={() => setView('EXAM_EDITOR')}
+                onExit={() => {
+                  // Restore the edited exam when exiting preview
+                  setEditingExam(activeExam);
+                  setView('EXAM_EDITOR');
+                }}
                 isPreview={true}
               />
             ) : (
