@@ -187,12 +187,12 @@ export default function App() {
   // New State for Create Exam Dropdown
   const [showCreateMenu, setShowCreateMenu] = useState(false);
 
-  // Auto Logout Logic
+  // Auto Logout Logic (Students Only)
   useEffect(() => {
     let timeout: NodeJS.Timeout;
 
     const resetTimer = () => {
-      if (currentUser) {
+      if (currentUser && currentUser.role === 'student') {
         clearTimeout(timeout);
         timeout = setTimeout(() => {
           setView('LOGIN');
@@ -203,7 +203,7 @@ export default function App() {
     };
 
     const events = ['mousedown', 'keydown', 'scroll', 'touchstart'];
-    if (currentUser) {
+    if (currentUser && currentUser.role === 'student') {
       resetTimer();
       events.forEach(event => document.addEventListener(event, resetTimer));
     }
@@ -291,6 +291,57 @@ export default function App() {
         }
      };
      fetchStudents();
+  }, [currentUser]);
+
+  // Realtime Violation Monitoring for Teacher
+  useEffect(() => {
+    if (currentUser?.role !== 'teacher' || !isSupabaseConfigured || !supabase) return;
+
+    // Request Notification Permission
+    if (Notification.permission !== 'granted') {
+      Notification.requestPermission();
+    }
+
+    const subscription = supabase
+      .channel('exam-violations')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'exam_results' },
+        (payload) => {
+          const newRecord = payload.new as any;
+          const oldRecord = payload.old as any;
+          
+          // Check if logs changed and added a tab_blur
+          // Note: payload.old.logs might be empty/null, need careful check
+          // Since we can't easily deep compare without lodash, let's just check length if array
+          // or strictly if new log is tab_blur.
+          
+          if (newRecord.logs && Array.isArray(newRecord.logs)) {
+             const newLogs = newRecord.logs as ExamLog[];
+             const oldLogs = (oldRecord.logs || []) as ExamLog[];
+
+             if (newLogs.length > oldLogs.length) {
+                const latestLog = newLogs[newLogs.length - 1];
+                if (latestLog.event === 'tab_blur') {
+                   // Show Notification
+                   if (Notification.permission === 'granted') {
+                      new Notification('Peringatan Pelanggaran Ujian', {
+                         body: `Siswa ${newRecord.student_name || 'Unknown'} terdeteksi keluar dari tab ujian!`,
+                         icon: '/vite.svg' // Placeholder icon
+                      });
+                   }
+                   // Optionally update local state to reflect change immediately
+                   setResults(prev => prev.map(r => r.id === newRecord.id ? { ...r, ...newRecord, studentName: r.studentName } : r));
+                }
+             }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
   }, [currentUser]);
 
 
@@ -720,16 +771,31 @@ export default function App() {
       
       doc.setFontSize(10);
       doc.text(`Nama: ${result.studentName}`, 14, yPos);
-      doc.text(`Waktu: ${formatDate(result.submittedAt!)}`, 120, yPos);
+      doc.text(`Waktu: ${result.submittedAt ? formatDate(result.submittedAt) : '-' }`, 120, yPos);
       yPos += 6;
       doc.text(`Ujian: ${exam.title}`, 14, yPos);
       doc.text(`Skor: ${result.score}`, 120, yPos);
       
-      // KKM Indicator
-      if (result.score < 75) {
+      // KKM Indicator & Violation Check
+      const violationCount = result.logs.filter(l => l.event === 'tab_blur').length;
+      
+      if (result.status === 'disqualified') {
+        doc.setTextColor(220, 38, 38); // Red
+        doc.text(`(DIDISKUALIFIKASI / DINONAKTIFKAN)`, 140, yPos);
+        doc.setTextColor(0, 0, 0); // Reset
+      } else if (result.score < 75) {
         doc.setTextColor(220, 38, 38); // Red
         doc.text(`(Di Bawah KKM)`, 140, yPos);
         doc.setTextColor(0, 0, 0); // Reset
+      }
+
+      if (violationCount > 0) {
+        yPos += 6;
+        doc.setTextColor(220, 38, 38);
+        doc.setFontSize(9);
+        doc.text(`Catatan: Terdeteksi ${violationCount}x pelanggaran (keluar tab ujian).`, 14, yPos);
+        doc.setTextColor(0, 0, 0);
+        doc.setFontSize(10);
       }
       
       yPos += 10;
@@ -793,12 +859,32 @@ export default function App() {
   };
 
   const exportFullAnswersToPDF = () => {
-    const completedResults = results.filter(r => r.status === 'completed');
+    const completedResults = results.filter(r => r.status === 'completed' || r.status === 'disqualified');
     if (completedResults.length === 0) {
       alert("Belum ada data ujian yang selesai.");
       return;
     }
     exportAnswersToPDF(completedResults, 'Rekap_Jawaban_Lengkap.pdf');
+  };
+
+  const handleDisqualify = async (resultId: string) => {
+    if (!confirm("Apakah Anda yakin ingin menonaktifkan ujian siswa ini? Siswa tidak dapat melanjutkan ujian dan status akan menjadi didiskualifikasi.")) return;
+
+    // Optimistic Update
+    setResults(prev => prev.map(r => r.id === resultId ? { ...r, status: 'disqualified', score: 0 } : r));
+
+    // DB Update
+    if (isSupabaseConfigured && supabase) {
+        const { error } = await supabase.from('exam_results').update({
+            status: 'disqualified',
+            score: 0
+        }).eq('id', resultId);
+        
+        if (error) {
+            console.error("Failed to disqualify:", error);
+            alert("Gagal update status di database.");
+        }
+    }
   };
 
   if (view === 'LOGIN') return <LoginView onLogin={handleLogin} />;
@@ -881,8 +967,12 @@ export default function App() {
                         </thead>
                         <tbody className="divide-y divide-gray-50">
                           {results.length === 0 ? <tr><td colSpan={4} className="py-20 text-center text-gray-400 font-medium italic">Belum ada data pengerjaan.</td></tr> : results.map(r => (
-                            <tr key={r.id} className="hover:bg-gray-50 transition-colors">
-                              <td className="px-10 py-8 font-bold text-gray-900">{r.studentName}<p className="text-[10px] font-black text-gray-300 uppercase mt-1">{formatDate(r.startedAt)}</p></td>
+                            <tr key={r.id} className={`hover:bg-gray-50 transition-colors ${r.status === 'disqualified' ? 'bg-red-50/30' : ''}`}>
+                              <td className="px-10 py-8 font-bold text-gray-900">
+                                {r.studentName}
+                                <p className="text-[10px] font-black text-gray-300 uppercase mt-1">{formatDate(r.startedAt)}</p>
+                                {r.status === 'disqualified' && <span className="inline-block mt-2 px-2 py-0.5 bg-red-600 text-white text-[10px] font-bold rounded">DISKUALIFIKASI</span>}
+                              </td>
                               <td className="px-10 py-8 text-gray-500 font-medium">{exams.find(e => e.id === r.examId)?.title}</td>
                               <td className="px-10 py-8">
                                 <div className="flex items-center justify-center gap-2">
@@ -893,9 +983,23 @@ export default function App() {
                               </td>
                               <td className="px-10 py-8 text-right">
                                 <div className="flex items-center justify-end gap-4">
-                                  <span className={`font-black text-3xl tracking-tighter ${r.status === 'completed' && r.score < 75 ? 'text-red-500' : 'text-indigo-600'}`}>
-                                    {r.status === 'completed' ? r.score : '-'}
-                                  </span>
+                                  <div className="text-right">
+                                    <span className={`font-black text-3xl tracking-tighter block ${r.status === 'completed' && r.score < 75 ? 'text-red-500' : r.status === 'disqualified' ? 'text-gray-400 line-through' : 'text-indigo-600'}`}>
+                                      {r.status === 'completed' || r.status === 'disqualified' ? r.score : '-'}
+                                    </span>
+                                    {r.logs.filter(l => l.event === 'tab_blur').length > 0 && (
+                                        <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-1 rounded-md mt-1 inline-block">
+                                            {r.logs.filter(l => l.event === 'tab_blur').length}x Pelanggaran
+                                        </span>
+                                    )}
+                                  </div>
+                                  
+                                  {r.status !== 'disqualified' && (
+                                    <button onClick={() => handleDisqualify(r.id)} className="p-3 bg-red-50 text-red-400 hover:text-white hover:bg-red-500 rounded-xl transition-all" title="Nonaktifkan / Diskualifikasi">
+                                        <CloseIcon className="w-5 h-5" />
+                                    </button>
+                                  )}
+                                  
                                   <button onClick={() => exportAnswersToPDF([r], `Hasil_${r.studentName.replace(/\s+/g, '_')}.pdf`)} className="p-3 bg-gray-50 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Cetak Hasil Siswa Ini">
                                     <FileDown className="w-5 h-5" />
                                   </button>

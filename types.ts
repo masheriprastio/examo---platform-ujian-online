@@ -60,7 +60,7 @@ export interface ExamResult {
   studentId: string;
   studentName: string;
   score: number;
-  status: 'in_progress' | 'completed';
+  status: 'in_progress' | 'completed' | 'disqualified';
   totalPointsPossible: number;
   pointsObtained: number;
   totalQuestions: number;
