@@ -8,6 +8,7 @@ export interface User {
   grade?: string;
   school?: string;
   nis?: string;
+  session_token?: string;
 }
 
 export type QuestionType = 'mcq' | 'true_false' | 'short_answer' | 'essay' | 'multiple_select';
@@ -16,7 +17,6 @@ export interface Question {
   id: string;
   type: QuestionType;
   text: string;
-  textAlign?: 'left' | 'center' | 'right'; // Text alignment for question
   options?: string[];
   correctAnswerIndex?: number;
   correctAnswerIndices?: number[];
@@ -28,8 +28,6 @@ export interface Question {
   topic?: string;
   difficulty?: 'easy' | 'medium' | 'hard';
   randomizeOptions?: boolean;
-  createdAt?: string; // Timestamp ketika soal dibuat
-  updatedAt?: string; // Timestamp terakhir soal diperbarui
   attachment?: {
     type: 'image' | 'video' | 'audio';
     url: string;
@@ -46,7 +44,6 @@ export interface Exam {
   category: string;
   status: 'draft' | 'published';
   createdAt: string;
-  updatedAt?: string; // Waktu perubahan terakhir
   randomizeQuestions?: boolean;
   startDate?: string;
   endDate?: string;
@@ -78,7 +75,6 @@ export interface ExamResult {
   answers: Record<string, any>;
   logs: ExamLog[];
   violation_alert?: boolean;
-  questions?: Question[]; // Store shuffled questions per session
 }
 
 export interface Material {

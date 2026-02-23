@@ -9,7 +9,7 @@ import {
   Mail, Lock, Eye, EyeOff, ArrowRight, AlertTriangle, Database,
   Menu, X as CloseIcon, FileDown, Download, UserPlus, FileSpreadsheet,
   XCircle, HelpCircle, RotateCcw, PenTool, Save, Plus, ChevronDown, Trash2, ShieldCheck,
-  ArrowUpDown, ArrowUp, ArrowDown, Key, AlertCircle, RefreshCw, WifiOff, Shield, Wifi, MapPin, Activity
+  ArrowUpDown, ArrowUp, ArrowDown, Key, AlertCircle, RefreshCw, WifiOff
 } from 'lucide-react';
 import { useNotification } from './context/NotificationContext';
 
@@ -20,10 +20,7 @@ import QuestionBank from './components/QuestionBank';
 import StudentManager from './components/StudentManager';
 import MaterialManager from './components/MaterialManager';
 import StudentMaterialList from './components/StudentMaterialList';
-import StudentExamHistory from './components/StudentExamHistory';
-import UserActivityManager from './components/UserActivityManager';
 import { MaterialService, Material } from './services/MaterialService';
-import UserActivityService from './services/UserActivityService';
 
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -170,12 +167,6 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Device & Session Tracking State
-  const [currentDeviceId, setCurrentDeviceId] = useState<string>('');
-  const [currentIP, setCurrentIP] = useState<string>('');
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  const [deviceLoginError, setDeviceLoginError] = useState<string | null>(null);
-
   const { addAlert } = useNotification();
 
   // Notification helper (uses NotificationContext which handles dedupe by key)
@@ -191,28 +182,10 @@ export default function App() {
         const sess = JSON.parse(raw);
         if (sess?.user) setCurrentUser(sess.user);
         if (sess?.view) setView(sess.view as AppView);
-        if (sess?.sessionId) setCurrentSessionId(sess.sessionId);
       }
     } catch (err) {
       console.error('Failed to restore session', err);
     }
-  }, []);
-
-  // Initialize device ID and get IP on app load
-  useEffect(() => {
-    const initializeDevice = async () => {
-      const deviceId = UserActivityService.generateDeviceId();
-      setCurrentDeviceId(deviceId);
-      
-      const ip = await UserActivityService.getClientIP();
-      setCurrentIP(ip);
-      
-      // Store in session storage for reuse
-      sessionStorage.setItem('examo_device_id', deviceId);
-      sessionStorage.setItem('examo_current_ip', ip);
-    };
-
-    initializeDevice();
   }, []);
 
   // Persist session when user/view changes
@@ -262,11 +235,6 @@ export default function App() {
   // State for server error handling
   const [isOffline, setIsOffline] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
-
-  // State for modals
-  const [showStudentExamHistory, setShowStudentExamHistory] = useState(false);
-  const [selectedStudentForHistory, setSelectedStudentForHistory] = useState<{ id: string; name: string } | null>(null);
-  const [showUserActivityManager, setShowUserActivityManager] = useState(false);
 
   // Session Timeout & Warning State
   const [showTimeoutWarning, setShowTimeoutWarning] = useState(false);
@@ -333,19 +301,14 @@ export default function App() {
       if (!isSupabaseConfigured || !supabase) return { exams: null as any, results: null as any };
 
       try {
-        // ✨ Optimize: Fetch exams and results in parallel (faster)
-        const [examsResponse, resultsResponse] = await Promise.all([
-          supabase.from('exams').select('*').order('created_at', { ascending: false }),
-          supabase.from('exam_results').select('*')
-        ]);
-        
+        // 1. Fetch Exams
+        const { data: examsData, error: examsError } = await supabase.from('exams').select('*').order('created_at', { ascending: false });
         let mappedExams: Exam[] = [];
-        if (examsResponse.data && !examsResponse.error) {
-          mappedExams = examsResponse.data.map((e: any) => ({
+        if (examsData && !examsError) {
+          mappedExams = examsData.map((e: any) => ({
             ...e,
             durationMinutes: e.duration_minutes,
             createdAt: e.created_at,
-            updatedAt: e.updated_at,
             startDate: e.start_date,
             endDate: e.end_date
           }));
@@ -353,9 +316,11 @@ export default function App() {
           setBankQuestions(mappedExams.flatMap(e => e.questions || []));
         }
 
+        // 2. Fetch Results
+        const { data: resultsData, error: resultsError } = await supabase.from('exam_results').select('*');
         let mappedResults: ExamResult[] = [];
-        if (resultsResponse.data && !resultsResponse.error) {
-          mappedResults = resultsResponse.data.map((r: any) => ({
+        if (resultsData && !resultsError) {
+          mappedResults = resultsData.map((r: any) => ({
              ...r,
              examId: r.exam_id,
              studentId: r.student_id,
@@ -383,6 +348,34 @@ export default function App() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Single Session Enforcement (One IP/Device Logic)
+  useEffect(() => {
+    if (!currentUser || !isSupabaseConfigured || !supabase) return;
+
+    // Realtime listener for session token changes
+    const channel = supabase
+      .channel(`user-session-${currentUser.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${currentUser.id}` },
+        (payload: any) => {
+          const newUser = payload.new;
+          // If the DB token changes and doesn't match our current token -> kicked out
+          if (newUser.session_token && newUser.session_token !== currentUser.session_token) {
+            alert("Sesi Anda telah berakhir karena akun ini login di perangkat lain.");
+            setCurrentUser(null);
+            setView('LOGIN');
+            localStorage.removeItem('examo_session');
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser]);
 
   // Fetch Data on view change (specifically when switching to Dashboard)
   useEffect(() => {
@@ -486,10 +479,13 @@ export default function App() {
                } else if (latestLog && latestLog.event === 'tab_blur') {
                   notify(`Peringatan: Siswa ${newRecord.student_name} keluar dari tab ujian!`, 'error', `tabblur:${newRecord.id}`);
                   if (Notification.permission === 'granted') {
-                     new Notification('Pelanggaran!', { body: `Siswa ${newRecord.student_name} keluar tab!`, icon: '/vite.svg' });
+                     new Notification('Pelanggaran Ujian', { body: `Siswa ${newRecord.student_name} terdeteksi keluar tab!`, icon: '/vite.svg' });
                   }
                } else if (latestLog && latestLog.event === 'submit') {
                   notify(`Siswa ${newRecord.student_name} telah mengirimkan ujian.`, 'success', `submit:${newRecord.id}`);
+                  if (Notification.permission === 'granted') {
+                     new Notification('Ujian Selesai', { body: `Siswa ${newRecord.student_name} telah mengirimkan ujian.`, icon: '/vite.svg' });
+                  }
                }
             }
           }
@@ -509,33 +505,6 @@ export default function App() {
   const handleLogin = async (role: 'teacher' | 'student', email: string, password?: string): Promise<string | null> => {
     const pwd = password || 'password';
 
-    // For real Supabase: validate device/IP login
-    if (isSupabaseConfigured && supabase && role === 'student') {
-      // Check if user can login from this device/IP
-      // First, fetch the user to get their ID
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('id')
-        .or(`email.eq.${email},nis.eq.${email}`)
-        .eq('role', role)
-        .single();
-
-      if (userError || !userData) return `${role === 'teacher' ? 'Guru' : 'Siswa'} tidak ditemukan.`;
-
-      // Validate device/IP
-      const validation = await UserActivityService.validateDeviceLogin(
-        userData.id,
-        email,
-        currentDeviceId,
-        currentIP
-      );
-
-      if (!validation.allowed) {
-        setDeviceLoginError(validation.message || 'Device login ditolak');
-        return validation.message || 'Device login ditolak';
-      }
-    }
-
     if (isSupabaseConfigured && supabase) {
         // Authenticate via Database
         const { data, error } = await supabase
@@ -552,40 +521,26 @@ export default function App() {
             return "Password salah.";
         }
 
-        // Create session and track login
-        const sessionId = await UserActivityService.createSession(
-          data.id,
-          data.email,
-          currentDeviceId,
-          currentIP
-        );
+        // Generate and update Session Token (Single Device Enforcement)
+        const sessionToken = generateUUID();
+        const { error: tokenError } = await supabase
+            .from('users')
+            .update({ session_token: sessionToken })
+            .eq('id', data.id);
 
-        if (sessionId) {
-          setCurrentSessionId(sessionId);
-          localStorage.setItem('examo_session', JSON.stringify({ 
-            user: data, 
-            view: role === 'teacher' ? 'TEACHER_DASHBOARD' : 'STUDENT_DASHBOARD',
-            sessionId,
-            deviceId: currentDeviceId,
-            ip: currentIP
-          }));
+        if (tokenError) {
+            console.error("Failed to set session token:", tokenError);
         }
 
-        // Log login activity
-        await UserActivityService.logActivity(
-          data.id,
-          data.email,
-          'login',
-          `Login from ${role}`,
-          currentIP,
-          currentDeviceId,
-          undefined,
-          sessionId || undefined
-        );
+        // Request Notification Permission immediately upon successful login (especially for teachers)
+        if (Notification.permission !== 'granted') {
+             Notification.requestPermission();
+        }
 
-        setCurrentUser(data);
+        const userWithToken = { ...data, session_token: sessionToken };
+        setCurrentUser(userWithToken);
+
         setView(role === 'teacher' ? 'TEACHER_DASHBOARD' : 'STUDENT_DASHBOARD');
-        
         // Fetch fresh data and notify existing violations to teacher
         const fetched = await fetchData();
         if (role === 'teacher' && fetched.results) {
@@ -595,6 +550,7 @@ export default function App() {
                 ? `PELANGGARAN BERAT: Siswa ${r.studentName} didiskualifikasikan!`
                 : `Peringatan: Siswa ${r.studentName} terdeteksi keluar tab ujian.`;
               notify(msg, 'error', `violation:${r.id}`);
+              // mark in state so UI shows highlight
               setResults(prev => prev.map(p => p.id === r.id ? { ...p, violation_alert: true } : p));
             }
           });
@@ -605,15 +561,6 @@ export default function App() {
         // Fallback to Mock
         if (role === 'teacher') {
             if (email === MOCK_TEACHER.email && pwd === 'password') {
-                const mockSessionId = generateUUID();
-                setCurrentSessionId(mockSessionId);
-                localStorage.setItem('examo_session', JSON.stringify({ 
-                  user: MOCK_TEACHER, 
-                  view: 'TEACHER_DASHBOARD',
-                  sessionId: mockSessionId,
-                  deviceId: currentDeviceId,
-                  ip: currentIP
-                }));
                 setCurrentUser(MOCK_TEACHER);
                 setView('TEACHER_DASHBOARD');
                 // For mock mode, check any existing results in state and notify
@@ -624,8 +571,7 @@ export default function App() {
                     setResults(prev => prev.map(p => p.id === r.id ? { ...p, violation_alert: true } : p));
                   }
                 });
-                return null;
-            }
+                return null; }
             return "Guru tidak ditemukan.";
         } else {
             const found = students.find(s => s.email === email || s.nis === email);
@@ -633,18 +579,7 @@ export default function App() {
                 if (found.password && found.password !== pwd) {
                     return "Password salah.";
                 }
-                const mockSessionId = generateUUID();
-                setCurrentSessionId(mockSessionId);
-                localStorage.setItem('examo_session', JSON.stringify({ 
-                  user: found, 
-                  view: 'STUDENT_DASHBOARD',
-                  sessionId: mockSessionId,
-                  deviceId: currentDeviceId,
-                  ip: currentIP
-                }));
-                setCurrentUser(found); 
-                setView('STUDENT_DASHBOARD'); 
-                return null;
+                setCurrentUser(found); setView('STUDENT_DASHBOARD'); return null;
             }
             return "Siswa tidak terdaftar.";
         }
@@ -912,33 +847,6 @@ export default function App() {
     }
   };
 
-  const handleDeleteExam = async (examId: string) => {
-    // 1. Optimistic Update
-    const originalExams = [...exams];
-    setExams(prev => prev.filter(e => e.id !== examId));
-
-    // 2. DB Delete
-    if (isSupabaseConfigured && supabase) {
-      // Check if it's a temp ID (not in DB yet)
-      if (examId.startsWith('temp-') || examId.startsWith('exam-')) {
-          // If it was just added and hasn't synced, we just removed it from state. Good.
-          return;
-      }
-
-      const { error } = await supabase.from('exams').delete().eq('id', examId);
-      if (error) {
-        console.error("Failed to delete exam:", error);
-        addAlert("Gagal menghapus ujian dari database: " + error.message, 'error');
-        // Rollback
-        setExams(originalExams);
-      } else {
-        addAlert("Ujian berhasil dihapus", 'success');
-      }
-    } else {
-      addAlert("Ujian berhasil dihapus", 'success');
-    }
-  };
-
   // Wrapper for BULK Student Updates (e.g., Import)
   const handleStudentUpdate = async (newStudents: User[]) => {
       // This is primarily for Excel Import which replaces/appends the list
@@ -986,37 +894,30 @@ export default function App() {
       // Check if exam exists in local state
       const exists = exams.some(e => e.id === updatedExam.id);
 
-      // Set updated timestamp
-      const examWithTimestamp: Exam = {
-          ...updatedExam,
-          updatedAt: new Date().toISOString()
-      };
-
       // Optimistic update - immediate UI update
       if (exists) {
-          setExams(prev => prev.map(e => e.id === examWithTimestamp.id ? examWithTimestamp : e));
+          setExams(prev => prev.map(e => e.id === updatedExam.id ? updatedExam : e));
       } else {
-          setExams(prev => [examWithTimestamp, ...prev]);
+          setExams(prev => [updatedExam, ...prev]);
       }
 
       // Show success message immediately (optimistic)
-      addAlert('Ujian berhasil disimpan!', 'success', 'save:' + examWithTimestamp.id);
+      addAlert('Ujian berhasil disimpan!', 'success', 'save:' + updatedExam.id);
 
       // DB save in background - don't wait for it
       if (isSupabaseConfigured && supabase) {
           const dbExam = {
-              id: examWithTimestamp.id,
-              title: examWithTimestamp.title,
-              description: examWithTimestamp.description,
-              duration_minutes: examWithTimestamp.durationMinutes,
-              category: examWithTimestamp.category,
-              status: examWithTimestamp.status,
-              questions: examWithTimestamp.questions,
-              start_date: examWithTimestamp.startDate,
-              end_date: examWithTimestamp.endDate,
+              id: updatedExam.id,
+              title: updatedExam.title,
+              description: updatedExam.description,
+              duration_minutes: updatedExam.durationMinutes,
+              category: updatedExam.category,
+              status: updatedExam.status,
+              questions: updatedExam.questions,
+              start_date: updatedExam.startDate,
+              end_date: updatedExam.endDate,
               created_by: currentUser?.id,
-              created_at: exists ? undefined : examWithTimestamp.createdAt,
-              updated_at: examWithTimestamp.updatedAt
+              created_at: exists ? undefined : updatedExam.createdAt
           };
 
           // Fire and forget - don't await
@@ -1024,39 +925,18 @@ export default function App() {
               try {
                   if (exists) {
                       // Update existing exam
-                      const { error } = await supabase.from('exams').update({
-                          id: dbExam.id,
-                          title: dbExam.title,
-                          description: dbExam.description,
-                          duration_minutes: dbExam.duration_minutes,
-                          category: dbExam.category,
-                          status: dbExam.status,
-                          questions: dbExam.questions,
-                          start_date: dbExam.start_date,
-                          end_date: dbExam.end_date
-                      }).eq('id', updatedExam.id);
+                      const { error } = await supabase.from('exams').update(dbExam).eq('id', updatedExam.id);
                       if (error) {
                           console.error("Failed to update exam in database:", error);
-                          // Only show error if DB save fails - silent for now
+                          // Only show error if DB save fails
+                          addAlert("Database save gagal (tapi data lokal tersimpan): " + error.message, 'warning');
                       }
                   } else {
                       // Insert new exam
-                      const { error } = await supabase.from('exams').insert({
-                          id: dbExam.id,
-                          title: dbExam.title,
-                          description: dbExam.description,
-                          duration_minutes: dbExam.duration_minutes,
-                          category: dbExam.category,
-                          status: dbExam.status,
-                          questions: dbExam.questions,
-                          start_date: dbExam.start_date,
-                          end_date: dbExam.end_date,
-                          created_by: dbExam.created_by,
-                          created_at: dbExam.created_at
-                      });
+                      const { error } = await supabase.from('exams').insert(dbExam);
                       if (error) {
                           console.error("Failed to create exam in database:", error);
-                          // Silent fail - data is safe locally
+                          addAlert("Database save gagal (tapi data lokal tersimpan): " + error.message, 'warning');
                       }
                   }
               } catch (err) {
@@ -1072,36 +952,30 @@ export default function App() {
   };
 
   const handleExamCreate = async (newExam: Exam) => {
-       // Add timestamps
-       const examWithTimestamp: Exam = {
-           ...newExam,
-           createdAt: newExam.createdAt || new Date().toISOString(),
-           updatedAt: new Date().toISOString()
-       };
-
        // Optimistic
-       setExams([examWithTimestamp, ...exams]);
+       setExams([newExam, ...exams]);
 
        // DB
        if (isSupabaseConfigured && supabase) {
            const dbExam = {
-              id: examWithTimestamp.id,
-              title: examWithTimestamp.title,
-              description: examWithTimestamp.description,
-              duration_minutes: examWithTimestamp.durationMinutes,
-              category: examWithTimestamp.category,
-              status: examWithTimestamp.status,
-              questions: examWithTimestamp.questions,
-              start_date: examWithTimestamp.startDate,
-              end_date: examWithTimestamp.endDate,
+              id: newExam.id,
+              title: newExam.title,
+              description: newExam.description,
+              duration_minutes: newExam.durationMinutes,
+              category: newExam.category,
+              status: newExam.status,
+              questions: newExam.questions,
+              start_date: newExam.startDate,
+              end_date: newExam.endDate,
               created_by: currentUser?.id,
-              created_at: examWithTimestamp.createdAt
+              created_at: newExam.createdAt
            };
            const { error } = await supabase.from('exams').insert(dbExam);
            if (error) {
                console.error("Failed to create exam in database:", error);
-               // Silent fail - data is safe locally, don't show error
-               setExams(prev => prev.filter(e => e.id !== examWithTimestamp.id));
+               addAlert("Gagal menyimpan ujian ke database: " + error.message, 'error');
+               // Rollback optimistic insert
+               setExams(prev => prev.filter(e => e.id !== newExam.id));
            } else {
                // Verify data was saved by refetching
                await fetchData();
@@ -1117,7 +991,7 @@ export default function App() {
       description: '',
       durationMinutes: 60,
       category: 'Umum',
-      status: 'draft',
+      status: 'published',
       createdAt: new Date().toISOString(),
       questions: []
     };
@@ -1274,6 +1148,38 @@ export default function App() {
       return;
     }
     exportAnswersToPDF(completedResults, 'Rekap_Jawaban_Lengkap.pdf');
+  };
+
+  const handleDeleteExam = async (examId: string) => {
+    if (!confirm("Apakah Anda yakin ingin menghapus ujian ini? Data nilai siswa juga akan terhapus.")) return;
+
+    // 1. Optimistic Update (Remove Exam)
+    const prevExams = [...exams];
+    setExams(prev => prev.filter(e => e.id !== examId));
+
+    // 2. Optimistic Update (Remove Results)
+    const prevResults = [...results];
+    setResults(prev => prev.filter(r => r.examId !== examId));
+
+    if (isSupabaseConfigured && supabase) {
+        // Delete Results first (best practice)
+        const { error: resError } = await supabase.from('exam_results').delete().eq('exam_id', examId);
+        if (resError) console.error("Failed to delete exam results:", resError);
+
+        // Delete Exam
+        const { error } = await supabase.from('exams').delete().eq('id', examId);
+        if (error) {
+            console.error("Failed to delete exam:", error);
+            addAlert("Gagal menghapus ujian dari database.", 'error');
+            // Rollback
+            setExams(prevExams);
+            setResults(prevResults);
+        } else {
+            addAlert("Ujian berhasil dihapus.", 'success');
+        }
+    } else {
+        addAlert("Ujian berhasil dihapus.", 'success');
+    }
   };
 
   const handleDisqualify = async (resultId: string) => {
@@ -1450,30 +1356,7 @@ export default function App() {
       {/* Token Modal */}
       {showTokenModal && <TokenModal />}
 
-      <Sidebar user={currentUser!} activeView={view} isOpen={isSidebarOpen} onNavigate={setView} onLogout={async () => {
-        // Log logout activity
-        if (currentUser) {
-          await UserActivityService.logActivity(
-            currentUser.id,
-            currentUser.email,
-            'logout',
-            `User logout`,
-            currentIP,
-            currentDeviceId,
-            undefined,
-            currentSessionId || undefined
-          );
-          
-          // Deactivate session
-          await UserActivityService.logout(currentSessionId, currentUser.id);
-        }
-        
-        setView('LOGIN');
-        setCurrentUser(null);
-        setCurrentSessionId(null);
-        localStorage.removeItem('examo_session');
-        setDeviceLoginError(null);
-      }} onClose={() => setIsSidebarOpen(false)} />
+      <Sidebar user={currentUser!} activeView={view} isOpen={isSidebarOpen} onNavigate={setView} onLogout={() => setView('LOGIN')} onClose={() => setIsSidebarOpen(false)} />
       <div className="flex-1 flex flex-col h-screen overflow-hidden text-left">
         <header className="md:hidden bg-white border-b border-gray-100 p-4 flex items-center justify-between"><button onClick={() => setIsSidebarOpen(true)} className="p-2 text-indigo-600 bg-indigo-50 rounded-xl"><Menu /></button><div className="flex items-center gap-2"><GraduationCap className="text-indigo-600" /><span className="font-black">Examo</span></div><div className="w-10" /></header>
         <main className="flex-1 p-6 md:p-10 overflow-y-auto">
@@ -1485,8 +1368,7 @@ export default function App() {
                     <h1 className="text-3xl font-black text-gray-900 tracking-tight">Buku Nilai Siswa</h1>
                     <p className="text-gray-400">Kelola dan ekspor hasil ujian kelas.</p>
                   </div>
-                  <div className="flex gap-2 flex-wrap">
-                    <button onClick={() => setShowUserActivityManager(true)} className="bg-white border-2 border-purple-600 text-purple-600 px-6 py-3 rounded-2xl font-black hover:bg-purple-50 transition-all flex items-center gap-2" title="Lihat aktivitas user"><Activity className="w-5 h-5" /> Aktivitas User</button>
+                  <div className="flex gap-2">
                     <button onClick={exportGradesToCSV} className="bg-white border-2 border-green-600 text-green-600 px-6 py-3 rounded-2xl font-black hover:bg-green-50 transition-all flex items-center gap-2"><FileSpreadsheet className="w-5 h-5" /> CSV</button>
                     <button onClick={exportGradesToPDF} className="bg-white border-2 border-indigo-600 text-indigo-600 px-6 py-3 rounded-2xl font-black hover:bg-indigo-50 transition-all flex items-center gap-2"><FileDown className="w-5 h-5" /> PDF</button>
                     <button onClick={exportFullAnswersToPDF} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black hover:bg-indigo-700 transition-all flex items-center gap-2 shadow-lg shadow-indigo-100"><FileText className="w-5 h-5" /> Cetak Jawaban</button>
@@ -1634,22 +1516,8 @@ export default function App() {
                               return (
                                 <tr key={s.id} className="hover:bg-gray-50 transition-colors">
                                   <td className="px-6 py-6 sticky left-0 bg-white group-hover:bg-gray-50 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
-                                      <div className="flex items-center justify-between gap-3">
-                                        <div>
-                                          <p className="font-bold text-gray-900">{s.name}</p>
-                                          <p className="text-xs text-gray-400 mt-1">{s.grade || '-'} • {s.nis || s.email}</p>
-                                        </div>
-                                        <button
-                                          onClick={() => {
-                                            setSelectedStudentForHistory({ id: s.id, name: s.name });
-                                            setShowStudentExamHistory(true);
-                                          }}
-                                          className="p-2 hover:bg-indigo-100 rounded-lg transition-colors hidden md:block"
-                                          title="Lihat riwayat ujian"
-                                        >
-                                          <History className="w-5 h-5 text-indigo-600" />
-                                        </button>
-                                      </div>
+                                      <p className="font-bold text-gray-900">{s.name}</p>
+                                      <p className="text-xs text-gray-400 mt-1">{s.grade || '-'} • {s.nis || s.email}</p>
                                   </td>
                                   <td className="px-4 py-6 text-center border-l border-gray-50">
                                       <span className={`font-black text-lg ${avgExam < 75 ? 'text-amber-500' : 'text-gray-900'}`}>{avgExam}</span>
@@ -1786,86 +1654,36 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-col md:flex-row justify-between items-end mb-6 gap-4">
-                  <h2 className="text-2xl font-black text-gray-900 tracking-tight">Ujian Terkini</h2>
-
-                  <div className="flex gap-3">
-                    <button
-                      onClick={async () => {
-                        const publishedExams = exams.filter(e => e.status === 'published');
-                        if (publishedExams.length === 0) {
-                          addAlert("Tidak ada ujian terpublish untuk dihapus.", 'info');
-                          return;
-                        }
-
-                        if (confirm(`Hapus SEMUA (${publishedExams.length}) ujian yang sudah terpublish? Tindakan ini tidak dapat dibatalkan.`)) {
-                          let successCount = 0;
-                          let failCount = 0;
-
-                          for (const exam of publishedExams) {
-                            try {
-                              // Optimistic local update
-                              setExams(prev => prev.filter(e => e.id !== exam.id));
-
-                              if (isSupabaseConfigured && supabase) {
-                                const { error } = await supabase.from('exams').delete().eq('id', exam.id);
-                                if (error) {
-                                  console.error(`Failed to delete exam ${exam.id}:`, error);
-                                  failCount++;
-                                } else {
-                                  successCount++;
-                                }
-                              } else {
-                                successCount++;
-                              }
-                            } catch (err) {
-                              console.error(err);
-                              failCount++;
-                            }
-                          }
-
-                          if (failCount === 0) {
-                            addAlert(`${successCount} ujian terpublish berhasil dihapus.`, 'success');
-                          } else {
-                            addAlert(`${successCount} berhasil dihapus, ${failCount} gagal.`, 'warning');
-                            fetchData();
-                          }
-                        }
-                      }}
-                      className="bg-red-50 text-red-600 px-6 py-3 rounded-2xl font-black hover:bg-red-600 hover:text-white transition-all flex items-center gap-2 active:scale-95 border border-red-100"
-                      title="Hapus semua ujian yang sudah dipublish"
-                    >
-                      <Trash2 className="w-5 h-5" /> Hapus Terpublish
-                    </button>
+                    <h2 className="text-2xl font-black text-gray-900 tracking-tight">Ujian Terkini</h2>
 
                     <div className="relative">
-                      <button
-                        onClick={() => setShowCreateMenu(!showCreateMenu)}
-                        className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center gap-2 active:scale-95"
-                      >
-                        <Plus className="w-5 h-5" /> Buat Ujian Baru <ChevronDown className={`w-4 h-4 transition-transform ${showCreateMenu ? 'rotate-180' : ''}`} />
-                      </button>
+                        <button
+                            onClick={() => setShowCreateMenu(!showCreateMenu)}
+                            className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center gap-2 active:scale-95"
+                        >
+                            <Plus className="w-5 h-5" /> Buat Ujian Baru <ChevronDown className={`w-4 h-4 transition-transform ${showCreateMenu ? 'rotate-180' : ''}`} />
+                        </button>
 
-                      {showCreateMenu && (
-                        <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden z-20 animate-in fade-in slide-in-from-top-2">
-                          <button
-                            onClick={handleCreateManual}
-                            className="w-full text-left px-5 py-4 hover:bg-gray-50 flex items-center gap-3 font-bold text-gray-700 transition-colors border-b border-gray-50"
-                          >
-                            <PenTool className="w-4 h-4 text-indigo-500" />
-                            Buat Manual
-                          </button>
-                          <button
-                            onClick={() => { setView('AI_GENERATOR'); setShowCreateMenu(false); }}
-                            className="w-full text-left px-5 py-4 hover:bg-indigo-50 flex items-center gap-3 font-bold text-indigo-700 transition-colors"
-                          >
-                            <Sparkles className="w-4 h-4 text-indigo-600" />
-                            Generate dengan AI
-                          </button>
-                        </div>
-                      )}
-                      {showCreateMenu && <div className="fixed inset-0 z-10" onClick={() => setShowCreateMenu(false)}></div>}
+                        {showCreateMenu && (
+                            <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden z-20 animate-in fade-in slide-in-from-top-2">
+                                <button
+                                    onClick={handleCreateManual}
+                                    className="w-full text-left px-5 py-4 hover:bg-gray-50 flex items-center gap-3 font-bold text-gray-700 transition-colors border-b border-gray-50"
+                                >
+                                    <PenTool className="w-4 h-4 text-indigo-500" />
+                                    Buat Manual
+                                </button>
+                                <button
+                                    onClick={() => { setView('AI_GENERATOR'); setShowCreateMenu(false); }}
+                                    className="w-full text-left px-5 py-4 hover:bg-indigo-50 flex items-center gap-3 font-bold text-indigo-700 transition-colors"
+                                >
+                                    <Sparkles className="w-4 h-4 text-indigo-600" />
+                                    Generate dengan AI
+                                </button>
+                            </div>
+                        )}
+                        {showCreateMenu && <div className="fixed inset-0 z-10" onClick={() => setShowCreateMenu(false)}></div>}
                     </div>
-                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-5">
@@ -1876,17 +1694,13 @@ export default function App() {
                   ) : (
                       exams.map(e => (
                         <div key={e.id} className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm flex items-center justify-between group">
-                          <div className="flex-1">
+                          <div>
                             <h3 className="font-bold text-gray-900 text-lg md:text-xl">{e.title}</h3>
                             <div className="flex gap-4 mt-2 text-[10px] font-black text-gray-400 uppercase tracking-widest"><span>{e.category}</span><span>{e.questions.length} Soal</span></div>
-                            <div className="text-[10px] text-gray-400 mt-3 space-y-0.5">
-                              <p>Dibuat: {new Date(e.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
-                              {e.updatedAt && <p>Terakhir diubah: {new Date(e.updatedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>}
-                            </div>
                           </div>
-                          <div style={{ display: 'flex', gap: '10px', flexShrink: 0 }}>
-                            <button onClick={() => { setEditingExam(e); setView('EXAM_EDITOR'); }} style={{ padding: '10px 15px', background: '#4f46e5', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', flexShrink: 0 }}><FileText size={20} /></button>
-                            <button onClick={() => { if (confirm(`Hapus "${e.title}"?`)) handleDeleteExam(e.id); }} style={{ padding: '10px 15px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', flexShrink: 0 }}><Trash2 size={20} /></button>
+                          <div className="flex gap-2">
+                            <button onClick={() => handleDeleteExam(e.id)} className="p-5 bg-gray-50 text-gray-400 rounded-3xl hover:bg-red-600 hover:text-white transition-all" title="Hapus Ujian"><Trash2 /></button>
+                            <button onClick={() => { setEditingExam(e); setView('EXAM_EDITOR'); }} className="p-5 bg-gray-50 text-gray-400 rounded-3xl hover:bg-indigo-600 hover:text-white transition-all" title="Edit Ujian"><FileText /></button>
                           </div>
                         </div>
                       ))
@@ -2223,25 +2037,6 @@ export default function App() {
                 </div>
               </div>
             )
-          )}
-
-          {/* StudentExamHistory Modal */}
-          {showStudentExamHistory && selectedStudentForHistory && (
-            <StudentExamHistory
-              studentId={selectedStudentForHistory.id}
-              studentName={selectedStudentForHistory.name}
-              onClose={() => {
-                setShowStudentExamHistory(false);
-                setSelectedStudentForHistory(null);
-              }}
-            />
-          )}
-
-          {/* UserActivityManager Modal */}
-          {showUserActivityManager && (
-            <UserActivityManager
-              onClose={() => setShowUserActivityManager(false)}
-            />
           )}
         </main>
       </div>
