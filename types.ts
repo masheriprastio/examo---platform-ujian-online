@@ -8,6 +8,7 @@ export interface User {
   grade?: string;
   school?: string;
   nis?: string;
+  session_token?: string;
 }
 
 export type QuestionType = 'mcq' | 'true_false' | 'short_answer' | 'essay' | 'multiple_select';

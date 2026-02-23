@@ -349,6 +349,34 @@ export default function App() {
     fetchData();
   }, []);
 
+  // Single Session Enforcement (One IP/Device Logic)
+  useEffect(() => {
+    if (!currentUser || !isSupabaseConfigured || !supabase) return;
+
+    // Realtime listener for session token changes
+    const channel = supabase
+      .channel(`user-session-${currentUser.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${currentUser.id}` },
+        (payload: any) => {
+          const newUser = payload.new;
+          // If the DB token changes and doesn't match our current token -> kicked out
+          if (newUser.session_token && newUser.session_token !== currentUser.session_token) {
+            alert("Sesi Anda telah berakhir karena akun ini login di perangkat lain.");
+            setCurrentUser(null);
+            setView('LOGIN');
+            localStorage.removeItem('examo_session');
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser]);
+
   // Fetch Data on view change (specifically when switching to Dashboard)
   useEffect(() => {
     if (view === 'STUDENT_DASHBOARD' || view === 'TEACHER_DASHBOARD') {
@@ -451,10 +479,13 @@ export default function App() {
                } else if (latestLog && latestLog.event === 'tab_blur') {
                   notify(`Peringatan: Siswa ${newRecord.student_name} keluar dari tab ujian!`, 'error', `tabblur:${newRecord.id}`);
                   if (Notification.permission === 'granted') {
-                     new Notification('Pelanggaran!', { body: `Siswa ${newRecord.student_name} keluar tab!`, icon: '/vite.svg' });
+                     new Notification('Pelanggaran Ujian', { body: `Siswa ${newRecord.student_name} terdeteksi keluar tab!`, icon: '/vite.svg' });
                   }
                } else if (latestLog && latestLog.event === 'submit') {
                   notify(`Siswa ${newRecord.student_name} telah mengirimkan ujian.`, 'success', `submit:${newRecord.id}`);
+                  if (Notification.permission === 'granted') {
+                     new Notification('Ujian Selesai', { body: `Siswa ${newRecord.student_name} telah mengirimkan ujian.`, icon: '/vite.svg' });
+                  }
                }
             }
           }
@@ -490,7 +521,25 @@ export default function App() {
             return "Password salah.";
         }
 
-        setCurrentUser(data);
+        // Generate and update Session Token (Single Device Enforcement)
+        const sessionToken = generateUUID();
+        const { error: tokenError } = await supabase
+            .from('users')
+            .update({ session_token: sessionToken })
+            .eq('id', data.id);
+
+        if (tokenError) {
+            console.error("Failed to set session token:", tokenError);
+        }
+
+        // Request Notification Permission immediately upon successful login (especially for teachers)
+        if (Notification.permission !== 'granted') {
+             Notification.requestPermission();
+        }
+
+        const userWithToken = { ...data, session_token: sessionToken };
+        setCurrentUser(userWithToken);
+
         setView(role === 'teacher' ? 'TEACHER_DASHBOARD' : 'STUDENT_DASHBOARD');
         // Fetch fresh data and notify existing violations to teacher
         const fetched = await fetchData();
@@ -1101,6 +1150,38 @@ export default function App() {
     exportAnswersToPDF(completedResults, 'Rekap_Jawaban_Lengkap.pdf');
   };
 
+  const handleDeleteExam = async (examId: string) => {
+    if (!confirm("Apakah Anda yakin ingin menghapus ujian ini? Data nilai siswa juga akan terhapus.")) return;
+
+    // 1. Optimistic Update (Remove Exam)
+    const prevExams = [...exams];
+    setExams(prev => prev.filter(e => e.id !== examId));
+
+    // 2. Optimistic Update (Remove Results)
+    const prevResults = [...results];
+    setResults(prev => prev.filter(r => r.examId !== examId));
+
+    if (isSupabaseConfigured && supabase) {
+        // Delete Results first (best practice)
+        const { error: resError } = await supabase.from('exam_results').delete().eq('exam_id', examId);
+        if (resError) console.error("Failed to delete exam results:", resError);
+
+        // Delete Exam
+        const { error } = await supabase.from('exams').delete().eq('id', examId);
+        if (error) {
+            console.error("Failed to delete exam:", error);
+            addAlert("Gagal menghapus ujian dari database.", 'error');
+            // Rollback
+            setExams(prevExams);
+            setResults(prevResults);
+        } else {
+            addAlert("Ujian berhasil dihapus.", 'success');
+        }
+    } else {
+        addAlert("Ujian berhasil dihapus.", 'success');
+    }
+  };
+
   const handleDisqualify = async (resultId: string) => {
     if (!confirm("Apakah Anda yakin ingin menonaktifkan ujian siswa ini? Siswa tidak dapat melanjutkan ujian dan status akan menjadi didiskualifikasi.")) return;
 
@@ -1617,7 +1698,10 @@ export default function App() {
                             <h3 className="font-bold text-gray-900 text-lg md:text-xl">{e.title}</h3>
                             <div className="flex gap-4 mt-2 text-[10px] font-black text-gray-400 uppercase tracking-widest"><span>{e.category}</span><span>{e.questions.length} Soal</span></div>
                           </div>
-                          <button onClick={() => { setEditingExam(e); setView('EXAM_EDITOR'); }} className="p-5 bg-gray-50 text-gray-400 rounded-3xl hover:bg-indigo-600 hover:text-white transition-all"><FileText /></button>
+                          <div className="flex gap-2">
+                            <button onClick={() => handleDeleteExam(e.id)} className="p-5 bg-gray-50 text-gray-400 rounded-3xl hover:bg-red-600 hover:text-white transition-all" title="Hapus Ujian"><Trash2 /></button>
+                            <button onClick={() => { setEditingExam(e); setView('EXAM_EDITOR'); }} className="p-5 bg-gray-50 text-gray-400 rounded-3xl hover:bg-indigo-600 hover:text-white transition-all" title="Edit Ujian"><FileText /></button>
+                          </div>
                         </div>
                       ))
                   )}
