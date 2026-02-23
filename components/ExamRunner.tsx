@@ -57,18 +57,28 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
   const violationCountRef = useRef<number>(0);
   const [browserNotificationRequested, setBrowserNotificationRequested] = useState(false);
 
+  // Proper Fisher-Yates shuffle algorithm
+  const fisherYatesShuffle = <T,>(array: T[]): T[] => {
+    const arr = [...array];
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  };
+
   useEffect(() => {
     let questionsToRun = [...exam.questions];
     
     if (exam.randomizeQuestions) {
-      questionsToRun = questionsToRun.sort(() => Math.random() - 0.5);
+      questionsToRun = fisherYatesShuffle(questionsToRun);
     }
 
     // Randomize options for MCQ and Multiple Select if enabled
     questionsToRun = questionsToRun.map(q => {
       if ((q.type === 'mcq' || q.type === 'multiple_select') && q.randomizeOptions && q.options) {
         const optionsWithIndex = q.options.map((opt, idx) => ({ opt, idx }));
-        const shuffledOptions = optionsWithIndex.sort(() => Math.random() - 0.5);
+        const shuffledOptions = fisherYatesShuffle(optionsWithIndex);
         
         // Find the new index of the correct answer(s)
         const newCorrectIndex = q.type === 'mcq' ? shuffledOptions.findIndex(o => o.idx === q.correctAnswerIndex) : undefined;
@@ -382,7 +392,12 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                 </div>
               )}
 
-              <h1 className="text-2xl md:text-3xl font-bold text-gray-900 leading-tight">{currentQuestion.text}</h1>
+              <h1 
+                className="text-2xl md:text-3xl font-bold text-gray-900 leading-tight" 
+                style={{ textAlign: (currentQuestion.textAlign || 'left') as any }}
+              >
+                {currentQuestion.text}
+              </h1>
             </div>
 
             <div className="space-y-4">
@@ -464,7 +479,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                   value={answers[currentQuestion.id] || ''} 
                   onChange={(e) => setAnswers(prev => ({ ...prev, [currentQuestion.id]: e.target.value }))} 
                   onBlur={(e) => addLog('autosave', `Updated answer for Q${currentQuestionIndex + 1}: "${e.target.value}"`)}
-                  className="w-full min-h-[300px] p-8 rounded-[40px] border-2 border-gray-50 bg-white focus:border-indigo-500 outline-none font-medium text-gray-800 text-lg shadow-inner" 
+                  className="w-full min-h-[500px] p-8 rounded-[40px] border-2 border-gray-50 bg-white focus:border-indigo-500 outline-none font-medium text-gray-800 text-base shadow-inner resize-vertical" 
                   placeholder="Tulis jawaban lengkap Anda di sini..." 
                 />
               )}

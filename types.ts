@@ -16,6 +16,7 @@ export interface Question {
   id: string;
   type: QuestionType;
   text: string;
+  textAlign?: 'left' | 'center' | 'right'; // Text alignment for question
   options?: string[];
   correctAnswerIndex?: number;
   correctAnswerIndices?: number[];

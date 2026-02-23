@@ -5,7 +5,8 @@ import { Exam, Question, QuestionType } from '../types';
 import { supabase } from '../lib/supabase';
 import { 
   Save, Plus, Trash2, Check, Clock, Type, Star, X, 
-  ChevronDown, ChevronUp, Database, GripVertical, Shuffle, Tag, AlertCircle, Eye, Image as ImageIcon, Upload, Link as LinkIcon
+  ChevronDown, ChevronUp, Database, GripVertical, Shuffle, Tag, AlertCircle, Eye, Image as ImageIcon, Upload, Link as LinkIcon,
+  AlignLeft, AlignCenter, AlignRight
 } from 'lucide-react';
 
 interface ExamEditorProps {
@@ -563,6 +564,29 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
 
                       <div>
                         <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Pertanyaan</label>
+                        <div className="mb-2 flex gap-1 bg-gray-100 rounded-lg p-1">
+                          <button
+                            onClick={() => handleQuestionChange(qIndex, 'textAlign', 'left')}
+                            className={`p-2 rounded-md text-xs transition-all ${q.textAlign === 'left' || !q.textAlign ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                            title="Rata Kiri"
+                          >
+                            <AlignLeft className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleQuestionChange(qIndex, 'textAlign', 'center')}
+                            className={`p-2 rounded-md text-xs transition-all ${q.textAlign === 'center' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                            title="Rata Tengah"
+                          >
+                            <AlignCenter className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleQuestionChange(qIndex, 'textAlign', 'right')}
+                            className={`p-2 rounded-md text-xs transition-all ${q.textAlign === 'right' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                            title="Rata Kanan"
+                          >
+                            <AlignRight className="w-4 h-4" />
+                          </button>
+                        </div>
                         <textarea value={q.text} onChange={(e) => handleQuestionChange(qIndex, 'text', e.target.value)} className="w-full px-4 py-3 rounded-xl border border-gray-100 focus:ring-2 focus:ring-indigo-500 h-20 font-bold outline-none" />
                       </div>
 
