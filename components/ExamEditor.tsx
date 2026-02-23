@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { generateUUID } from '../lib/uuid';
 import { Exam, Question, QuestionType } from '../types';
+import { supabase } from '../lib/supabase';
 import { 
   Save, Plus, Trash2, Check, Clock, Type, Star, X, 
   ChevronDown, ChevronUp, Database, GripVertical, Shuffle, Tag, AlertCircle, Eye, Image as ImageIcon, Upload, Link as LinkIcon
@@ -74,6 +75,41 @@ const recoverBackup = (examId: string, fallback: Exam): Exam => {
   return fallback;
 };
 
+// Helper function untuk upload image ke Supabase Storage
+const uploadImageToSupabase = async (file: File, examId: string): Promise<string> => {
+  try {
+    const fileName = `exams/${examId}/${Date.now()}_${file.name}`;
+    
+    const { data: uploadData, error: uploadError } = await supabase
+      .storage
+      .from('materials')
+      .upload(fileName, file, {
+        cacheControl: '3600',
+        upsert: false
+      });
+
+    if (uploadError) {
+      console.error('Storage upload error:', uploadError);
+      throw new Error('Failed to upload image: ' + uploadError.message);
+    }
+
+    // Get public URL
+    const { data: publicUrlData } = supabase
+      .storage
+      .from('materials')
+      .getPublicUrl(fileName);
+
+    if (!publicUrlData || !publicUrlData.publicUrl) {
+      throw new Error('Failed to get public URL');
+    }
+
+    return publicUrlData.publicUrl;
+  } catch (error) {
+    console.error('Image upload error:', error);
+    throw error;
+  }
+};
+
 const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveToBank, onPreview }) => {
   // Parse initial dates if they exist, or keep them empty/null
   // Try to recover from backup if available
@@ -92,17 +128,41 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     
     backupTimeoutRef.current = setTimeout(() => {
       try {
-        // Only backup essential data (no attachments to save space)
-        const compressedData: Exam = {
-          ...formData,
-          questions: formData.questions.map(q => ({
-            ...q,
-            attachment: undefined // Remove attachments to save space
-          }))
-        };
+        // Backup exam data with attachments (now they're URLs, not base64)
+        const backup = JSON.stringify(formData);
+        const backup_size = new Blob([backup]).size;
         
-        const backup = JSON.stringify(compressedData);
-        
+        // Only save if under 4MB (leave room for other data)
+        if (backup_size < 4 * 1024 * 1024) {
+          localStorage.setItem(`exam_draft_${formData.id}`, backup);
+        } else {
+          // If too large, remove attachments and save compressed version
+          const compressedData: Exam = {
+            ...formData,
+            questions: formData.questions.map(q => ({
+              ...q,
+              attachment: undefined // Remove attachments to save space
+            }))
+          };
+          const compressedBackup = JSON.stringify(compressedData);
+          const compressedSize = new Blob([compressedBackup]).size;
+          
+          if (compressedSize < 4 * 1024 * 1024) {
+            localStorage.setItem(`exam_draft_${formData.id}`, compressedBackup);
+          } else {
+            // Still too large, try cleanup old backups
+            for (let i = 0; i < localStorage.length; i++) {
+              const key = localStorage.key(i);
+              if (key && key.startsWith('exam_draft_') && key !== `exam_draft_${formData.id}`) {
+                localStorage.removeItem(key);
+              }
+            }
+            // Try saving compressed version again
+            if (compressedSize < 4 * 1024 * 1024) {
+              localStorage.setItem(`exam_draft_${formData.id}`, compressedBackup);
+            }
+          }
+        }
         // Check size before saving (rough estimate: 1 char = 1 byte)
         if (backup.length > 4000000) { // ~4MB limit to be safe
           // Clear old backups to free space
@@ -186,7 +246,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     setFormData(prev => ({ ...prev, questions: newQuestions }));
   };
 
-  const handleFileUpload = (qIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (qIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 15 * 1024 * 1024) { // 15MB limit
@@ -194,11 +254,23 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         return;
       }
 
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        handleAttachmentChange(qIndex, reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      try {
+        // Show loading state while uploading
+        const newQuestions = [...formData.questions];
+        newQuestions[qIndex] = {
+          ...newQuestions[qIndex],
+          attachment: { type: 'image', url: 'uploading...', caption: '' }
+        };
+        setFormData(prev => ({ ...prev, questions: newQuestions }));
+
+        // Upload to Supabase Storage
+        const publicUrl = await uploadImageToSupabase(file, formData.id);
+        handleAttachmentChange(qIndex, publicUrl);
+      } catch (error) {
+        alert(`Gagal upload gambar: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        // Remove attachment on error
+        handleAttachmentChange(qIndex, '');
+      }
     }
   };
 

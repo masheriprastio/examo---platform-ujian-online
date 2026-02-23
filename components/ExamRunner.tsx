@@ -97,7 +97,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
       const remaining = (exam.durationMinutes * 60) - elapsed;
       setTimeLeft(remaining > 0 ? remaining : 0);
     }
-    setTimeout(() => setIsReady(true), 1000);
+    setIsReady(true); // Remove 1-second artificial delay
   }, [exam.questions, existingProgress]);
 
   useEffect(() => { answersRef.current = answers; }, [answers]);
