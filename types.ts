@@ -78,6 +78,7 @@ export interface ExamResult {
   answers: Record<string, any>;
   logs: ExamLog[];
   violation_alert?: boolean;
+  questions?: Question[]; // Store shuffled questions per session
 }
 
 export interface Material {

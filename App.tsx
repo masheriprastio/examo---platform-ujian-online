@@ -9,7 +9,7 @@ import {
   Mail, Lock, Eye, EyeOff, ArrowRight, AlertTriangle, Database,
   Menu, X as CloseIcon, FileDown, Download, UserPlus, FileSpreadsheet,
   XCircle, HelpCircle, RotateCcw, PenTool, Save, Plus, ChevronDown, Trash2, ShieldCheck,
-  ArrowUpDown, ArrowUp, ArrowDown, Key, AlertCircle, RefreshCw, WifiOff
+  ArrowUpDown, ArrowUp, ArrowDown, Key, AlertCircle, RefreshCw, WifiOff, Shield, Wifi, MapPin, Activity
 } from 'lucide-react';
 import { useNotification } from './context/NotificationContext';
 
@@ -20,7 +20,10 @@ import QuestionBank from './components/QuestionBank';
 import StudentManager from './components/StudentManager';
 import MaterialManager from './components/MaterialManager';
 import StudentMaterialList from './components/StudentMaterialList';
+import StudentExamHistory from './components/StudentExamHistory';
+import UserActivityManager from './components/UserActivityManager';
 import { MaterialService, Material } from './services/MaterialService';
+import UserActivityService from './services/UserActivityService';
 
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -167,6 +170,12 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
+  // Device & Session Tracking State
+  const [currentDeviceId, setCurrentDeviceId] = useState<string>('');
+  const [currentIP, setCurrentIP] = useState<string>('');
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [deviceLoginError, setDeviceLoginError] = useState<string | null>(null);
+
   const { addAlert } = useNotification();
 
   // Notification helper (uses NotificationContext which handles dedupe by key)
@@ -182,10 +191,28 @@ export default function App() {
         const sess = JSON.parse(raw);
         if (sess?.user) setCurrentUser(sess.user);
         if (sess?.view) setView(sess.view as AppView);
+        if (sess?.sessionId) setCurrentSessionId(sess.sessionId);
       }
     } catch (err) {
       console.error('Failed to restore session', err);
     }
+  }, []);
+
+  // Initialize device ID and get IP on app load
+  useEffect(() => {
+    const initializeDevice = async () => {
+      const deviceId = UserActivityService.generateDeviceId();
+      setCurrentDeviceId(deviceId);
+      
+      const ip = await UserActivityService.getClientIP();
+      setCurrentIP(ip);
+      
+      // Store in session storage for reuse
+      sessionStorage.setItem('examo_device_id', deviceId);
+      sessionStorage.setItem('examo_current_ip', ip);
+    };
+
+    initializeDevice();
   }, []);
 
   // Persist session when user/view changes
@@ -235,6 +262,11 @@ export default function App() {
   // State for server error handling
   const [isOffline, setIsOffline] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+
+  // State for modals
+  const [showStudentExamHistory, setShowStudentExamHistory] = useState(false);
+  const [selectedStudentForHistory, setSelectedStudentForHistory] = useState<{ id: string; name: string } | null>(null);
+  const [showUserActivityManager, setShowUserActivityManager] = useState(false);
 
   // Session Timeout & Warning State
   const [showTimeoutWarning, setShowTimeoutWarning] = useState(false);
@@ -477,6 +509,33 @@ export default function App() {
   const handleLogin = async (role: 'teacher' | 'student', email: string, password?: string): Promise<string | null> => {
     const pwd = password || 'password';
 
+    // For real Supabase: validate device/IP login
+    if (isSupabaseConfigured && supabase && role === 'student') {
+      // Check if user can login from this device/IP
+      // First, fetch the user to get their ID
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('id')
+        .or(`email.eq.${email},nis.eq.${email}`)
+        .eq('role', role)
+        .single();
+
+      if (userError || !userData) return `${role === 'teacher' ? 'Guru' : 'Siswa'} tidak ditemukan.`;
+
+      // Validate device/IP
+      const validation = await UserActivityService.validateDeviceLogin(
+        userData.id,
+        email,
+        currentDeviceId,
+        currentIP
+      );
+
+      if (!validation.allowed) {
+        setDeviceLoginError(validation.message || 'Device login ditolak');
+        return validation.message || 'Device login ditolak';
+      }
+    }
+
     if (isSupabaseConfigured && supabase) {
         // Authenticate via Database
         const { data, error } = await supabase
@@ -493,8 +552,40 @@ export default function App() {
             return "Password salah.";
         }
 
+        // Create session and track login
+        const sessionId = await UserActivityService.createSession(
+          data.id,
+          data.email,
+          currentDeviceId,
+          currentIP
+        );
+
+        if (sessionId) {
+          setCurrentSessionId(sessionId);
+          localStorage.setItem('examo_session', JSON.stringify({ 
+            user: data, 
+            view: role === 'teacher' ? 'TEACHER_DASHBOARD' : 'STUDENT_DASHBOARD',
+            sessionId,
+            deviceId: currentDeviceId,
+            ip: currentIP
+          }));
+        }
+
+        // Log login activity
+        await UserActivityService.logActivity(
+          data.id,
+          data.email,
+          'login',
+          `Login from ${role}`,
+          currentIP,
+          currentDeviceId,
+          undefined,
+          sessionId || undefined
+        );
+
         setCurrentUser(data);
         setView(role === 'teacher' ? 'TEACHER_DASHBOARD' : 'STUDENT_DASHBOARD');
+        
         // Fetch fresh data and notify existing violations to teacher
         const fetched = await fetchData();
         if (role === 'teacher' && fetched.results) {
@@ -504,7 +595,6 @@ export default function App() {
                 ? `PELANGGARAN BERAT: Siswa ${r.studentName} didiskualifikasikan!`
                 : `Peringatan: Siswa ${r.studentName} terdeteksi keluar tab ujian.`;
               notify(msg, 'error', `violation:${r.id}`);
-              // mark in state so UI shows highlight
               setResults(prev => prev.map(p => p.id === r.id ? { ...p, violation_alert: true } : p));
             }
           });
@@ -515,6 +605,15 @@ export default function App() {
         // Fallback to Mock
         if (role === 'teacher') {
             if (email === MOCK_TEACHER.email && pwd === 'password') {
+                const mockSessionId = generateUUID();
+                setCurrentSessionId(mockSessionId);
+                localStorage.setItem('examo_session', JSON.stringify({ 
+                  user: MOCK_TEACHER, 
+                  view: 'TEACHER_DASHBOARD',
+                  sessionId: mockSessionId,
+                  deviceId: currentDeviceId,
+                  ip: currentIP
+                }));
                 setCurrentUser(MOCK_TEACHER);
                 setView('TEACHER_DASHBOARD');
                 // For mock mode, check any existing results in state and notify
@@ -525,7 +624,8 @@ export default function App() {
                     setResults(prev => prev.map(p => p.id === r.id ? { ...p, violation_alert: true } : p));
                   }
                 });
-                return null; }
+                return null;
+            }
             return "Guru tidak ditemukan.";
         } else {
             const found = students.find(s => s.email === email || s.nis === email);
@@ -533,7 +633,18 @@ export default function App() {
                 if (found.password && found.password !== pwd) {
                     return "Password salah.";
                 }
-                setCurrentUser(found); setView('STUDENT_DASHBOARD'); return null;
+                const mockSessionId = generateUUID();
+                setCurrentSessionId(mockSessionId);
+                localStorage.setItem('examo_session', JSON.stringify({ 
+                  user: found, 
+                  view: 'STUDENT_DASHBOARD',
+                  sessionId: mockSessionId,
+                  deviceId: currentDeviceId,
+                  ip: currentIP
+                }));
+                setCurrentUser(found); 
+                setView('STUDENT_DASHBOARD'); 
+                return null;
             }
             return "Siswa tidak terdaftar.";
         }
@@ -1339,7 +1450,30 @@ export default function App() {
       {/* Token Modal */}
       {showTokenModal && <TokenModal />}
 
-      <Sidebar user={currentUser!} activeView={view} isOpen={isSidebarOpen} onNavigate={setView} onLogout={() => setView('LOGIN')} onClose={() => setIsSidebarOpen(false)} />
+      <Sidebar user={currentUser!} activeView={view} isOpen={isSidebarOpen} onNavigate={setView} onLogout={async () => {
+        // Log logout activity
+        if (currentUser) {
+          await UserActivityService.logActivity(
+            currentUser.id,
+            currentUser.email,
+            'logout',
+            `User logout`,
+            currentIP,
+            currentDeviceId,
+            undefined,
+            currentSessionId || undefined
+          );
+          
+          // Deactivate session
+          await UserActivityService.logout(currentSessionId, currentUser.id);
+        }
+        
+        setView('LOGIN');
+        setCurrentUser(null);
+        setCurrentSessionId(null);
+        localStorage.removeItem('examo_session');
+        setDeviceLoginError(null);
+      }} onClose={() => setIsSidebarOpen(false)} />
       <div className="flex-1 flex flex-col h-screen overflow-hidden text-left">
         <header className="md:hidden bg-white border-b border-gray-100 p-4 flex items-center justify-between"><button onClick={() => setIsSidebarOpen(true)} className="p-2 text-indigo-600 bg-indigo-50 rounded-xl"><Menu /></button><div className="flex items-center gap-2"><GraduationCap className="text-indigo-600" /><span className="font-black">Examo</span></div><div className="w-10" /></header>
         <main className="flex-1 p-6 md:p-10 overflow-y-auto">
@@ -1351,7 +1485,8 @@ export default function App() {
                     <h1 className="text-3xl font-black text-gray-900 tracking-tight">Buku Nilai Siswa</h1>
                     <p className="text-gray-400">Kelola dan ekspor hasil ujian kelas.</p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap">
+                    <button onClick={() => setShowUserActivityManager(true)} className="bg-white border-2 border-purple-600 text-purple-600 px-6 py-3 rounded-2xl font-black hover:bg-purple-50 transition-all flex items-center gap-2" title="Lihat aktivitas user"><Activity className="w-5 h-5" /> Aktivitas User</button>
                     <button onClick={exportGradesToCSV} className="bg-white border-2 border-green-600 text-green-600 px-6 py-3 rounded-2xl font-black hover:bg-green-50 transition-all flex items-center gap-2"><FileSpreadsheet className="w-5 h-5" /> CSV</button>
                     <button onClick={exportGradesToPDF} className="bg-white border-2 border-indigo-600 text-indigo-600 px-6 py-3 rounded-2xl font-black hover:bg-indigo-50 transition-all flex items-center gap-2"><FileDown className="w-5 h-5" /> PDF</button>
                     <button onClick={exportFullAnswersToPDF} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black hover:bg-indigo-700 transition-all flex items-center gap-2 shadow-lg shadow-indigo-100"><FileText className="w-5 h-5" /> Cetak Jawaban</button>
@@ -1499,8 +1634,22 @@ export default function App() {
                               return (
                                 <tr key={s.id} className="hover:bg-gray-50 transition-colors">
                                   <td className="px-6 py-6 sticky left-0 bg-white group-hover:bg-gray-50 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
-                                      <p className="font-bold text-gray-900">{s.name}</p>
-                                      <p className="text-xs text-gray-400 mt-1">{s.grade || '-'} • {s.nis || s.email}</p>
+                                      <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                          <p className="font-bold text-gray-900">{s.name}</p>
+                                          <p className="text-xs text-gray-400 mt-1">{s.grade || '-'} • {s.nis || s.email}</p>
+                                        </div>
+                                        <button
+                                          onClick={() => {
+                                            setSelectedStudentForHistory({ id: s.id, name: s.name });
+                                            setShowStudentExamHistory(true);
+                                          }}
+                                          className="p-2 hover:bg-indigo-100 rounded-lg transition-colors hidden md:block"
+                                          title="Lihat riwayat ujian"
+                                        >
+                                          <History className="w-5 h-5 text-indigo-600" />
+                                        </button>
+                                      </div>
                                   </td>
                                   <td className="px-4 py-6 text-center border-l border-gray-50">
                                       <span className={`font-black text-lg ${avgExam < 75 ? 'text-amber-500' : 'text-gray-900'}`}>{avgExam}</span>
@@ -2074,6 +2223,25 @@ export default function App() {
                 </div>
               </div>
             )
+          )}
+
+          {/* StudentExamHistory Modal */}
+          {showStudentExamHistory && selectedStudentForHistory && (
+            <StudentExamHistory
+              studentId={selectedStudentForHistory.id}
+              studentName={selectedStudentForHistory.name}
+              onClose={() => {
+                setShowStudentExamHistory(false);
+                setSelectedStudentForHistory(null);
+              }}
+            />
+          )}
+
+          {/* UserActivityManager Modal */}
+          {showUserActivityManager && (
+            <UserActivityManager
+              onClose={() => setShowUserActivityManager(false)}
+            />
           )}
         </main>
       </div>

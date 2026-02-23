@@ -67,14 +67,38 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
     return arr;
   };
 
-  useEffect(() => {
+  // Generate session-specific shuffle seed key
+  const getShuffleCacheKey = (): string => {
+    return `examo_shuffle_${exam.id}_${userId}`;
+  };
+
+  // Load or generate shuffled questions
+  const loadOrGenerateShuffledQuestions = (): Question[] => {
+    const cacheKey = getShuffleCacheKey();
+    
+    // If existing progress exists, use the questions from there (preserves order)
+    if (existingProgress?.questions) {
+      return existingProgress.questions;
+    }
+
+    // Try to load from session storage (persists across page refreshes during same session)
+    const cachedData = sessionStorage.getItem(cacheKey);
+    if (cachedData) {
+      try {
+        return JSON.parse(cachedData);
+      } catch (err) {
+        console.warn('Failed to parse cached shuffle data:', err);
+      }
+    }
+
+    // Generate new shuffle
     let questionsToRun = [...exam.questions];
     
     if (exam.randomizeQuestions) {
       questionsToRun = fisherYatesShuffle(questionsToRun);
     }
 
-    // Randomize options for MCQ and Multiple Select if enabled
+    // Randomize options for MCQ and Multiple Select if enabled (HANYA SEKALI)
     questionsToRun = questionsToRun.map(q => {
       if ((q.type === 'mcq' || q.type === 'multiple_select') && q.randomizeOptions && q.options) {
         const optionsWithIndex = q.options.map((opt, idx) => ({ opt, idx }));
@@ -99,7 +123,16 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
       return q;
     });
 
+    // Save to session storage untuk session berikutnya (jika user refresh)
+    sessionStorage.setItem(cacheKey, JSON.stringify(questionsToRun));
+    
+    return questionsToRun;
+  };
+
+  useEffect(() => {
+    const questionsToRun = loadOrGenerateShuffledQuestions();
     setShuffledQuestions(questionsToRun);
+    
     if (existingProgress?.startedAt) {
       const started = new Date(existingProgress.startedAt).getTime();
       const now = new Date().getTime();
@@ -108,7 +141,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
       setTimeLeft(remaining > 0 ? remaining : 0);
     }
     setIsReady(true); // Remove 1-second artificial delay
-  }, [exam.questions, existingProgress]);
+  }, [exam.id, userId]);
 
   useEffect(() => { answersRef.current = answers; }, [answers]);
   useEffect(() => { logsRef.current = logs; }, [logs]);
