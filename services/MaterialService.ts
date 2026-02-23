@@ -101,6 +101,7 @@ export class MaterialService {
         file_size: file.size,
         file_url: publicUrlData.publicUrl,
         uploaded_by: 'teacher_id', // Replace with actual user ID
+        uploaded_at: new Date().toISOString(), // Timestamp upload
         category,
         grade,
         subject,

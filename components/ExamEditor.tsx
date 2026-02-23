@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { generateUUID } from '../lib/uuid';
 import { Exam, Question, QuestionType } from '../types';
 import { 
@@ -30,14 +30,93 @@ const formatDateTimeLocal = (dateString: string): string => {
   }
 };
 
+// Helper function untuk format timestamp soal dengan format readable
+const formatQuestionTimestamp = (dateString?: string): string => {
+  if (!dateString) return 'Belum diset';
+  try {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'Baru saja';
+    if (diffMins < 60) return `${diffMins} menit lalu`;
+    if (diffHours < 24) return `${diffHours} jam lalu`;
+    if (diffDays < 7) return `${diffDays} hari lalu`;
+    
+    return date.toLocaleDateString('id-ID', { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric', 
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  } catch {
+    return 'Tanggal tidak valid';
+  }
+
+};
+
+// Helper function untuk recover backup dari localStorage
+const recoverBackup = (examId: string, fallback: Exam): Exam => {
+  try {
+    const backup = localStorage.getItem(`exam_draft_${examId}`);
+    if (backup) {
+      const parsed = JSON.parse(backup);
+      console.log('Recovered exam draft from backup');
+      return parsed;
+    }
+  } catch (e) {
+    console.warn('Failed to recover backup:', e);
+  }
+  return fallback;
+};
+
 const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveToBank, onPreview }) => {
   // Parse initial dates if they exist, or keep them empty/null
-  const [formData, setFormData] = useState<Exam>({ ...exam });
+  // Try to recover from backup if available
+  const [formData, setFormData] = useState<Exam>(() => recoverBackup(exam.id, exam));
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(formData.questions[0]?.id || null);
   const [questionToDelete, setQuestionToDelete] = useState<string | null>(null);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [uploadMode, setUploadMode] = useState<Record<string, 'url' | 'file'>>({});
   const [isSaving, setIsSaving] = useState(false);
+  const backupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastSavedRef = useRef<string>(JSON.stringify(exam));
+
+  // Auto-backup state to localStorage every 2 seconds
+  useEffect(() => {
+    if (backupTimeoutRef.current) clearTimeout(backupTimeoutRef.current);
+    
+    backupTimeoutRef.current = setTimeout(() => {
+      const backup = JSON.stringify(formData);
+      try {
+        localStorage.setItem(`exam_draft_${exam.id}`, backup);
+      } catch (e) {
+        console.warn('Failed to backup exam draft:', e);
+      }
+    }, 2000);
+
+    return () => {
+      if (backupTimeoutRef.current) clearTimeout(backupTimeoutRef.current);
+    };
+  }, [formData, exam.id]);
+
+  // Warn user if they try to leave without saving
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (JSON.stringify(formData) !== lastSavedRef.current) {
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [formData]);
   
   const handleExamChange = (field: keyof Exam, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -45,7 +124,11 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
 
   const handleQuestionChange = (qIndex: number, field: keyof Question, value: any) => {
     const newQuestions = [...formData.questions];
-    newQuestions[qIndex] = { ...newQuestions[qIndex], [field]: value };
+    newQuestions[qIndex] = { 
+      ...newQuestions[qIndex], 
+      [field]: value,
+      updatedAt: new Date().toISOString() // Update timestamp setiap ada perubahan
+    };
     setFormData(prev => ({ ...prev, questions: newQuestions }));
   };
 
@@ -92,6 +175,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   };
 
   const addQuestion = (type: QuestionType = 'mcq') => {
+    const now = new Date().toISOString();
     const newQuestion: Question = {
       id: generateUUID(),
       type,
@@ -99,6 +183,8 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
       points: 10,
       explanation: '',
       difficulty: 'medium',
+      createdAt: now, // Timestamp ketika soal dibuat
+      updatedAt: now, // Timestamp pembaruan awal
       ...(type === 'mcq' ? { options: ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D'], correctAnswerIndex: 0, randomizeOptions: false } : {}),
       ...(type === 'multiple_select' ? { options: ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D'], correctAnswerIndices: [], randomizeOptions: false } : {}),
       ...(type === 'true_false' ? { trueFalseAnswer: true } : {}),
@@ -128,23 +214,52 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     e.preventDefault();
     if (draggedIndex === null || draggedIndex === index) return;
     
-    const newQs = [...formData.questions];
-    const draggedItem = newQs.splice(draggedIndex, 1)[0];
-    newQs.splice(index, 0, draggedItem);
+    // Validate indices
+    if (draggedIndex < 0 || draggedIndex >= formData.questions.length || 
+        index < 0 || index >= formData.questions.length) {
+      setDraggedIndex(null);
+      return;
+    }
     
-    setDraggedIndex(index);
-    setFormData(prev => ({ ...prev, questions: newQs }));
+    const newQs = [...formData.questions];
+    const draggedItem = newQs[draggedIndex];
+    
+    // Safely splice and insert
+    if (draggedItem) {
+      newQs.splice(draggedIndex, 1);
+      newQs.splice(index, 0, draggedItem);
+      
+      setDraggedIndex(index);
+      setFormData(prev => ({ ...prev, questions: newQs }));
+    }
   };
+
+  // Helper function untuk mendapatkan soal yang paling terakhir dibuat
+  const getLastCreatedQuestion = (): Question | null => {
+    if (formData.questions.length === 0) return null;
+    return formData.questions.reduce((latest, current) => {
+      if (!latest.createdAt) return current;
+      if (!current.createdAt) return latest;
+      return new Date(current.createdAt) > new Date(latest.createdAt) ? current : latest;
+    });
+  };
+
+  const lastQuestion = getLastCreatedQuestion();
 
   return (
     <div className="fixed inset-0 bg-white z-[60] flex flex-col font-sans text-left overflow-hidden">
       <header className="px-6 md:px-8 py-4 md:py-5 border-b border-gray-100 flex justify-between items-center bg-white shadow-sm shrink-0">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 flex-1">
           <div className="bg-indigo-50 p-2 rounded-xl border border-indigo-100 hidden md:block">
             <Database className="w-5 h-5 text-indigo-600" />
           </div>
-          <div>
+          <div className="flex-1">
             <h2 className="text-lg md:text-xl font-black text-gray-900 leading-none">Editor Ujian</h2>
+            {lastQuestion && (
+              <p className="text-xs text-gray-500 mt-1 line-clamp-1">
+                Soal terakhir dibuat: {formatQuestionTimestamp(lastQuestion.createdAt)}
+              </p>
+            )}
           </div>
         </div>
         <div className="flex gap-2">
@@ -162,6 +277,13 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
               setIsSaving(true);
               try {
                 await Promise.resolve(onSave(formData));
+                lastSavedRef.current = JSON.stringify(formData);
+                // Clear backup after successful save
+                try {
+                  localStorage.removeItem(`exam_draft_${exam.id}`);
+                } catch (e) {
+                  console.warn('Failed to clear backup:', e);
+                }
               } finally {
                 setIsSaving(false);
               }
@@ -280,8 +402,11 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                       </div>
                       <div className="hidden md:block p-1 text-gray-300 cursor-grab active:cursor-grabbing"><GripVertical className="w-5 h-5"/></div>
                       <span className="w-8 h-8 rounded-lg bg-gray-900 text-white flex items-center justify-center font-black text-xs shrink-0">{qIndex + 1}</span>
-                      <span className="text-gray-700 font-bold truncate text-sm">{q.text}</span>
-                      {q.attachment?.url && <ImageIcon className="w-4 h-4 text-indigo-500 ml-2" />}
+                      <div className="flex-1 overflow-hidden min-w-0">
+                        <span className="text-gray-700 font-bold truncate text-sm block">{q.text}</span>
+                        <span className="text-gray-400 text-xs mt-0.5">Dibuat {formatQuestionTimestamp(q.createdAt)}</span>
+                      </div>
+                      {q.attachment?.url && <ImageIcon className="w-4 h-4 text-indigo-500" />}
                     </div>
                     <div className="flex items-center gap-1">
                       {onSaveToBank && (
@@ -297,13 +422,33 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                           <Database className="w-4 h-4" />
                         </button>
                       )}
-                      <button onClick={(e) => { e.stopPropagation(); setQuestionToDelete(q.id); }} className="p-2 text-red-300 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); setQuestionToDelete(q.id); }} 
+                        className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition"
+                        title="Hapus Soal"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                       {activeQuestionId === q.id ? <ChevronUp className="w-4 h-4 text-indigo-400" /> : <ChevronDown className="w-4 h-4 text-gray-300" />}
                     </div>
                   </div>
 
                   {activeQuestionId === q.id && (
                     <div className="p-6 md:p-8 bg-gray-50/30 border-t border-gray-50 space-y-6 animate-in slide-in-from-top-2">
+                      {/* Timestamp Info */}
+                      <div className="flex flex-wrap gap-4 text-xs text-gray-500 pb-4 border-b border-gray-200">
+                        <div className="flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-indigo-400" />
+                          <span>Dibuat: {formatQuestionTimestamp(q.createdAt)}</span>
+                        </div>
+                        {q.updatedAt && q.updatedAt !== q.createdAt && (
+                          <div className="flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-amber-400" />
+                            <span>Diubah: {formatQuestionTimestamp(q.updatedAt)}</span>
+                          </div>
+                        )}
+                      </div>
+
                       <div>
                         <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Pertanyaan</label>
                         <textarea value={q.text} onChange={(e) => handleQuestionChange(qIndex, 'text', e.target.value)} className="w-full px-4 py-3 rounded-xl border border-gray-100 focus:ring-2 focus:ring-indigo-500 h-20 font-bold outline-none" />
@@ -489,9 +634,17 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         <div className="fixed inset-0 bg-gray-900/60 flex items-center justify-center z-[70] p-6 animate-in fade-in">
           <div className="bg-white p-8 rounded-[35px] max-w-sm w-full text-center">
             <h3 className="text-xl font-black mb-6">Hapus Soal?</h3>
+            <p className="text-sm text-gray-500 mb-6">Soal yang dihapus tidak dapat dikembalikan.</p>
             <div className="flex gap-3">
-              <button onClick={() => setQuestionToDelete(null)} className="flex-1 py-3 bg-gray-50 text-gray-500 rounded-xl font-bold">Batal</button>
-              <button onClick={() => { setFormData(prev => ({ ...prev, questions: prev.questions.filter(q => q.id !== questionToDelete) })); setQuestionToDelete(null); }} className="flex-1 py-3 bg-red-600 text-white rounded-xl font-black">Hapus</button>
+              <button onClick={() => setQuestionToDelete(null)} className="flex-1 py-3 bg-gray-50 text-gray-500 rounded-xl font-bold hover:bg-gray-100 transition">Batal</button>
+              <button onClick={() => { 
+                setFormData(prev => ({ 
+                  ...prev, 
+                  questions: prev.questions.filter(q => q.id !== questionToDelete),
+                  updatedAt: new Date().toISOString() // Update timestamp saat soal dihapus
+                })); 
+                setQuestionToDelete(null); 
+              }} className="flex-1 py-3 bg-red-600 text-white rounded-xl font-black hover:bg-red-700 transition">Hapus</button>
             </div>
           </div>
         </div>

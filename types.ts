@@ -27,6 +27,8 @@ export interface Question {
   topic?: string;
   difficulty?: 'easy' | 'medium' | 'hard';
   randomizeOptions?: boolean;
+  createdAt?: string; // Timestamp ketika soal dibuat
+  updatedAt?: string; // Timestamp terakhir soal diperbarui
   attachment?: {
     type: 'image' | 'video' | 'audio';
     url: string;
@@ -43,6 +45,7 @@ export interface Exam {
   category: string;
   status: 'draft' | 'published';
   createdAt: string;
+  updatedAt?: string; // Waktu perubahan terakhir
   randomizeQuestions?: boolean;
   startDate?: string;
   endDate?: string;
