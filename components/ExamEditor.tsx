@@ -91,11 +91,51 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     if (backupTimeoutRef.current) clearTimeout(backupTimeoutRef.current);
     
     backupTimeoutRef.current = setTimeout(() => {
-      const backup = JSON.stringify(formData);
       try {
+        // Only backup essential data (no attachments to save space)
+        const compressedData: Exam = {
+          ...formData,
+          questions: formData.questions.map(q => ({
+            ...q,
+            attachment: undefined // Remove attachments to save space
+          }))
+        };
+        
+        const backup = JSON.stringify(compressedData);
+        
+        // Check size before saving (rough estimate: 1 char = 1 byte)
+        if (backup.length > 4000000) { // ~4MB limit to be safe
+          // Clear old backups to free space
+          const keys = Object.keys(localStorage);
+          keys.forEach(key => {
+            if (key.startsWith('exam_draft_') && key !== `exam_draft_${exam.id}`) {
+              try {
+                localStorage.removeItem(key);
+              } catch (e) {
+                // Ignore errors
+              }
+            }
+          });
+        }
+        
         localStorage.setItem(`exam_draft_${exam.id}`, backup);
       } catch (e) {
-        console.warn('Failed to backup exam draft:', e);
+        if (e instanceof DOMException && e.code === 22) {
+          // QuotaExceededError - clear all old backups and try again
+          const keys = Object.keys(localStorage);
+          keys.forEach(key => {
+            if (key.startsWith('exam_draft_') && key !== `exam_draft_${exam.id}`) {
+              try {
+                localStorage.removeItem(key);
+              } catch (err) {
+                // Ignore
+              }
+            }
+          });
+          // Silently skip backup if still full
+        } else {
+          console.warn('Failed to backup exam draft:', e);
+        }
       }
     }, 2000);
 
