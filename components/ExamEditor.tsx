@@ -61,6 +61,34 @@ const formatQuestionTimestamp = (dateString?: string): string => {
 
 };
 
+// Helper function untuk validasi input penilaian (angka, titik, koma)
+const validatePointsInput = (value: string): { isValid: boolean; error?: string; parsedValue?: number } => {
+  if (!value || value.trim() === '') {
+    return { isValid: false, error: 'Nilai tidak boleh kosong' };
+  }
+
+  // Normalize input: convert comma to dot
+  const normalized = value.replace(',', '.');
+
+  // Check if it's a valid number
+  const parsed = parseFloat(normalized);
+  if (isNaN(parsed)) {
+    return { isValid: false, error: 'Hanya angka, titik, atau koma yang diizinkan' };
+  }
+
+  // Check if number is positive
+  if (parsed < 0) {
+    return { isValid: false, error: 'Nilai harus angka positif' };
+  }
+
+  // Check if number is not too large
+  if (parsed > 1000) {
+    return { isValid: false, error: 'Nilai maksimal 1000' };
+  }
+
+  return { isValid: true, parsedValue: parsed };
+};
+
 // Helper function untuk recover backup dari localStorage
 const recoverBackup = (examId: string, fallback: Exam): Exam => {
   try {
@@ -120,6 +148,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [uploadMode, setUploadMode] = useState<Record<string, 'url' | 'file'>>({});
   const [isSaving, setIsSaving] = useState(false);
+  const [pointsErrors, setPointsErrors] = useState<Record<string, string>>({}); // Track validation errors per question
   const backupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedRef = useRef<string>(JSON.stringify(exam));
 
@@ -231,6 +260,28 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
       updatedAt: new Date().toISOString() // Update timestamp setiap ada perubahan
     };
     setFormData(prev => ({ ...prev, questions: newQuestions }));
+  };
+
+  // Handler khusus untuk points dengan validasi
+  const handlePointsChange = (qIndex: number, value: string) => {
+    const qId = formData.questions[qIndex]?.id;
+    if (!qId) return;
+
+    const validation = validatePointsInput(value);
+    
+    if (!validation.isValid) {
+      setPointsErrors(prev => ({
+        ...prev,
+        [qId]: validation.error || 'Invalid value'
+      }));
+    } else {
+      setPointsErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[qId];
+        return newErrors;
+      });
+      handleQuestionChange(qIndex, 'points', validation.parsedValue || 0);
+    }
   };
 
   const handleAttachmentChange = (qIndex: number, url: string) => {
@@ -374,8 +425,40 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
               </p>
             )}
           </div>
+          {/* Status Badge & Toggle */}
+          <div className="flex items-center gap-3 ml-4 pr-2 border-r border-gray-100">
+            {formData.status === 'draft' ? (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <Clock className="w-4 h-4 text-yellow-600" />
+                <span className="text-xs font-bold text-yellow-700">DRAFT</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg">
+                <Check className="w-4 h-4 text-green-600" />
+                <span className="text-xs font-bold text-green-700">PUBLISHED</span>
+              </div>
+            )}
+          </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 ml-4">
+          {/* Toggle Draft/Published */}
+          {formData.status === 'draft' ? (
+            <button
+              onClick={() => handleExamChange('status', 'published')}
+              className="px-4 py-2 bg-green-50 border-2 border-green-200 text-green-600 rounded-xl hover:bg-green-100 font-bold flex items-center gap-2 transition-all text-sm"
+              title="Publikasikan ujian agar siswa bisa melihat"
+            >
+              <Check className="w-4 h-4" /> Publikasikan
+            </button>
+          ) : (
+            <button
+              onClick={() => handleExamChange('status', 'draft')}
+              className="px-4 py-2 bg-yellow-50 border-2 border-yellow-200 text-yellow-600 rounded-xl hover:bg-yellow-100 font-bold flex items-center gap-2 transition-all text-sm"
+              title="Ubah ke draft agar siswa tidak bisa melihat"
+            >
+              <Clock className="w-4 h-4" /> Ke Draft
+            </button>
+          )}
           {onPreview && (
             <button 
               onClick={() => onPreview(formData)} 
@@ -674,7 +757,22 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                         </div>
                         <div>
                           <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Bobot Nilai</label>
-                          <input type="number" step="0.5" value={q.points} onChange={(e) => handleQuestionChange(qIndex, 'points', parseFloat(e.target.value) || 0)} className="w-full px-4 py-2.5 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-sm font-bold outline-none" placeholder="Misal: 6, 6.5, atau 10" />
+                          <input 
+                            type="text" 
+                            step="0.5" 
+                            value={q.points} 
+                            onChange={(e) => handlePointsChange(qIndex, e.target.value)}
+                            className={`w-full px-4 py-2.5 rounded-xl border-2 bg-white focus:ring-2 focus:ring-indigo-500 text-sm font-bold outline-none transition-all ${
+                              pointsErrors[q.id] ? 'border-red-500 bg-red-50' : 'border-gray-100'
+                            }`}
+                            placeholder="Misal: 6, 6.5, atau 10"
+                          />
+                          {pointsErrors[q.id] && (
+                            <div className="flex items-center gap-1 mt-1 text-red-500 text-xs font-bold">
+                              <AlertCircle className="w-3 h-3" />
+                              {pointsErrors[q.id]}
+                            </div>
+                          )}
                         </div>
                       </div>
 
