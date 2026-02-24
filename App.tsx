@@ -847,6 +847,40 @@ export default function App() {
     }
   };
 
+  // Handler for INDIVIDUAL Student Edit (Update existing student)
+  const handleEditStudent = async (editedStudent: User) => {
+    // 1. Optimistic Update
+    setStudents(prev => prev.map(s => s.id === editedStudent.id ? editedStudent : s));
+
+    // 2. DB Update
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from('users')
+        .update({
+          name: editedStudent.name,
+          email: editedStudent.email,
+          password: editedStudent.password,
+          grade: editedStudent.grade,
+          nis: editedStudent.nis
+        })
+        .eq('id', editedStudent.id);
+
+      if (error) {
+        console.error("Failed to update student:", error);
+        addAlert("Gagal update data siswa: " + error.message, 'error');
+        // Rollback by reverting to original
+        const originalStudent = students.find(s => s.id === editedStudent.id);
+        if (originalStudent) {
+          setStudents(prev => prev.map(s => s.id === editedStudent.id ? originalStudent : s));
+        }
+      } else {
+        addAlert('Data siswa berhasil diperbarui!', 'success');
+      }
+    } else {
+      // Mock mode: just show success
+      addAlert('Data siswa berhasil diperbarui!', 'success');
+    }
+  };
+
   // Wrapper for BULK Student Updates (e.g., Import)
   const handleStudentUpdate = async (newStudents: User[]) => {
       // This is primarily for Excel Import which replaces/appends the list
@@ -1610,6 +1644,7 @@ export default function App() {
                   onUpdate={handleStudentUpdate}
                   onAddStudent={handleAddStudent}
                   onDeleteStudent={handleDeleteStudent}
+                  onEditStudent={handleEditStudent}
               />
             ) : view === 'MATERIAL_MANAGER' ? (
               <MaterialManager />

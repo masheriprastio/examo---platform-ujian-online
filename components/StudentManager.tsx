@@ -14,9 +14,10 @@ interface StudentManagerProps {
   onUpdate: (updated: User[]) => void;
   onAddStudent: (newStudent: User) => Promise<void>;
   onDeleteStudent: (id: string) => Promise<void>;
+  onEditStudent?: (editedStudent: User) => Promise<void>;
 }
 
-const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onAddStudent, onDeleteStudent }) => {
+const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onAddStudent, onDeleteStudent, onEditStudent }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const [modalMode, setModalMode] = useState<'add' | 'edit' | null>(null);
@@ -124,13 +125,26 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
         };
         await onAddStudent(student);
         } else if (modalMode === 'edit' && editingId) {
-            // For edit, we still use the old way via onUpdate(all_students) OR ideally a new onEditStudent prop
-            // Given the plan, let's keep using onUpdate for edits for now as refactor focused on Add/Delete
-            const updatedStudents = students.map(s => s.id === editingId ? { ...s, ...formData, email: emailToUse, password: passwordToUse } : s);
-            // We can trick App.tsx: usually onUpdate handles replacement
-            // Ideally we need onUpdateStudent prop.
-            // But let's follow the prop signature: onUpdate
-            onUpdate(updatedStudents);
+            // Use new onEditStudent callback if available, otherwise fall back to onUpdate
+            const editedStudent = students.find(s => s.id === editingId);
+            if (editedStudent) {
+              const updatedStudent: User = {
+                ...editedStudent,
+                name: formData.name,
+                email: emailToUse,
+                grade: formData.grade,
+                nis: formData.nis,
+                password: passwordToUse
+              };
+              if (onEditStudent) {
+                // Use dedicated edit handler that syncs to DB
+                await onEditStudent(updatedStudent);
+              } else {
+                // Fallback to onUpdate for backward compatibility
+                const updatedStudents = students.map(s => s.id === editingId ? updatedStudent : s);
+                onUpdate(updatedStudents);
+              }
+            }
         }
 
         setFormData({ name: '', email: '', grade: '', nis: '', password: '' });
