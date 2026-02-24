@@ -674,7 +674,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                         </div>
                         <div>
                           <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Bobot Nilai</label>
-                          <input type="number" value={q.points} onChange={(e) => handleQuestionChange(qIndex, 'points', parseInt(e.target.value) || 0)} className="w-full px-4 py-2.5 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-sm font-bold outline-none" />
+                          <input type="number" step="0.5" value={q.points} onChange={(e) => handleQuestionChange(qIndex, 'points', parseFloat(e.target.value) || 0)} className="w-full px-4 py-2.5 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-sm font-bold outline-none" placeholder="Misal: 6, 6.5, atau 10" />
                         </div>
                       </div>
 

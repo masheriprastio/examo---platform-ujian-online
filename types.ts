@@ -11,7 +11,7 @@ export interface User {
   session_token?: string;
 }
 
-export type QuestionType = 'mcq' | 'true_false' | 'short_answer' | 'essay' | 'multiple_select';
+export type QuestionType = 'mcq' | 'true_false' | 'short_answer' | 'essay' | 'multiple_select' | 'essay_dragdrop';
 
 export interface Question {
   id: string;
@@ -28,6 +28,10 @@ export interface Question {
   topic?: string;
   difficulty?: 'easy' | 'medium' | 'hard';
   randomizeOptions?: boolean;
+  // Untuk Essay Drag & Drop
+  dragDropItems?: string[];                    // Item yang bisa di-drag (kiri)
+  dragDropTargets?: string[];                  // Target drop zones (kanan)
+  dragDropAnswer?: { [key: string]: string }; // Mapping: item → target
   attachment?: {
     type: 'image' | 'video' | 'audio';
     url: string;
