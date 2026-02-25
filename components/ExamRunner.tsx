@@ -104,23 +104,23 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
     // Randomize options for MCQ and Multiple Select if enabled (HANYA SEKALI)
     questionsToRun = questionsToRun.map(q => {
       if ((q.type === 'mcq' || q.type === 'multiple_select') && q.randomizeOptions && q.options) {
-        const optionsWithIndex = q.options.map((opt, idx) => ({ opt, idx }));
+        const optionsWithIndex: { opt: string; idx: number }[] = q.options.map((opt, idx) => ({ opt, idx }));
         const shuffledOptions = fisherYatesShuffle(optionsWithIndex);
         
         // Find the new index of the correct answer(s)
-        const newCorrectIndex = q.type === 'mcq' ? shuffledOptions.findIndex(o => o.idx === q.correctAnswerIndex) : undefined;
+        const newCorrectIndex = q.type === 'mcq' ? shuffledOptions.findIndex((o: { opt: string; idx: number }) => o.idx === q.correctAnswerIndex) : undefined;
         
         let newCorrectIndices: number[] | undefined;
         if (q.type === 'multiple_select' && q.correctAnswerIndices) {
-          newCorrectIndices = q.correctAnswerIndices.map(oldIdx => shuffledOptions.findIndex(o => o.idx === oldIdx));
+          newCorrectIndices = q.correctAnswerIndices.map(oldIdx => shuffledOptions.findIndex((o: { opt: string; idx: number }) => o.idx === oldIdx));
         }
         
         return {
           ...q,
-          options: shuffledOptions.map(o => o.opt),
+          options: shuffledOptions.map((o: { opt: string; idx: number }) => o.opt),
           correctAnswerIndex: newCorrectIndex,
           correctAnswerIndices: newCorrectIndices,
-          _originalOptionsMapping: shuffledOptions.map(o => o.idx) // Store mapping if needed
+          _originalOptionsMapping: shuffledOptions.map((o: { opt: string; idx: number }) => o.idx) // Store mapping if needed
         };
       }
       return q;

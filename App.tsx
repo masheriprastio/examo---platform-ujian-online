@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Exam, AppView, ExamResult, Question, ExamLog } from './types';
-import { MOCK_TEACHER, MOCK_STUDENT, MOCK_EXAMS, supabase, isSupabaseConfigured } from './lib/supabase';
+import { MOCK_TEACHER, MOCK_STUDENT, MOCK_ADMIN, MOCK_EXAMS, supabase, isSupabaseConfigured } from './lib/supabase';
 import { generateUUID } from './lib/uuid';
 import {
   LogOut, LayoutDashboard, ClipboardList, Sparkles,
@@ -573,6 +573,43 @@ export default function App() {
             .or(`email.eq.${email},nis.eq.${email}`)
             .single();
 
+        // Special Admin Fallback: If DB user missing, check hardcoded Admin credentials
+        if ((error || !data) && email === MOCK_ADMIN.email) {
+            if (password === MOCK_ADMIN.password) {
+                 // Attempt to seed the admin user to DB so FKs work
+                 const { data: newUser, error: createError } = await supabase.from('users').insert({
+                     name: MOCK_ADMIN.name,
+                     email: MOCK_ADMIN.email,
+                     password: MOCK_ADMIN.password,
+                     role: 'admin',
+                     school: MOCK_ADMIN.school,
+                     nis: 'ADMIN' // Assuming NIS column exists
+                 }).select().single();
+
+                 if (newUser && !createError) {
+                     // Logged in with real DB user now!
+                     const userWithToken = { ...newUser, session_token: generateUUID() };
+                     // Update session token
+                     await supabase.from('users').update({ session_token: userWithToken.session_token }).eq('id', newUser.id);
+
+                     setCurrentUser(userWithToken);
+                     setView('TEACHER_DASHBOARD');
+                     return null;
+                 } else {
+                     // Fallback if insert failed (e.g. RLS preventing insert?)
+                     // Use a fake UUID to satisfy UUID type constraints if any
+                     const fakeId = '00000000-0000-0000-0000-000000000000';
+                     const adminUser = { ...MOCK_ADMIN, id: fakeId, session_token: generateUUID() };
+                     setCurrentUser(adminUser);
+                     setView('TEACHER_DASHBOARD');
+                     addAlert("Login Admin Mode (Data Admin tidak tersimpan di DB)", 'warning');
+                     return null;
+                 }
+            } else {
+                return "Password salah.";
+            }
+        }
+
         if (error || !data) return "User tidak ditemukan.";
 
         // Simple password check (In production, use bcrypt/argon2 on backend or Supabase Auth)
@@ -1093,10 +1130,7 @@ export default function App() {
           setExams(prev => [updatedExam, ...prev]);
       }
 
-      // Show success message immediately (optimistic)
-      addAlert('Ujian berhasil disimpan!', 'success', 'save:' + updatedExam.id);
-
-      // DB save in background - don't wait for it
+      // DB save (Await to ensure persistence)
       if (isSupabaseConfigured && supabase) {
           const dbExam = {
               id: updatedExam.id,
@@ -1112,34 +1146,39 @@ export default function App() {
               created_at: exists ? undefined : updatedExam.createdAt
           };
 
-          // Fire and forget - don't await
-          (async () => {
-              try {
-                  if (exists) {
-                      // Update existing exam
-                      const { error } = await supabase.from('exams').update(dbExam).eq('id', updatedExam.id);
-                      if (error) {
-                          console.error("Failed to update exam in database:", error);
-                          // Only show error if DB save fails
-                          addAlert("Database save gagal (tapi data lokal tersimpan): " + error.message, 'warning');
-                      }
-                  } else {
-                      // Insert new exam
-                      const { error } = await supabase.from('exams').insert(dbExam);
-                      if (error) {
-                          console.error("Failed to create exam in database:", error);
-                          addAlert("Database save gagal (tapi data lokal tersimpan): " + error.message, 'warning');
-                      }
-                  }
-              } catch (err) {
-                  console.error("Database operation error:", err);
+          try {
+              let error;
+              if (exists) {
+                  // Update existing exam
+                  const res = await supabase.from('exams').update(dbExam).eq('id', updatedExam.id);
+                  error = res.error;
+              } else {
+                  // Insert new exam
+                  const res = await supabase.from('exams').insert(dbExam);
+                  error = res.error;
               }
-          })();
-      }
 
-      // Navigate immediately - don't wait for DB
-      shouldFetchRef.current = false; // Prevent race condition where fetch gets old data
-      setView('TEACHER_DASHBOARD');
+              if (error) {
+                  console.error("Failed to save exam to database:", error);
+                  addAlert("Gagal menyimpan ke database: " + error.message, 'error');
+                  throw new Error(error.message);
+              } else {
+                  addAlert('Ujian berhasil disimpan!', 'success', 'save:' + updatedExam.id);
+                  // Navigate only on success
+                  shouldFetchRef.current = false; // Prevent race condition where fetch gets old data
+                  setView('TEACHER_DASHBOARD');
+              }
+          } catch (err: any) {
+              console.error("Database operation error:", err);
+              addAlert("Terjadi kesalahan saat menyimpan: " + (err.message || 'Unknown error'), 'error');
+              // Do NOT navigate away
+              throw err; // Propagate to ExamEditor
+          }
+      } else {
+          // Mock mode
+          addAlert('Ujian berhasil disimpan!', 'success', 'save:' + updatedExam.id);
+          setView('TEACHER_DASHBOARD');
+      }
   };
 
   const handleExamCreate = async (newExam: Exam) => {

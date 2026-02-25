@@ -343,9 +343,18 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         handleAttachmentChange(qIndex, publicUrl);
 
       } catch (error) {
-        alert(`Gagal upload gambar: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        // Remove attachment on error
-        handleAttachmentChange(qIndex, '');
+        console.warn('Upload to Supabase failed, falling back to Base64:', error);
+        // Fallback to Base64
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const base64 = e.target?.result as string;
+          handleAttachmentChange(qIndex, base64);
+        };
+        reader.onerror = () => {
+             alert(`Gagal upload gambar (Storage & Base64): ${error instanceof Error ? error.message : 'Unknown error'}`);
+             handleAttachmentChange(qIndex, '');
+        };
+        reader.readAsDataURL(file);
       }
     }
   };
@@ -419,9 +428,18 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         handleOptionAttachmentChange(qIndex, oIndex, publicUrl);
 
       } catch (error) {
-        alert(`Gagal upload gambar opsi: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        // Reset loading state
-        handleOptionAttachmentChange(qIndex, oIndex, '');
+        console.warn('Upload to Supabase failed, falling back to Base64:', error);
+        // Fallback to Base64
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const base64 = e.target?.result as string;
+          handleOptionAttachmentChange(qIndex, oIndex, base64);
+        };
+        reader.onerror = () => {
+             alert(`Gagal upload gambar opsi (Storage & Base64): ${error instanceof Error ? error.message : 'Unknown error'}`);
+             handleOptionAttachmentChange(qIndex, oIndex, '');
+        };
+        reader.readAsDataURL(file);
       } finally {
         e.target.value = ''; // Reset input
       }
