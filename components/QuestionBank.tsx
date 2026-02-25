@@ -58,6 +58,7 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions = [], onUpdate })
       options: ['', '', '', ''],
       correctAnswerIndex: 0,
       randomizeOptions: false,
+      optionAttachments: [undefined, undefined, undefined, undefined],
       explanation: '',
       topic: ''
     };
@@ -259,12 +260,14 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
     if (file) {
       if (file.size > 15 * 1024 * 1024) { // 15MB limit
         alert("Ukuran file maksimal 15MB");
+        e.target.value = ''; // Reset input
         return;
       }
 
       const reader = new FileReader();
       reader.onloadend = () => {
         handleOptionAttachmentChange(idx, reader.result as string);
+        e.target.value = ''; // Reset input after successful upload
       };
       reader.readAsDataURL(file);
     }
@@ -411,7 +414,19 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                   {formData.attachment?.url && (
                       <div className="relative group shrink-0">
                           <div className="w-12 h-12 rounded-xl bg-gray-200 border border-gray-300 overflow-hidden">
-                              <img src={formData.attachment.url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
+                              <img
+                                src={formData.attachment.url}
+                                alt="Preview"
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  // eslint-disable-next-line no-console
+                                  console.error('Failed to load main attachment:', formData.attachment?.url);
+                                  (e.currentTarget as HTMLImageElement).src = 'https://placehold.co/100x100?text=Error';
+                                }}
+                              />
+                          </div>
+                          <div className="mt-1">
+                            <a href={formData.attachment.url} target="_blank" rel="noreferrer" className="text-xs text-indigo-600">Buka lampiran</a>
                           </div>
                           <button
                             onClick={() => handleAttachmentChange('')}
@@ -559,22 +574,28 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                           {formData.optionAttachments?.[idx]?.url && (
                             <div className="relative group shrink-0">
                               <div className="w-20 h-20 rounded-xl bg-gray-200 border border-gray-300 overflow-hidden">
-                                <img 
-                                  src={formData.optionAttachments[idx].url!} 
-                                  alt={`Preview ${String.fromCharCode(65 + idx)}`} 
-                                  className="w-full h-full object-cover" 
+                                <img
+                                  src={formData.optionAttachments[idx].url!}
+                                  alt={`Preview ${String.fromCharCode(65 + idx)}`}
+                                  className="w-full h-full object-cover"
                                   onError={(e) => {
+                                    const src = formData.optionAttachments?.[idx]?.url;
+                                    // eslint-disable-next-line no-console
+                                    console.error('Failed to load option preview:', src);
                                     (e.currentTarget as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100"%3E%3Crect fill="%23e5e7eb" width="100" height="100"/%3E%3Ctext x="50" y="50" text-anchor="middle" dy=".3em" fill="%236b7280" font-size="12" font-family="system-ui"%3EError%3C/text%3E%3C/svg%3E';
                                   }}
                                 />
                               </div>
-                              <button
-                                onClick={() => handleOptionAttachmentChange(idx, '')}
-                                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                                title="Hapus Gambar"
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
+                              <div className="flex items-start gap-2 mt-2">
+                                <button
+                                  onClick={() => handleOptionAttachmentChange(idx, '')}
+                                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                  title="Hapus Gambar"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                                <a href={formData.optionAttachments[idx].url} target="_blank" rel="noreferrer" className="text-xs text-indigo-600">Buka gambar</a>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -727,22 +748,28 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                             {formData.optionAttachments?.[idx]?.url && (
                               <div className="relative group shrink-0">
                                 <div className="w-20 h-20 rounded-xl bg-gray-200 border border-gray-300 overflow-hidden">
-                                  <img 
-                                    src={formData.optionAttachments[idx].url!} 
-                                    alt={`Preview ${String.fromCharCode(65 + idx)}`} 
-                                    className="w-full h-full object-cover" 
+                                  <img
+                                    src={formData.optionAttachments[idx].url!}
+                                    alt={`Preview ${String.fromCharCode(65 + idx)}`}
+                                    className="w-full h-full object-cover"
                                     onError={(e) => {
+                                      const src = formData.optionAttachments?.[idx]?.url;
+                                      // eslint-disable-next-line no-console
+                                      console.error('Failed to load option preview:', src);
                                       (e.currentTarget as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100"%3E%3Crect fill="%23e5e7eb" width="100" height="100"/%3E%3Ctext x="50" y="50" text-anchor="middle" dy=".3em" fill="%236b7280" font-size="12" font-family="system-ui"%3EError%3C/text%3E%3C/svg%3E';
                                     }}
                                   />
                                 </div>
-                                <button
-                                  onClick={() => handleOptionAttachmentChange(idx, '')}
-                                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                                  title="Hapus Gambar"
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
+                                <div className="flex items-start gap-2 mt-2">
+                                  <button
+                                    onClick={() => handleOptionAttachmentChange(idx, '')}
+                                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                    title="Hapus Gambar"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                  <a href={formData.optionAttachments[idx].url} target="_blank" rel="noreferrer" className="text-xs text-indigo-600">Buka gambar</a>
+                                </div>
                               </div>
                             )}
                           </div>

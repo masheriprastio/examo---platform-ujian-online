@@ -173,7 +173,8 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
             ...formData,
             questions: formData.questions.map(q => ({
               ...q,
-              attachment: undefined // Remove attachments to save space
+              attachment: undefined, // Remove main attachments to save space
+              optionAttachments: undefined // Also remove option attachments to save space
             }))
           };
           const compressedBackup = JSON.stringify(compressedData);
@@ -357,12 +358,14 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     if (file) {
       if (file.size > 15 * 1024 * 1024) { // 15MB limit
         alert("Ukuran file maksimal 15MB");
+        e.target.value = ''; // Reset input
         return;
       }
 
       const reader = new FileReader();
       reader.onloadend = () => {
         handleOptionAttachmentChange(qIndex, oIndex, reader.result as string);
+        e.target.value = ''; // Reset input after successful upload
       };
       reader.readAsDataURL(file);
     }
@@ -379,8 +382,8 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
       difficulty: 'medium',
       createdAt: now, // Timestamp ketika soal dibuat
       updatedAt: now, // Timestamp pembaruan awal
-      ...(type === 'mcq' ? { options: ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D'], correctAnswerIndex: 0, randomizeOptions: false } : {}),
-      ...(type === 'multiple_select' ? { options: ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D'], correctAnswerIndices: [], randomizeOptions: false } : {}),
+      ...(type === 'mcq' ? { options: ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D'], correctAnswerIndex: 0, randomizeOptions: false, optionAttachments: [undefined, undefined, undefined, undefined] } : {}),
+      ...(type === 'multiple_select' ? { options: ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D'], correctAnswerIndices: [], randomizeOptions: false, optionAttachments: [undefined, undefined, undefined, undefined] } : {}),
       ...(type === 'true_false' ? { trueFalseAnswer: true } : {}),
       ...(type === 'short_answer' ? { shortAnswer: '' } : {}),
       ...(type === 'essay' ? { essayAnswer: '' } : {})
