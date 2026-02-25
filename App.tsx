@@ -31,9 +31,9 @@ const formatDate = (iso: string) => new Date(iso).toLocaleDateString('id-ID', {
 });
 
 const LoginView: React.FC<{
-  onLogin: (role: 'teacher' | 'student', email: string, password?: string) => Promise<string | null>;
+  onLogin: (role: 'teacher' | 'student' | 'admin', email: string, password?: string) => Promise<string | null>;
 }> = ({ onLogin }) => {
-  const [role, setRole] = useState<'student' | 'teacher'>('student');
+  const [role, setRole] = useState<'student' | 'teacher' | 'admin'>('student');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('password');
   const [showPassword, setShowPassword] = useState(false);
@@ -44,6 +44,7 @@ const LoginView: React.FC<{
     // Only autofill if using mocks
     if (!isSupabaseConfigured) {
         if (role === 'teacher') setEmail(MOCK_TEACHER.email);
+        else if (role === 'admin') setEmail('admin@sekolah.id');
         else setEmail(MOCK_STUDENT.email);
         setPassword('password');
     } else {
@@ -76,6 +77,7 @@ const LoginView: React.FC<{
           <div className="flex bg-gray-100 p-1 rounded-2xl">
             <button type="button" onClick={() => setRole('student')} className={`flex-1 py-3 rounded-xl text-sm font-black transition-all ${role === 'student' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Siswa</button>
             <button type="button" onClick={() => setRole('teacher')} className={`flex-1 py-3 rounded-xl text-sm font-black transition-all ${role === 'teacher' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Guru</button>
+            <button type="button" onClick={() => setRole('admin')} className={`flex-1 py-3 rounded-xl text-sm font-black transition-all ${role === 'admin' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Admin</button>
           </div>
 
           {errorMsg && (
@@ -122,7 +124,8 @@ const Sidebar: React.FC<{
   onLogout: () => void;
   onClose: () => void;
 }> = ({ user, activeView, isOpen, onNavigate, onLogout, onClose }) => {
-  const isTeacher = user.role === 'teacher';
+  const isTeacherOrAdmin = user.role === 'teacher' || user.role === 'admin';
+  const isAdmin = user.role === 'admin';
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false); // Submenu state
 
   // Auto expand submenu if active view is a child
@@ -132,11 +135,11 @@ const Sidebar: React.FC<{
     }
   }, [activeView]);
 
-  const menuItems = isTeacher ? [
+  const menuItems = isTeacherOrAdmin ? [
     { id: 'TEACHER_DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'TEACHER_GRADES', label: 'Buku Nilai', icon: ClipboardList },
-    // Group "Guru & Siswa"
-    {
+    // Group "Guru & Siswa" - Only for Admin
+    ...(isAdmin ? [{
       id: 'GROUP_USERS',
       label: 'Guru & Siswa',
       icon: Users,
@@ -147,7 +150,7 @@ const Sidebar: React.FC<{
         { id: 'TEACHER_TEACHERS', label: 'Manajemen Guru' },
         { id: 'TEACHER_STUDENTS', label: 'Manajemen Siswa' }
       ]
-    },
+    }] : []),
     { id: 'TEACHER_BANK', label: 'Bank Soal', icon: Database },
     { id: 'AI_GENERATOR', label: 'Generator AI', icon: Sparkles },
     { id: 'MATERIAL_MANAGER', label: 'Manajemen Materi', icon: FileText },
@@ -571,7 +574,7 @@ export default function App() {
   }, [currentUser]);
 
 
-  const handleLogin = async (role: 'teacher' | 'student', email: string, password?: string): Promise<string | null> => {
+  const handleLogin = async (role: 'teacher' | 'student' | 'admin', email: string, password?: string): Promise<string | null> => {
     const pwd = password || 'password';
 
     if (isSupabaseConfigured && supabase) {
@@ -583,7 +586,7 @@ export default function App() {
             .eq('role', role)
             .single();
 
-        if (error || !data) return `${role === 'teacher' ? 'Guru' : 'Siswa'} tidak ditemukan.`;
+        if (error || !data) return `${role === 'teacher' ? 'Guru' : role === 'admin' ? 'Admin' : 'Siswa'} tidak ditemukan.`;
 
         // Simple password check (In production, use bcrypt/argon2 on backend or Supabase Auth)
         if (data.password && data.password !== pwd) {
@@ -609,10 +612,10 @@ export default function App() {
         const userWithToken = { ...data, session_token: sessionToken };
         setCurrentUser(userWithToken);
 
-        setView(role === 'teacher' ? 'TEACHER_DASHBOARD' : 'STUDENT_DASHBOARD');
+        setView(role === 'teacher' || role === 'admin' ? 'TEACHER_DASHBOARD' : 'STUDENT_DASHBOARD');
         // Fetch fresh data and notify existing violations to teacher
         const fetched = await fetchData();
-        if (role === 'teacher' && fetched.results) {
+        if ((role === 'teacher' || role === 'admin') && fetched.results) {
           fetched.results.forEach(r => {
             if (r.violation_alert) {
               const msg = r.logs && Array.isArray(r.logs) && r.logs.some((l: any) => l.event === 'violation_disqualified')
@@ -628,9 +631,10 @@ export default function App() {
 
     } else {
         // Fallback to Mock
-        if (role === 'teacher') {
-            if (email === MOCK_TEACHER.email && pwd === 'password') {
-                setCurrentUser(MOCK_TEACHER);
+        if (role === 'teacher' || role === 'admin') {
+            const mockUser = role === 'teacher' ? MOCK_TEACHER : { id: 'admin-01', email: 'admin@sekolah.id', name: 'Administrator', role: 'admin', school: 'SMA Negeri 1 Digital', password: 'password' };
+            if (email === mockUser.email && pwd === 'password') {
+                setCurrentUser(mockUser as User);
                 setView('TEACHER_DASHBOARD');
                 // For mock mode, check any existing results in state and notify
                 results.forEach(r => {
@@ -641,7 +645,7 @@ export default function App() {
                   }
                 });
                 return null; }
-            return "Guru tidak ditemukan.";
+            return `${role === 'teacher' ? 'Guru' : 'Admin'} tidak ditemukan.`;
         } else {
             const found = students.find(s => s.email === email || s.nis === email);
             if (found) {
@@ -1553,7 +1557,7 @@ export default function App() {
       <div className="flex-1 flex flex-col h-screen overflow-hidden text-left">
         <header className="md:hidden bg-white border-b border-gray-100 p-4 flex items-center justify-between"><button onClick={() => setIsSidebarOpen(true)} className="p-2 text-indigo-600 bg-indigo-50 rounded-xl"><Menu /></button><div className="flex items-center gap-2"><GraduationCap className="text-indigo-600" /><span className="font-black">Examo</span></div><div className="w-10" /></header>
         <main className="flex-1 p-6 md:p-10 overflow-y-auto">
-          {currentUser?.role === 'teacher' ? (
+          {currentUser && (currentUser.role === 'teacher' || currentUser.role === 'admin') ? (
             view === 'TEACHER_GRADES' ? (
               <div className="max-w-6xl mx-auto animate-in fade-in">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
@@ -1848,12 +1852,16 @@ export default function App() {
               />
             ) : (
               <div className="max-w-6xl mx-auto animate-in fade-in pb-20">
-                <h1 className="text-3xl font-black text-gray-900 mb-8">Dashboard Guru</h1>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
+                <h1 className="text-3xl font-black text-gray-900 mb-8">Dashboard {currentUser.role === 'admin' ? 'Admin' : 'Guru'}</h1>
+                <div className={`grid grid-cols-1 ${currentUser.role === 'admin' ? 'md:grid-cols-4' : 'md:grid-cols-2'} gap-6 mb-12`}>
                   <StatCard label="Ujian Aktif" value={exams.length} icon={Book} color="blue" />
                   <StatCard label="Bank Soal" value={bankQuestions.length} icon={Database} color="green" />
-                  <StatCard label="Total Siswa" value={students.length} icon={Users} color="indigo" />
-                  <StatCard label="Hasil Masuk" value={results.filter(r => r.status === 'completed').length} icon={CheckCircle} color="blue" />
+                  {currentUser.role === 'admin' && (
+                    <>
+                      <StatCard label="Total Siswa" value={students.length} icon={Users} color="indigo" />
+                      <StatCard label="Hasil Masuk" value={results.filter(r => r.status === 'completed').length} icon={CheckCircle} color="blue" />
+                    </>
+                  )}
                 </div>
 
                 <div className="flex flex-col md:flex-row justify-between items-end mb-6 gap-4">
