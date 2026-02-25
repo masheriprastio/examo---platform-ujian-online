@@ -76,18 +76,21 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
   const loadOrGenerateShuffledQuestions = (): Question[] => {
     const cacheKey = getShuffleCacheKey();
     
-    // If existing progress exists, use the questions from there (preserves order)
-    if (existingProgress?.questions) {
-      return existingProgress.questions;
-    }
+    // If NOT in preview mode, try to load from cache or existing progress
+    if (!isPreview) {
+      // If existing progress exists, use the questions from there (preserves order)
+      if (existingProgress?.questions) {
+        return existingProgress.questions;
+      }
 
-    // Try to load from session storage (persists across page refreshes during same session)
-    const cachedData = sessionStorage.getItem(cacheKey);
-    if (cachedData) {
-      try {
-        return JSON.parse(cachedData);
-      } catch (err) {
-        console.warn('Failed to parse cached shuffle data:', err);
+      // Try to load from session storage (persists across page refreshes during same session)
+      const cachedData = sessionStorage.getItem(cacheKey);
+      if (cachedData) {
+        try {
+          return JSON.parse(cachedData);
+        } catch (err) {
+          console.warn('Failed to parse cached shuffle data:', err);
+        }
       }
     }
 
@@ -100,59 +103,34 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
 
     // Randomize options for MCQ and Multiple Select if enabled (HANYA SEKALI)
     questionsToRun = questionsToRun.map(q => {
-      if ((q.type === 'mcq' || q.type === 'multiple_select') && q.randomizeOptions) {
-        // Handle both legacy string[] options and new richOptions + optionAttachments
-        const sourceOptions: { html: string; attachment?: string; optionAttachment?: any; idx: number }[] = q.richOptions
-            ? q.richOptions.map((ro, idx) => ({ 
-                html: ro.html, 
-                attachment: ro.attachment, 
-                optionAttachment: q.optionAttachments?.[idx],
-                idx 
-              }))
-            : q.options?.map((opt, idx) => ({ 
-                html: opt, 
-                attachment: '', 
-                optionAttachment: q.optionAttachments?.[idx],
-                idx 
-              })) || [];
-
-        if (sourceOptions.length > 0) {
-            const shuffledOptions = fisherYatesShuffle(sourceOptions);
-
-            // Find the new index of the correct answer(s)
-            const newCorrectIndex = q.type === 'mcq' ? shuffledOptions.findIndex(o => o.idx === q.correctAnswerIndex) : undefined;
-
-            let newCorrectIndices: number[] | undefined;
-            if (q.type === 'multiple_select' && q.correctAnswerIndices) {
-                newCorrectIndices = q.correctAnswerIndices.map(oldIdx => shuffledOptions.findIndex(o => o.idx === oldIdx));
-            }
-
-            return {
-                ...q,
-                // Update both legacy and new structure to be safe, though UI should prefer richOptions
-                options: shuffledOptions.map(o => o.html),
-                richOptions: shuffledOptions.map(o => ({ html: o.html, attachment: o.attachment })),
-                optionAttachments: shuffledOptions.map(o => o.optionAttachment),
-                correctAnswerIndex: newCorrectIndex,
-                correctAnswerIndices: newCorrectIndices,
-                _originalOptionsMapping: shuffledOptions.map(o => o.idx) // Store mapping if needed
-            };
+      if ((q.type === 'mcq' || q.type === 'multiple_select') && q.randomizeOptions && q.options) {
+        const optionsWithIndex = q.options.map((opt, idx) => ({ opt, idx }));
+        const shuffledOptions = fisherYatesShuffle(optionsWithIndex);
+        
+        // Find the new index of the correct answer(s)
+        const newCorrectIndex = q.type === 'mcq' ? shuffledOptions.findIndex(o => o.idx === q.correctAnswerIndex) : undefined;
+        
+        let newCorrectIndices: number[] | undefined;
+        if (q.type === 'multiple_select' && q.correctAnswerIndices) {
+          newCorrectIndices = q.correctAnswerIndices.map(oldIdx => shuffledOptions.findIndex(o => o.idx === oldIdx));
         }
+        
+        return {
+          ...q,
+          options: shuffledOptions.map(o => o.opt),
+          correctAnswerIndex: newCorrectIndex,
+          correctAnswerIndices: newCorrectIndices,
+          _originalOptionsMapping: shuffledOptions.map(o => o.idx) // Store mapping if needed
+        };
       }
-
-      // If not randomized or no options, but we need to normalize richOptions for legacy data
-      if (!q.richOptions && q.options) {
-          return {
-              ...q,
-              richOptions: q.options.map(opt => ({ html: opt }))
-          };
-      }
-
       return q;
     });
 
     // Save to session storage untuk session berikutnya (jika user refresh)
-    sessionStorage.setItem(cacheKey, JSON.stringify(questionsToRun));
+    // BUT ONLY IF NOT IN PREVIEW MODE
+    if (!isPreview) {
+      sessionStorage.setItem(cacheKey, JSON.stringify(questionsToRun));
+    }
     
     return questionsToRun;
   };
@@ -388,6 +366,18 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
   if (!isReady) return <div className="h-screen bg-white flex items-center justify-center"><LoaderComponent text="Mempersiapkan Lembar Ujian..." /></div>;
 
   const currentQuestion = shuffledQuestions[currentQuestionIndex];
+
+  if (!currentQuestion) {
+    return (
+        <div className="h-screen bg-white flex flex-col items-center justify-center p-8 text-center">
+            <AlertTriangle className="w-12 h-12 text-amber-500 mb-4" />
+            <h3 className="text-xl font-black text-gray-900">Tidak Ada Pertanyaan</h3>
+            <p className="text-gray-500 mt-2">Ujian ini belum memiliki pertanyaan yang dapat ditampilkan.</p>
+            <button onClick={onExit} className="mt-6 px-6 py-3 bg-gray-900 text-white rounded-xl font-bold">Kembali</button>
+        </div>
+    );
+  }
+
   const totalAnswered = Object.keys(answers).length;
   const progressPercent = (totalAnswered / shuffledQuestions.length) * 100;
 
@@ -462,41 +452,49 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
             </div>
 
             <div className="space-y-4">
-              {currentQuestion.type === 'mcq' && (currentQuestion.richOptions || currentQuestion.options)?.map((opt, idx) => {
-                const htmlContent = typeof opt === 'string' ? opt : opt.html;
-                const optionAttachment = currentQuestion.optionAttachments?.[idx];
-                const hasAttachment = optionAttachment?.url;
+              {currentQuestion.type === 'mcq' && currentQuestion.options?.map((opt, idx) => {
+                const attachment = currentQuestion.optionAttachments?.[idx];
                 return (
-                    <button key={idx} onClick={() => {
+                  <button key={idx} onClick={() => {
                     setAnswers(prev => {
-                        if (prev[currentQuestion.id] !== idx) {
+                      if (prev[currentQuestion.id] !== idx) {
                         addLog('autosave', `Changed answer for Q${currentQuestionIndex + 1} to option ${String.fromCharCode(65 + idx)}`);
-                        }
-                        return { ...prev, [currentQuestion.id]: idx };
+                      }
+                      return { ...prev, [currentQuestion.id]: idx };
                     });
-                    }} className={`w-full text-left p-6 rounded-[28px] border-2 transition-all flex items-start gap-5 ${answers[currentQuestion.id] === idx ? 'bg-indigo-50 border-indigo-600 shadow-xl' : 'bg-white border-gray-50 hover:bg-gray-50/30'}`}>
-                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black shrink-0 mt-1 ${answers[currentQuestion.id] === idx ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-400'}`}>{String.fromCharCode(65 + idx)}</div>
-                    <div className={`flex-1 flex flex-col gap-3 ${answers[currentQuestion.id] === idx ? 'text-indigo-900' : 'text-gray-700'}`}>
-                      <div className={`font-medium text-lg prose max-w-none`} dangerouslySetInnerHTML={{ __html: htmlContent }} />
-                      {hasAttachment && (
-                        <img 
-                          src={optionAttachment.url} 
-                          alt={`Option ${String.fromCharCode(65 + idx)}`}
-                          className="max-w-xs max-h-64 rounded-lg border border-gray-200 object-contain"
-                          onError={(e) => (e.currentTarget.src = 'https://placehold.co/300x200?text=Error')}
-                        />
+                  }} className={`w-full text-left p-6 rounded-[28px] border-2 transition-all flex items-start gap-5 ${answers[currentQuestion.id] === idx ? 'bg-indigo-50 border-indigo-600 shadow-xl' : 'bg-white border-gray-50 hover:bg-gray-50/30'}`}>
+                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black flex-shrink-0 mt-1 ${answers[currentQuestion.id] === idx ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-400'}`}>{String.fromCharCode(65 + idx)}</div>
+                    <div className="flex-1 space-y-2">
+                      <div className={`font-bold text-lg ${answers[currentQuestion.id] === idx ? 'text-indigo-900' : 'text-gray-700'}`} dangerouslySetInnerHTML={{__html: opt}}></div>
+                      {attachment?.url && (
+                        <div className="flex gap-2 items-center">
+                          <img
+                            src={attachment.url}
+                            alt="Option"
+                            className="h-20 rounded-lg object-cover"
+                            onError={(e) => {
+                              const src = attachment.url;
+                              // Log the failing URL to help debugging inaccessible/incorrect paths
+                              // eslint-disable-next-line no-console
+                              console.error('Failed to load option attachment:', src);
+                              (e.currentTarget as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="80" height="80"%3E%3Crect fill="%23e5e7eb" width="80" height="80"/%3E%3Ctext x="40" y="44" text-anchor="middle" fill="%236b7280" font-size="10" font-family="system-ui"%3EUnavailable%3C/text%3E%3C/svg%3E';
+                            }}
+                          />
+                          <div className="flex flex-col">
+                            {attachment.caption && <span className="text-xs text-gray-600 italic">{attachment.caption}</span>}
+                            <a href={attachment.url} target="_blank" rel="noreferrer" className="text-xs text-indigo-600 mt-1">Buka gambar</a>
+                          </div>
+                        </div>
                       )}
                     </div>
-                    </button>
+                  </button>
                 );
               })}
 
-              {currentQuestion.type === 'multiple_select' && (currentQuestion.richOptions || currentQuestion.options)?.map((opt, idx) => {
-                const htmlContent = typeof opt === 'string' ? opt : opt.html;
+              {currentQuestion.type === 'multiple_select' && currentQuestion.options?.map((opt, idx) => {
                 const currentAnswers = (answers[currentQuestion.id] as number[]) || [];
                 const isSelected = currentAnswers.includes(idx);
-                const optionAttachment = currentQuestion.optionAttachments?.[idx];
-                const hasAttachment = optionAttachment?.url;
+                const attachment = currentQuestion.optionAttachments?.[idx];
                 return (
                   <button key={idx} onClick={() => {
                     setAnswers(prev => {
@@ -509,18 +507,29 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                       return { ...prev, [currentQuestion.id]: newAns };
                     });
                   }} className={`w-full text-left p-6 rounded-[28px] border-2 transition-all flex items-start gap-5 ${isSelected ? 'bg-indigo-50 border-indigo-600 shadow-xl' : 'bg-white border-gray-50 hover:bg-gray-50/30'}`}>
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center border-2 shrink-0 mt-1 ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-transparent'}`}>
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center border-2 flex-shrink-0 mt-1 ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-transparent'}`}>
                       <CheckCircle className="w-6 h-6" />
                     </div>
-                    <div className={`flex-1 flex flex-col gap-3 ${isSelected ? 'text-indigo-900' : 'text-gray-700'}`}>
-                      <div className={`font-medium text-lg prose max-w-none`} dangerouslySetInnerHTML={{ __html: htmlContent }} />
-                      {hasAttachment && (
-                        <img 
-                          src={optionAttachment.url} 
-                          alt={`Option ${String.fromCharCode(65 + idx)}`}
-                          className="max-w-xs max-h-64 rounded-lg border border-gray-200 object-contain"
-                          onError={(e) => (e.currentTarget.src = 'https://placehold.co/300x200?text=Error')}
-                        />
+                    <div className="flex-1 space-y-2">
+                      <div className={`font-bold text-lg ${isSelected ? 'text-indigo-900' : 'text-gray-700'}`} dangerouslySetInnerHTML={{__html: opt}}></div>
+                      {attachment?.url && (
+                        <div className="flex gap-2 items-center">
+                          <img
+                            src={attachment.url}
+                            alt="Option"
+                            className="h-20 rounded-lg object-cover"
+                            onError={(e) => {
+                              const src = attachment.url;
+                              // eslint-disable-next-line no-console
+                              console.error('Failed to load option attachment:', src);
+                              (e.currentTarget as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="80" height="80"%3E%3Crect fill="%23e5e7eb" width="80" height="80"/%3E%3Ctext x="40" y="44" text-anchor="middle" fill="%236b7280" font-size="10" font-family="system-ui"%3EUnavailable%3C/text%3E%3C/svg%3E';
+                            }}
+                          />
+                          <div className="flex flex-col">
+                            {attachment.caption && <span className="text-xs text-gray-600 italic">{attachment.caption}</span>}
+                            <a href={attachment.url} target="_blank" rel="noreferrer" className="text-xs text-indigo-600 mt-1">Buka gambar</a>
+                          </div>
+                        </div>
                       )}
                     </div>
                   </button>
