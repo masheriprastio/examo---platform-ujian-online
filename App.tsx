@@ -267,7 +267,8 @@ export default function App() {
   const [retryCount, setRetryCount] = useState(0);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [lastFetchTime, setLastFetchTime] = useState<number>(0);
-  const FETCH_CACHE_DURATION = 30 * 1000; // Cache data for 30 seconds
+  const FETCH_CACHE_DURATION = 5 * 60 * 1000; // Cache data for 5 minutes (optimized for Free Tier)
+  const [hasInitialLoad, setHasInitialLoad] = useState(false); // Track if initial load completed
 
   // Session Timeout & Warning State
   const [showTimeoutWarning, setShowTimeoutWarning] = useState(false);
@@ -330,30 +331,44 @@ export default function App() {
   }, [currentUser, addAlert]);
 
     // Load Data from Supabase. Returns fetched exams and results for callers to act on.
+    // OPTIMIZED: Select only needed columns, smaller limits, longer cache for Free Tier
     const fetchData = async (forceRefresh = false) => {
       if (!isSupabaseConfigured || !supabase) return { exams: null as any, results: null as any };
 
       // Check cache - don't fetch if data was recently loaded (unless forceRefresh)
       const now = Date.now();
       if (!forceRefresh && lastFetchTime > 0 && (now - lastFetchTime) < FETCH_CACHE_DURATION) {
-        console.log('Using cached data, last fetch was', Math.round((now - lastFetchTime) / 1000), 'seconds ago');
+        console.log('[Supabase Cache] Using cached data, last fetch was', Math.round((now - lastFetchTime) / 1000), 'seconds ago');
         return { exams, results };
       }
 
       try {
         setIsLoadingData(true);
         
-        // Show loading state only if it takes more than 300ms
+        // Show loading state only if it takes more than 500ms
         const loadingTimeout = setTimeout(() => {
-          addAlert('Memuat data dari database...', 'info', 'loading-data');
-        }, 300);
+          addAlert('🔄 Memuat data... (Free Tier Supabase, mungkin sedikit lambat)', 'info', 'loading-data');
+        }, 500);
 
-        // 1. Fetch Exams with limit for performance
-        const { data: examsData, error: examsError } = await supabase
+        // OPTIMIZATION TIP 1: Fetch requests in parallel, not sequentially
+        const examsPromise = supabase
           .from('exams')
-          .select('*')
+          .select('id, title, category, status, created_at, duration_minutes, start_date, end_date, questions, randomize_questions, token_required, exam_token')
           .order('created_at', { ascending: false })
-          .limit(50); // Limit to 50 exams for performance
+          .limit(30); // Reduced from 50 to 30 for better performance
+
+        const resultsPromise = supabase
+          .from('exam_results')
+          .select('id, exam_id, student_id, student_name, total_points_possible, points_obtained, total_questions, correct_count, incorrect_count, unanswered_count, submitted_at, started_at, logs')
+          .gte('submitted_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()) // 30 days ago
+          .order('submitted_at', { ascending: false })
+          .limit(80); // Reduced from 100 to 80
+
+        // Execute both in parallel
+        const [{ data: examsData, error: examsError }, { data: resultsData, error: resultsError }] = await Promise.all([
+          examsPromise,
+          resultsPromise
+        ]);
 
         let mappedExams: Exam[] = [];
         if (examsData && !examsError) {
@@ -363,25 +378,19 @@ export default function App() {
               durationMinutes: e.duration_minutes,
               createdAt: e.created_at,
               startDate: e.start_date,
-              endDate: e.end_date
+              endDate: e.end_date,
+              randomizeQuestions: e.randomize_questions ?? false,
+              tokenRequired: e.token_required ?? false,
+              examToken: e.exam_token
             };
             // Normalize questions to ensure optionAttachments is proper
             return normalizeExam(exam);
           });
           setExams(mappedExams);
           setBankQuestions(mappedExams.flatMap(e => e.questions || []));
+        } else if (examsError) {
+          console.warn('[Supabase] Exams fetch error:', examsError);
         }
-
-        // 2. Fetch Results with limit and only recent data
-        const oneMonthAgo = new Date();
-        oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
-        
-        const { data: resultsData, error: resultsError } = await supabase
-          .from('exam_results')
-          .select('*')
-          .gte('submitted_at', oneMonthAgo.toISOString())
-          .order('submitted_at', { ascending: false })
-          .limit(100); // Limit to 100 most recent results
 
         let mappedResults: ExamResult[] = [];
         if (resultsData && !resultsError) {
@@ -389,7 +398,7 @@ export default function App() {
              ...r,
              examId: r.exam_id,
              studentId: r.student_id,
-             studentName: r.student_name || 'Unknown',
+             studentName: r.student_name || 'Tidak diketahui',
              totalPointsPossible: r.total_points_possible,
              pointsObtained: r.points_obtained,
              totalQuestions: r.total_questions,
@@ -401,22 +410,25 @@ export default function App() {
              violation_alert: Array.isArray(r.logs) && r.logs.some((l: any) => l.event === 'tab_blur' || l.event === 'violation_disqualified')
           }));
           setResults(mappedResults);
+        } else if (resultsError) {
+          console.warn('[Supabase] Results fetch error:', resultsError);
         }
 
         clearTimeout(loadingTimeout);
         setLastFetchTime(now);
         setIsLoadingData(false);
+        setHasInitialLoad(true);
         
-        // Show success message if data was actually fetched (not cached)
+        // Show success message only if data was actually fetched (not cached)
         if (forceRefresh || lastFetchTime === 0) {
-          addAlert('Data berhasil dimuat!', 'success', 'data-loaded');
+          addAlert('✅ Data berhasil dimuat! (Cache: 5 menit)', 'success', 'data-loaded');
         }
         
         return { exams: mappedExams, results: mappedResults };
       } catch (err) {
-        console.error("Failed to fetch data from Supabase:", err);
+        console.error("[Supabase] Failed to fetch data:", err);
         setIsLoadingData(false);
-        addAlert('Gagal memuat data dari database. Coba lagi nanti.', 'error', 'fetch-error');
+        addAlert('❌ Gagal memuat data. Periksa koneksi internet atau coba refresh page.', 'error', 'fetch-error');
         return { exams: null as any, results: null as any };
       }
     };
@@ -472,13 +484,22 @@ export default function App() {
     }
   }, [view]);
 
-  // Fetch Students (only if Teacher logged in)
+  // Fetch Students (only if Teacher logged in) - WITH OPTIMIZED QUERY
   useEffect(() => {
      const fetchStudents = async () => {
         if (currentUser?.role === 'teacher' && isSupabaseConfigured && supabase) {
-            const { data, error } = await supabase.from('users').select('*').eq('role', 'student');
+            // OPTIMIZATION: Select only needed columns, not all
+            const { data, error } = await supabase
+              .from('users')
+              .select('id, email, name, nis, grade, school, role')
+              .eq('role', 'student')
+              .limit(200); // Reasonable limit for most schools
+            
             if (data && !error) {
                 setStudents(data as User[]);
+                console.log('[Students] Loaded', data.length, 'students (optimized query)');
+            } else if (error) {
+                console.warn('[Students] Fetch error:', error);
             }
         }
      };
@@ -991,9 +1012,12 @@ export default function App() {
               // Rollback optimistic
               setStudents(students);
           } else {
-              // Re-fetch to get IDs? Or just let next load handle it.
-              // For better UX, we should ideally re-fetch.
-              const { data } = await supabase.from('users').select('*').eq('role', 'student');
+              // Re-fetch to get IDs with OPTIMIZED QUERY
+              const { data } = await supabase
+                .from('users')
+                .select('id, email, name, nis, grade, school, role')
+                .eq('role', 'student')
+                .limit(200);
               if (data) setStudents(data as User[]);
           }
       }

@@ -38,13 +38,16 @@ export class MaterialService {
   }
 
   static async getAllMaterials(): Promise<Material[]> {
+    // OPTIMIZATION: Select only needed columns, not all columns with * 
+    // Also add limit for Free Tier performance
     const { data, error } = await supabase
       .from('materials')
-      .select('*')
-      .order('uploaded_at', { ascending: false });
+      .select('id, title, description, file_name, mime_type, file_size, file_url, uploaded_by, uploaded_at, category, grade, subject, is_public')
+      .order('uploaded_at', { ascending: false })
+      .limit(100); // Reasonable limit for materials
 
     if (error) {
-      console.error('Failed to fetch materials:', error);
+      console.error('[Materials] Failed to fetch:', error);
       return [];
     }
 
@@ -52,6 +55,7 @@ export class MaterialService {
       return [];
     }
 
+    console.log('[Materials] Loaded', data.length, 'materials (optimized query)');
     return data.map(this.normalizeMaterial);
   }
 
