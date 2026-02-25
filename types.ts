@@ -18,6 +18,11 @@ export interface Question {
   type: QuestionType;
   text: string;
   options?: string[];
+  optionAttachments?: Array<{
+    url?: string;
+    type?: 'image' | 'video' | 'audio';
+    caption?: string;
+  }>;
   correctAnswerIndex?: number;
   correctAnswerIndices?: number[];
   trueFalseAnswer?: boolean;

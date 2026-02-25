@@ -231,6 +231,7 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions = [], onUpdate })
 const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => void, onCancel: () => void }> = ({ question, onSave, onCancel }) => {
   const [formData, setFormData] = useState<Question>({ ...question });
   const [uploadMode, setUploadMode] = useState<'url' | 'file'>('url');
+  const [optionUploadMode, setOptionUploadMode] = useState<{ [key: number]: 'url' | 'file' }>({});
 
   const handleChange = (field: keyof Question, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -240,6 +241,32 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
     const newOpts = [...(formData.options || [])];
     newOpts[idx] = val;
     setFormData(prev => ({ ...prev, options: newOpts }));
+  };
+
+  const handleOptionAttachmentChange = (idx: number, url: string) => {
+    const newAttachments = [...(formData.optionAttachments || Array(formData.options?.length || 0).fill(null))];
+    if (url) {
+      newAttachments[idx] = { type: 'image', url: url, caption: '' };
+    } else {
+      newAttachments[idx] = { url: undefined };
+    }
+    setFormData(prev => ({ ...prev, optionAttachments: newAttachments }));
+  };
+
+  const handleOptionFileUpload = (idx: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 15 * 1024 * 1024) { // 15MB limit
+        alert("Ukuran file maksimal 15MB");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        handleOptionAttachmentChange(idx, reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleAttachmentChange = (url: string) => {
@@ -447,40 +474,110 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 gap-4">
+                <div className="grid grid-cols-1 gap-6">
                   {formData.options?.map((opt, idx) => (
-                    <div key={idx} className="relative group">
-                      <div className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-black text-gray-400 border border-gray-200">{String.fromCharCode(65 + idx)}</div>
-                      <input
-                        type="text"
-                        value={opt}
-                        onChange={(e) => handleOptionChange(idx, e.target.value)}
-                        className={`w-full pl-14 pr-20 py-4 rounded-xl border-2 font-bold text-sm outline-none transition-all ${formData.correctAnswerIndex === idx ? 'border-green-500 bg-green-50/20' : 'border-gray-100 bg-gray-50 focus:bg-white focus:border-indigo-200'}`}
-                        placeholder={`Pilihan ${String.fromCharCode(65 + idx)}`}
-                      />
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2 flex gap-1">
-                        <button
-                          onClick={() => handleChange('correctAnswerIndex', idx)}
-                          className={`p-1.5 rounded-lg transition-all ${formData.correctAnswerIndex === idx ? 'bg-green-500 text-white shadow-lg shadow-green-200' : 'bg-gray-200 text-gray-400 hover:bg-gray-300'}`}
-                          title="Tandai Jawaban Benar"
-                        >
-                          <Check className="w-4 h-4" />
-                        </button>
-                        {(formData.options?.length || 0) > 2 && (
+                    <div key={idx} className="bg-gray-50 p-4 rounded-2xl border-2 border-gray-100 space-y-4">
+                      {/* Option Input */}
+                      <div className="relative group">
+                        <div className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-black text-gray-400 border border-gray-200">{String.fromCharCode(65 + idx)}</div>
+                        <input
+                          type="text"
+                          value={opt}
+                          onChange={(e) => handleOptionChange(idx, e.target.value)}
+                          className={`w-full pl-14 pr-20 py-4 rounded-xl border-2 font-bold text-sm outline-none transition-all ${formData.correctAnswerIndex === idx ? 'border-green-500 bg-green-50/20' : 'border-gray-100 bg-gray-50 focus:bg-white focus:border-indigo-200'}`}
+                          placeholder={`Pilihan ${String.fromCharCode(65 + idx)}`}
+                        />
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex gap-1">
                           <button
-                            onClick={() => {
-                              const newOptions = formData.options?.filter((_, i) => i !== idx) || [];
-                              handleChange('options', newOptions);
-                              if (formData.correctAnswerIndex === idx) {
-                                handleChange('correctAnswerIndex', 0);
-                              }
-                            }}
-                            className="p-1.5 rounded-lg bg-gray-200 text-gray-400 hover:bg-red-200 hover:text-red-500 transition-all"
-                            title="Hapus Pilihan"
+                            onClick={() => handleChange('correctAnswerIndex', idx)}
+                            className={`p-1.5 rounded-lg transition-all ${formData.correctAnswerIndex === idx ? 'bg-green-500 text-white shadow-lg shadow-green-200' : 'bg-gray-200 text-gray-400 hover:bg-gray-300'}`}
+                            title="Tandai Jawaban Benar"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Check className="w-4 h-4" />
                           </button>
-                        )}
+                          {(formData.options?.length || 0) > 2 && (
+                            <button
+                              onClick={() => {
+                                const newOptions = formData.options?.filter((_, i) => i !== idx) || [];
+                                const newAttachments = formData.optionAttachments?.filter((_, i) => i !== idx);
+                                handleChange('options', newOptions);
+                                if (newAttachments) handleChange('optionAttachments', newAttachments);
+                                if (formData.correctAnswerIndex === idx) {
+                                  handleChange('correctAnswerIndex', 0);
+                                }
+                              }}
+                              className="p-1.5 rounded-lg bg-gray-200 text-gray-400 hover:bg-red-200 hover:text-red-500 transition-all"
+                              title="Hapus Pilihan"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Attachment Section */}
+                      <div className="border-t border-gray-200 pt-4">
+                        <div className="flex justify-between items-center mb-3">
+                          <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                            <ImageIcon className="w-3 h-3" /> Lampiran Gambar (Opsional)
+                          </label>
+                          <div className="flex bg-gray-100 rounded-lg p-0.5">
+                            <button
+                              onClick={() => setOptionUploadMode(prev => ({ ...prev, [idx]: 'url' }))}
+                              className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${(optionUploadMode[idx] ?? 'url') === 'url' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                            >
+                              <LinkIcon className="w-3 h-3" /> URL
+                            </button>
+                            <button
+                              onClick={() => setOptionUploadMode(prev => ({ ...prev, [idx]: 'file' }))}
+                              className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${(optionUploadMode[idx] ?? 'url') === 'file' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                            >
+                              <Upload className="w-3 h-3" /> Upload
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex gap-2 items-start">
+                          {(optionUploadMode[idx] ?? 'url') === 'url' ? (
+                            <input
+                              type="text"
+                              value={formData.optionAttachments?.[idx]?.url || ''}
+                              onChange={(e) => handleOptionAttachmentChange(idx, e.target.value)}
+                              placeholder="https://example.com/image.jpg"
+                              className="flex-1 px-4 py-3 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-sm font-bold outline-none"
+                            />
+                          ) : (
+                            <div className="flex-1 relative">
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) => handleOptionFileUpload(idx, e)}
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                              />
+                              <div className="w-full px-4 py-3 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-center hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-gray-400 font-bold text-sm">
+                                <Upload className="w-4 h-4" />
+                                {formData.optionAttachments?.[idx]?.url?.startsWith('data:') ? 'Ganti File...' : 'Upload Gambar'}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex justify-start mt-2">
+                          {formData.optionAttachments?.[idx]?.url && (
+                            <div className="relative group shrink-0">
+                              <div className="w-12 h-12 rounded-xl bg-gray-200 border border-gray-300 overflow-hidden">
+                                <img src={formData.optionAttachments[idx].url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
+                              </div>
+                              <button
+                                onClick={() => handleOptionAttachmentChange(idx, '')}
+                                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                title="Hapus Gambar"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -523,43 +620,113 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 gap-4">
+                <div className="grid grid-cols-1 gap-6">
                   {formData.options?.map((opt, idx) => {
                     const isSelected = formData.correctAnswerIndices?.includes(idx);
                     return (
-                      <div key={idx} className="relative group">
-                        <div className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-black text-gray-400 border border-gray-200">{String.fromCharCode(65 + idx)}</div>
-                        <input
-                          type="text"
-                          value={opt}
-                          onChange={(e) => handleOptionChange(idx, e.target.value)}
-                          className={`w-full pl-14 pr-20 py-4 rounded-xl border-2 font-bold text-sm outline-none transition-all ${isSelected ? 'border-green-500 bg-green-50/20' : 'border-gray-100 bg-gray-50 focus:bg-white focus:border-indigo-200'}`}
-                        />
-                        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex gap-1">
-                          <button 
-                            onClick={() => {
-                              const current = formData.correctAnswerIndices || [];
-                              handleChange('correctAnswerIndices', current.includes(idx) ? current.filter(i => i !== idx) : [...current, idx]);
-                            }} 
-                            className={`p-1.5 rounded-lg transition-all ${isSelected ? 'bg-green-500 text-white shadow-lg shadow-green-200' : 'bg-gray-200 text-gray-400 hover:bg-gray-300'}`}
-                          >
-                            <Check className="w-4 h-4" />
-                          </button>
-                          {(formData.options?.length || 0) > 2 && (
-                            <button
+                      <div key={idx} className="bg-gray-50 p-4 rounded-2xl border-2 border-gray-100 space-y-4">
+                        {/* Option Input */}
+                        <div className="relative group">
+                          <div className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-black text-gray-400 border border-gray-200">{String.fromCharCode(65 + idx)}</div>
+                          <input
+                            type="text"
+                            value={opt}
+                            onChange={(e) => handleOptionChange(idx, e.target.value)}
+                            className={`w-full pl-14 pr-20 py-4 rounded-xl border-2 font-bold text-sm outline-none transition-all ${isSelected ? 'border-green-500 bg-green-50/20' : 'border-gray-100 bg-gray-50 focus:bg-white focus:border-indigo-200'}`}
+                          />
+                          <div className="absolute right-3 top-1/2 -translate-y-1/2 flex gap-1">
+                            <button 
                               onClick={() => {
-                                const newOptions = formData.options?.filter((_, i) => i !== idx) || [];
-                                handleChange('options', newOptions);
                                 const current = formData.correctAnswerIndices || [];
-                                const newIndices = current.filter(i => i !== idx);
-                                handleChange('correctAnswerIndices', newIndices);
-                              }}
-                              className="p-1.5 rounded-lg bg-gray-200 text-gray-400 hover:bg-red-200 hover:text-red-500 transition-all"
-                              title="Hapus Pilihan"
+                                handleChange('correctAnswerIndices', current.includes(idx) ? current.filter(i => i !== idx) : [...current, idx]);
+                              }} 
+                              className={`p-1.5 rounded-lg transition-all ${isSelected ? 'bg-green-500 text-white shadow-lg shadow-green-200' : 'bg-gray-200 text-gray-400 hover:bg-gray-300'}`}
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Check className="w-4 h-4" />
                             </button>
-                          )}
+                            {(formData.options?.length || 0) > 2 && (
+                              <button
+                                onClick={() => {
+                                  const newOptions = formData.options?.filter((_, i) => i !== idx) || [];
+                                  const newAttachments = formData.optionAttachments?.filter((_, i) => i !== idx);
+                                  handleChange('options', newOptions);
+                                  if (newAttachments) handleChange('optionAttachments', newAttachments);
+                                  const current = formData.correctAnswerIndices || [];
+                                  const newIndices = current.filter(i => i !== idx);
+                                  handleChange('correctAnswerIndices', newIndices);
+                                }}
+                                className="p-1.5 rounded-lg bg-gray-200 text-gray-400 hover:bg-red-200 hover:text-red-500 transition-all"
+                                title="Hapus Pilihan"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Attachment Section */}
+                        <div className="border-t border-gray-200 pt-4">
+                          <div className="flex justify-between items-center mb-3">
+                            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                              <ImageIcon className="w-3 h-3" /> Lampiran Gambar (Opsional)
+                            </label>
+                            <div className="flex bg-gray-100 rounded-lg p-0.5">
+                              <button
+                                onClick={() => setOptionUploadMode(prev => ({ ...prev, [idx]: 'url' }))}
+                                className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${(optionUploadMode[idx] ?? 'url') === 'url' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                              >
+                                <LinkIcon className="w-3 h-3" /> URL
+                              </button>
+                              <button
+                                onClick={() => setOptionUploadMode(prev => ({ ...prev, [idx]: 'file' }))}
+                                className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${(optionUploadMode[idx] ?? 'url') === 'file' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                              >
+                                <Upload className="w-3 h-3" /> Upload
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex gap-2 items-start">
+                            {(optionUploadMode[idx] ?? 'url') === 'url' ? (
+                              <input
+                                type="text"
+                                value={formData.optionAttachments?.[idx]?.url || ''}
+                                onChange={(e) => handleOptionAttachmentChange(idx, e.target.value)}
+                                placeholder="https://example.com/image.jpg"
+                                className="flex-1 px-4 py-3 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-sm font-bold outline-none"
+                              />
+                            ) : (
+                              <div className="flex-1 relative">
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(e) => handleOptionFileUpload(idx, e)}
+                                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                />
+                                <div className="w-full px-4 py-3 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-center hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-gray-400 font-bold text-sm">
+                                  <Upload className="w-4 h-4" />
+                                  {formData.optionAttachments?.[idx]?.url?.startsWith('data:') ? 'Ganti File...' : 'Upload Gambar'}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex justify-start mt-2">
+                            {formData.optionAttachments?.[idx]?.url && (
+                              <div className="relative group shrink-0">
+                                <div className="w-12 h-12 rounded-xl bg-gray-200 border border-gray-300 overflow-hidden">
+                                  <img src={formData.optionAttachments[idx].url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
+                                </div>
+                                <button
+                                  onClick={() => handleOptionAttachmentChange(idx, '')}
+                                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                  title="Hapus Gambar"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );

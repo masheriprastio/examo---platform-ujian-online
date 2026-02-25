@@ -147,6 +147,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   const [questionToDelete, setQuestionToDelete] = useState<string | null>(null);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [uploadMode, setUploadMode] = useState<Record<string, 'url' | 'file'>>({});
+  const [optionUploadMode, setOptionUploadMode] = useState<Record<string, 'url' | 'file'>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [pointsErrors, setPointsErrors] = useState<Record<string, string>>({}); // Track validation errors per question
   const backupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -336,6 +337,34 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     newOptions[oIndex] = value;
     newQuestions[qIndex] = { ...newQuestions[qIndex], options: newOptions };
     setFormData(prev => ({ ...prev, questions: newQuestions }));
+  };
+
+  const handleOptionAttachmentChange = (qIndex: number, oIndex: number, url: string) => {
+    const newQuestions = [...formData.questions];
+    const newAttachments = [...(newQuestions[qIndex].optionAttachments || Array(newQuestions[qIndex].options?.length || 0).fill(null))];
+    if (url) {
+      newAttachments[oIndex] = { type: 'image', url: url, caption: '' };
+    } else {
+      newAttachments[oIndex] = { url: undefined };
+    }
+    newQuestions[qIndex] = { ...newQuestions[qIndex], optionAttachments: newAttachments };
+    setFormData(prev => ({ ...prev, questions: newQuestions }));
+  };
+
+  const handleOptionFileUpload = (qIndex: number, oIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 15 * 1024 * 1024) { // 15MB limit
+        alert("Ukuran file maksimal 15MB");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        handleOptionAttachmentChange(qIndex, oIndex, reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const addQuestion = (type: QuestionType = 'mcq') => {
