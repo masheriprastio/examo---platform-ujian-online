@@ -53,6 +53,15 @@ export const MOCK_STUDENT: User = {
   nis: '12345'
 };
 
+export const MOCK_ADMIN: User = {
+  id: 'admin-01',
+  email: 'admin@sekolah.id',
+  password: 'password',
+  name: 'Administrator',
+  role: 'admin',
+  school: 'SMA Negeri 1 Digital'
+};
+
 export const MOCK_EXAMS: Exam[] = [
   {
     id: 'exam-1',
