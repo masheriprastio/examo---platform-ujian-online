@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User, Exam, AppView, ExamResult, Question, ExamLog } from './types';
 import { MOCK_TEACHER, MOCK_STUDENT, MOCK_EXAMS, supabase, isSupabaseConfigured } from './lib/supabase';
 import { generateUUID } from './lib/uuid';
@@ -166,6 +166,7 @@ export default function App() {
   const [view, setView] = useState<AppView>('LOGIN');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const shouldFetchRef = useRef(true); // Prevent re-fetching stale data after save
 
   const { addAlert } = useNotification();
 
@@ -380,7 +381,11 @@ export default function App() {
   // Fetch Data on view change (specifically when switching to Dashboard)
   useEffect(() => {
     if (view === 'STUDENT_DASHBOARD' || view === 'TEACHER_DASHBOARD') {
-      fetchData();
+      if (shouldFetchRef.current) {
+        fetchData();
+      } else {
+        shouldFetchRef.current = true; // Reset for next time
+      }
     }
 
     if (view === 'STUDENT_MATERIALS') {
@@ -980,9 +985,8 @@ export default function App() {
       }
 
       // Navigate immediately - don't wait for DB
-      setTimeout(() => {
-          setView('TEACHER_DASHBOARD');
-      }, 300); // Small delay for notification to show
+      shouldFetchRef.current = false; // Prevent race condition where fetch gets old data
+      setView('TEACHER_DASHBOARD');
   };
 
   const handleExamCreate = async (newExam: Exam) => {

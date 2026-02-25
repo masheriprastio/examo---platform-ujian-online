@@ -512,6 +512,22 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
 
   const lastQuestion = getLastCreatedQuestion();
 
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await Promise.resolve(onSave(formData));
+      lastSavedRef.current = JSON.stringify(formData);
+      // Clear backup after successful save
+      try {
+        localStorage.removeItem(`exam_draft_${exam.id}`);
+      } catch (e) {
+        console.warn('Failed to clear backup:', e);
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-white z-[60] flex flex-col font-sans text-left overflow-hidden">
       <header className="px-6 md:px-8 py-4 md:py-5 border-b border-gray-100 flex justify-between items-center bg-white shadow-sm shrink-0">
@@ -577,25 +593,11 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
               <Eye className="w-4 h-4" /> Preview
             </button>
           )}
-          <button onClick={onCancel} className="px-4 py-2 text-gray-500 font-bold hover:bg-gray-50 rounded-xl transition text-sm">Batal</button>
+          <button onClick={onCancel} className="hidden md:block px-4 py-2 text-gray-500 font-bold hover:bg-gray-50 rounded-xl transition text-sm">Batal</button>
           <button 
-            onClick={async () => {
-              setIsSaving(true);
-              try {
-                await Promise.resolve(onSave(formData));
-                lastSavedRef.current = JSON.stringify(formData);
-                // Clear backup after successful save
-                try {
-                  localStorage.removeItem(`exam_draft_${exam.id}`);
-                } catch (e) {
-                  console.warn('Failed to clear backup:', e);
-                }
-              } finally {
-                setIsSaving(false);
-              }
-            }} 
+            onClick={handleSave}
             disabled={isSaving}
-            className="px-6 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-black shadow-lg shadow-indigo-100 flex items-center gap-2 transition-all active:scale-95 text-sm disabled:opacity-70 disabled:cursor-not-allowed"
+            className="hidden md:flex px-6 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-black shadow-lg shadow-indigo-100 items-center gap-2 transition-all active:scale-95 text-sm disabled:opacity-70 disabled:cursor-not-allowed"
           >
             {isSaving ? (
               <>
@@ -611,7 +613,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto bg-gray-50/50 p-4 md:p-10">
+      <div className="flex-1 overflow-y-auto bg-gray-50/50 p-4 md:p-10 pb-32 md:pb-10">
         <div className="max-w-4xl mx-auto space-y-6 md:space-y-10">
           <section className="bg-white rounded-[30px] md:rounded-[40px] shadow-sm border border-gray-100 p-6 md:p-10">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1147,6 +1149,29 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
             </div>
           </section>
         </div>
+      </div>
+
+      {/* Mobile Bottom Bar for Actions */}
+      <div className="md:hidden absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 flex gap-3 z-[60] shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+        <button onClick={onCancel} className="flex-1 py-3 text-gray-500 font-bold bg-gray-50 hover:bg-gray-100 rounded-xl transition text-sm border border-gray-200">
+            Batal
+        </button>
+        <button
+            onClick={handleSave}
+            disabled={isSaving}
+            className="flex-[2] py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-black shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 transition-all active:scale-95 text-sm disabled:opacity-70 disabled:cursor-not-allowed"
+          >
+            {isSaving ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Menyimpan...
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4" /> Simpan
+              </>
+            )}
+        </button>
       </div>
 
       {questionToDelete && (
