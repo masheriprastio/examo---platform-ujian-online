@@ -28,6 +28,9 @@ export interface Question {
   topic?: string;
   difficulty?: 'easy' | 'medium' | 'hard';
   randomizeOptions?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  textAlign?: 'left' | 'center' | 'right';
   // Untuk Essay Drag & Drop
   dragDropItems?: string[];                    // Item yang bisa di-drag (kiri)
   dragDropTargets?: string[];                  // Target drop zones (kanan)

@@ -89,6 +89,16 @@ const validatePointsInput = (value: string): { isValid: boolean; error?: string;
   return { isValid: true, parsedValue: parsed };
 };
 
+// Helper function to convert file to Base64
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = (error) => reject(error);
+  });
+};
+
 // Helper function untuk recover backup dari localStorage
 const recoverBackup = (examId: string, fallback: Exam): Exam => {
   try {
@@ -106,6 +116,9 @@ const recoverBackup = (examId: string, fallback: Exam): Exam => {
 
 // Helper function untuk upload image ke Supabase Storage
 const uploadImageToSupabase = async (file: File, examId: string): Promise<string> => {
+  if (!supabase) {
+    throw new Error("Supabase is not configured.");
+  }
   try {
     const fileName = `exams/${examId}/${Date.now()}_${file.name}`;
     
@@ -306,22 +319,28 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         return;
       }
 
-      try {
-        // Show loading state while uploading
-        const newQuestions = [...formData.questions];
-        newQuestions[qIndex] = {
-          ...newQuestions[qIndex],
-          attachment: { type: 'image', url: 'uploading...', caption: '' }
-        };
-        setFormData(prev => ({ ...prev, questions: newQuestions }));
+      // Show loading state while uploading
+      const newQuestions = [...formData.questions];
+      newQuestions[qIndex] = {
+        ...newQuestions[qIndex],
+        attachment: { type: 'image', url: 'uploading...', caption: '' }
+      };
+      setFormData(prev => ({ ...prev, questions: newQuestions }));
 
+      try {
         // Upload to Supabase Storage
         const publicUrl = await uploadImageToSupabase(file, formData.id);
         handleAttachmentChange(qIndex, publicUrl);
       } catch (error) {
-        alert(`Gagal upload gambar: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        // Remove attachment on error
-        handleAttachmentChange(qIndex, '');
+        console.warn("Upload failed, attempting local fallback:", error);
+        // Fallback: Convert to Base64 (Data URI) for offline/mock mode
+        try {
+          const base64 = await fileToBase64(file);
+          handleAttachmentChange(qIndex, base64);
+        } catch (base64Error) {
+          alert(`Gagal upload gambar: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          handleAttachmentChange(qIndex, '');
+        }
       }
     }
   };
