@@ -17,7 +17,8 @@ export interface Question {
   id: string;
   type: QuestionType;
   text: string;
-  options?: string[];
+  options?: string[]; // Deprecated: Use richOptions
+  richOptions?: { html: string; attachment?: string }[];
   correctAnswerIndex?: number;
   correctAnswerIndices?: number[];
   trueFalseAnswer?: boolean;
