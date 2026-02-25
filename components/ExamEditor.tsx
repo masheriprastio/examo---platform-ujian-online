@@ -395,20 +395,29 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
 
   const handleOptionAttachmentChange = (qIndex: number, oIndex: number, url: string) => {
     setFormData(prev => {
-        const newQuestions = [...prev.questions];
-        if (!newQuestions[qIndex]) return prev;
+      const newQuestions = [...prev.questions];
+      if (!newQuestions[qIndex]) return prev;
 
-        const currentQ = newQuestions[qIndex];
-        const newAttachments = [...(currentQ.optionAttachments || Array(currentQ.options?.length || 0).fill(undefined))];
+      const currentQ = newQuestions[qIndex];
+      const optionCount = currentQ.options?.length || 0;
+      
+      // Pastikan array optionAttachments memiliki panjang yang sama dengan options
+      const newAttachments = [...(currentQ.optionAttachments || Array(optionCount).fill(undefined))];
+      
+      // Jika oIndex melebihi panjang array, extend array
+      if (oIndex >= newAttachments.length) {
+        newAttachments.length = oIndex + 1;
+        newAttachments.fill(undefined, currentQ.optionAttachments?.length || 0);
+      }
 
-        if (url) {
-            newAttachments[oIndex] = { type: 'image', url: url, caption: '' };
-        } else {
-            newAttachments[oIndex] = undefined;
-        }
+      if (url) {
+        newAttachments[oIndex] = { type: 'image', url: url, caption: '' };
+      } else {
+        newAttachments[oIndex] = undefined;
+      }
 
-        newQuestions[qIndex] = { ...currentQ, optionAttachments: newAttachments };
-        return { ...prev, questions: newQuestions };
+      newQuestions[qIndex] = { ...currentQ, optionAttachments: newAttachments };
+      return { ...prev, questions: newQuestions };
     });
   };
 

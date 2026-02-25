@@ -104,7 +104,17 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
     // Randomize options for MCQ and Multiple Select if enabled (HANYA SEKALI)
     questionsToRun = questionsToRun.map(q => {
       if ((q.type === 'mcq' || q.type === 'multiple_select') && q.randomizeOptions && q.options) {
-        const optionsWithIndex = q.options.map((opt, idx) => ({ opt, idx }));
+        interface OptionWithAttachment {
+          opt: string;
+          idx: number;
+          attachment?: any;
+        }
+        
+        const optionsWithIndex: OptionWithAttachment[] = q.options.map((opt, idx) => ({ 
+          opt, 
+          idx,
+          attachment: q.optionAttachments?.[idx] 
+        }));
         const shuffledOptions = fisherYatesShuffle(optionsWithIndex);
         
         // Find the new index of the correct answer(s)
@@ -115,9 +125,13 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
           newCorrectIndices = q.correctAnswerIndices.map(oldIdx => shuffledOptions.findIndex(o => o.idx === oldIdx));
         }
         
+        // Update optionAttachments sesuai dengan urutan yang di-shuffle
+        const shuffledAttachments = shuffledOptions.map(o => o.attachment);
+        
         return {
           ...q,
           options: shuffledOptions.map(o => o.opt),
+          optionAttachments: shuffledAttachments,
           correctAnswerIndex: newCorrectIndex,
           correctAnswerIndices: newCorrectIndices,
           _originalOptionsMapping: shuffledOptions.map(o => o.idx) // Store mapping if needed
