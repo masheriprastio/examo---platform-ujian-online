@@ -59,6 +59,59 @@ const normalizeExam = (exam: Exam): Exam => {
   };
 };
 
+// Helper: Get exam schedule status (untuk bug penjadwalan ujian)
+interface ExamScheduleStatus {
+  isNotStarted: boolean;
+  isActive: boolean;
+  isExpired: boolean;
+  startDate: number | null;
+  endDate: number | null;
+  now: number;
+}
+
+const getExamScheduleStatus = (exam: Exam): ExamScheduleStatus => {
+  const now = new Date().getTime();
+  const startDate = exam.startDate ? new Date(exam.startDate).getTime() : null;
+  const endDate = exam.endDate ? new Date(exam.endDate).getTime() : null;
+
+  // Jika tidak ada startDate dan endDate, exam bisa diambil setiap saat
+  if (!startDate && !endDate) {
+    return { isNotStarted: false, isActive: true, isExpired: false, startDate, endDate, now };
+  }
+
+  // Jika ada startDate tapi belum saatnya
+  const isNotStarted = startDate ? startDate > now : false;
+  
+  // Jika ada endDate dan sudah lewat
+  const isExpired = endDate ? endDate < now : false;
+
+  // Exam aktif jika sudah mulai dan belum expired
+  const isActive = !isNotStarted && !isExpired;
+
+  return { isNotStarted, isActive, isExpired, startDate, endDate, now };
+};
+
+// Helper: Check if student can take exam right now
+const isExamAvailable = (exam: Exam): boolean => {
+  const status = getExamScheduleStatus(exam);
+  return exam.status === 'published' && status.isActive;
+};
+
+// Helper: Filter exams untuk student dashboard
+const filterStudentExams = (exams: Exam[]) => {
+  const available = exams.filter(isExamAvailable);
+  const upcoming = exams.filter(e => {
+    const status = getExamScheduleStatus(e);
+    return e.status === 'published' && status.isNotStarted;
+  });
+  const expired = exams.filter(e => {
+    const status = getExamScheduleStatus(e);
+    return e.status === 'published' && status.isExpired;
+  });
+  
+  return { available, upcoming, expired };
+};
+
 const LoginView: React.FC<{
   onLogin: (role: 'teacher' | 'student', email: string, password?: string) => Promise<string | null>;
 }> = ({ onLogin }) => {
@@ -2109,82 +2162,180 @@ export default function App() {
                      <div className="bg-green-50 p-8 rounded-[35px] border border-green-100"><TrendingUp className="w-12 h-12 text-green-600" /></div>
                    </div>
                 </div>
-                <h2 className="text-2xl font-black text-gray-900 mb-8 tracking-tight">Ujian Tersedia</h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
-                  {exams.filter(e => e.status === 'published').length === 0 ? (
-                    <div className="col-span-full text-center py-20 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
-                      <p className="text-gray-400 font-medium">Belum ada ujian yang tersedia saat ini.</p>
-                      <button onClick={fetchData} className="mt-4 text-indigo-600 font-bold hover:underline">Coba Segarkan</button>
-                    </div>
-                  ) : exams.filter(e => e.status === 'published').map(e => {
-                    const progress = results.find(r => r.examId === e.id && r.studentId === currentUser?.id);
-                    const isTaken = progress?.status === 'completed';
-                    const isInProgress = progress?.status === 'in_progress';
-                    
-                    const now = new Date().getTime();
-                    const start = e.startDate ? new Date(e.startDate).getTime() : 0;
-                    const end = e.endDate ? new Date(e.endDate).getTime() : Infinity;
-                    
-                    const isNotStarted = start > now;
-                    const isExpired = end < now;
-                    const isActive = !isNotStarted && !isExpired;
+                <h2 className="text-2xl font-black text-gray-900 mb-8 tracking-tight">Ujian</h2>
+                
+                {/* Exam Tabs */}
+                <div className="flex gap-2 mb-8 flex-wrap">
+                  {[
+                    { name: 'Tersedia', key: 'available', count: filterStudentExams(exams).available.length },
+                    { name: 'Mendatang', key: 'upcoming', count: filterStudentExams(exams).upcoming.length },
+                    { name: 'Selesai', key: 'expired', count: filterStudentExams(exams).expired.length }
+                  ].map(tab => (
+                    <button
+                      key={tab.key}
+                      onClick={() => setView(`view-${tab.key}` as any)}
+                      className={`px-6 py-3 rounded-xl font-bold transition-all ${
+                        view === `view-${tab.key}`
+                          ? 'bg-indigo-600 text-white shadow-lg'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      {tab.name} ({tab.count})
+                    </button>
+                  ))}
+                </div>
 
-                    let btnText = 'Mulai Sekarang';
-                    let btnClass = 'bg-indigo-600 text-white shadow-indigo-100';
-                    let btnIcon = <PlayCircle className="w-5 h-5" />;
-                    let isDisabled = false;
+                {/* Available Exams */}
+                {view === 'STUDENT_DASHBOARD' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
+                    {filterStudentExams(exams).available.length === 0 ? (
+                      <div className="col-span-full text-center py-20 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
+                        <p className="text-gray-400 font-medium">Belum ada ujian yang tersedia saat ini.</p>
+                        <button onClick={() => fetchData(true)} className="mt-4 text-indigo-600 font-bold hover:underline">Coba Segarkan</button>
+                      </div>
+                    ) : filterStudentExams(exams).available.map(e => {
+                      const progress = results.find(r => r.examId === e.id && r.studentId === currentUser?.id);
+                      const isTaken = progress?.status === 'completed';
+                      const isInProgress = progress?.status === 'in_progress';
 
-                    if (isNotStarted) {
-                        btnText = `Belum Dimulai (${new Date(start).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })})`;
-                        btnClass = 'bg-gray-100 text-gray-400 cursor-not-allowed';
-                        isDisabled = true;
-                        btnIcon = <Clock className="w-5 h-5" />;
-                    } else if (isExpired) {
-                        btnText = 'Ujian Berakhir';
-                        btnClass = 'bg-red-50 text-red-500 cursor-not-allowed border border-red-100';
-                        isDisabled = true;
-                        btnIcon = <XCircle className="w-5 h-5" />;
-                    } else if (isTaken) {
+                      let btnText = 'Mulai Sekarang';
+                      let btnClass = 'bg-indigo-600 text-white shadow-indigo-100';
+                      let btnIcon = <PlayCircle className="w-5 h-5" />;
+                      let isDisabled = false;
+
+                      if (isTaken) {
                         btnText = 'Ulangi Ujian';
                         btnClass = 'bg-white border-2 border-indigo-600 text-indigo-600 shadow-none hover:bg-indigo-50';
                         btnIcon = <RotateCcw className="w-5 h-5" />;
-                    } else if (isInProgress) {
+                      } else if (isInProgress) {
                         btnText = 'Lanjutkan';
                         btnClass = 'bg-amber-500 text-white';
                         btnIcon = <Clock className="w-5 h-5" />;
-                    }
+                      }
 
-                    return (
-                      <div key={e.id} className="bg-white p-10 rounded-[50px] border border-gray-100 shadow-sm hover:shadow-2xl transition-all flex flex-col group">
-                        <div className="flex justify-between items-center mb-8">
+                      return (
+                        <div key={e.id} className="bg-white p-10 rounded-[50px] border border-gray-100 shadow-sm hover:shadow-2xl transition-all flex flex-col group">
+                          <div className="flex justify-between items-center mb-8">
                             <span className="bg-indigo-50 text-indigo-600 text-[10px] font-black uppercase px-4 py-1.5 rounded-full border border-indigo-100 tracking-widest">{e.category}</span>
                             {isTaken && <CheckCircle className="text-green-500" />}
-                            {isInProgress && !isExpired && <Clock className="text-amber-500" />}
-                            {isExpired && <span className="text-[10px] font-black uppercase bg-red-100 text-red-600 px-2 py-1 rounded">Expired</span>}
-                        </div>
-                        <h3 className="text-2xl font-bold text-gray-900 mb-2 leading-tight group-hover:text-indigo-600 transition-colors">{e.title}</h3>
-                        
-                        {(e.startDate || e.endDate) && (
+                            {isInProgress && <Clock className="text-amber-500" />}
+                          </div>
+                          <h3 className="text-2xl font-bold text-gray-900 mb-2 leading-tight group-hover:text-indigo-600 transition-colors">{e.title}</h3>
+                          <p className="text-gray-600 text-sm mb-4 line-clamp-2">{e.description}</p>
+                          
+                          {(e.startDate || e.endDate) && (
                             <div className="mb-4 text-xs text-gray-500 font-medium space-y-1 bg-gray-50 p-3 rounded-xl border border-gray-100">
-                                {e.startDate && <div>Mulai: {new Date(e.startDate).toLocaleString('id-ID')}</div>}
-                                {e.endDate && <div>Selesai: {new Date(e.endDate).toLocaleString('id-ID')}</div>}
+                              {e.startDate && <div>📅 Mulai: {new Date(e.startDate).toLocaleString('id-ID')}</div>}
+                              {e.endDate && <div>⏰ Selesai: {new Date(e.endDate).toLocaleString('id-ID')}</div>}
                             </div>
-                        )}
+                          )}
 
-                        <div className="mt-auto pt-6 border-t border-gray-50">
+                          <div className="mt-auto pt-6 border-t border-gray-50">
                             <button 
-                                onClick={() => !isDisabled && handleStartExamWithToken(e)} 
-                                disabled={isDisabled}
-                                className={`w-full font-black py-4 rounded-[20px] shadow-xl transition-all flex items-center justify-center gap-3 active:scale-95 ${btnClass} ${isDisabled ? 'shadow-none active:scale-100' : ''}`}
+                              onClick={() => handleStartExamWithToken(e)} 
+                              className={`w-full font-black py-4 rounded-[20px] shadow-xl transition-all flex items-center justify-center gap-3 active:scale-95 ${btnClass}`}
                             >
-                                {btnText} {btnIcon}
-                                {e.requireToken && !isDisabled && <Key className="w-4 h-4 ml-1" />}
+                              {btnText} {btnIcon}
+                              {e.requireToken && <Key className="w-4 h-4 ml-1" />}
                             </button>
+                          </div>
                         </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Upcoming Exams */}
+                {view === 'view-upcoming' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
+                    {filterStudentExams(exams).upcoming.length === 0 ? (
+                      <div className="col-span-full text-center py-20 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
+                        <p className="text-gray-400 font-medium">Tidak ada ujian yang akan datang.</p>
                       </div>
-                    );
-                  })}
-                </div>
+                    ) : filterStudentExams(exams).upcoming.map(e => {
+                      const startDate = e.startDate ? new Date(e.startDate).getTime() : 0;
+                      const timeUntilStart = Math.max(0, startDate - new Date().getTime());
+                      const daysUntil = Math.ceil(timeUntilStart / (1000 * 60 * 60 * 24));
+                      
+                      return (
+                        <div key={e.id} className="bg-white p-10 rounded-[50px] border-2 border-amber-200 shadow-sm hover:shadow-2xl transition-all flex flex-col group bg-amber-50/30">
+                          <div className="flex justify-between items-center mb-8">
+                            <span className="bg-amber-50 text-amber-700 text-[10px] font-black uppercase px-4 py-1.5 rounded-full border border-amber-200 tracking-widest">Mendatang</span>
+                            <span className="text-[10px] font-black uppercase bg-amber-200 text-amber-800 px-3 py-1.5 rounded-lg">
+                              {daysUntil} hari lagi
+                            </span>
+                          </div>
+                          <h3 className="text-2xl font-bold text-gray-900 mb-2 leading-tight">{e.title}</h3>
+                          <p className="text-gray-600 text-sm mb-4 line-clamp-2">{e.description}</p>
+                          
+                          {(e.startDate || e.endDate) && (
+                            <div className="mb-4 text-xs text-gray-600 font-medium space-y-1 bg-white p-3 rounded-xl border border-amber-200">
+                              {e.startDate && <div>📅 Dimulai: {new Date(e.startDate).toLocaleString('id-ID')}</div>}
+                              {e.endDate && <div>⏰ Berakhir: {new Date(e.endDate).toLocaleString('id-ID')}</div>}
+                            </div>
+                          )}
+
+                          <div className="mt-auto pt-6 border-t border-amber-100">
+                            <button 
+                              disabled
+                              className="w-full font-black py-4 rounded-[20px] shadow-xl transition-all flex items-center justify-center gap-3 bg-gray-100 text-gray-400 cursor-not-allowed"
+                            >
+                              Belum Tersedia
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Expired Exams */}
+                {view === 'view-expired' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
+                    {filterStudentExams(exams).expired.length === 0 ? (
+                      <div className="col-span-full text-center py-20 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
+                        <p className="text-gray-400 font-medium">Tidak ada ujian yang sudah berakhir.</p>
+                      </div>
+                    ) : filterStudentExams(exams).expired.map(e => {
+                      return (
+                        <div key={e.id} className="bg-white p-10 rounded-[50px] border-2 border-red-200 shadow-sm hover:shadow-2xl transition-all flex flex-col group bg-red-50/30">
+                          <div className="flex justify-between items-center mb-8">
+                            <span className="bg-red-50 text-red-700 text-[10px] font-black uppercase px-4 py-1.5 rounded-full border border-red-200 tracking-widest">Selesai</span>
+                            <XCircle className="text-red-500" />
+                          </div>
+                          <h3 className="text-2xl font-bold text-gray-900 mb-2 leading-tight">{e.title}</h3>
+                          <p className="text-gray-600 text-sm mb-4 line-clamp-2">{e.description}</p>
+                          
+                          {(e.startDate || e.endDate) && (
+                            <div className="mb-4 text-xs text-gray-600 font-medium space-y-1 bg-white p-3 rounded-xl border border-red-200">
+                              {e.startDate && <div>📅 Dimulai: {new Date(e.startDate).toLocaleString('id-ID')}</div>}
+                              {e.endDate && <div>⏰ Berakhir: {new Date(e.endDate).toLocaleString('id-ID')}</div>}
+                            </div>
+                          )}
+
+                          <div className="mt-auto pt-6 border-t border-red-100">
+                            <button 
+                              disabled
+                              className="w-full font-black py-4 rounded-[20px] shadow-xl transition-all flex items-center justify-center gap-3 bg-red-50 text-red-500 cursor-not-allowed border border-red-100"
+                            >
+                              Ujian Berakhir
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Back Button for Other Tabs */}
+                {(view === 'view-upcoming' || view === 'view-expired') && (
+                  <button 
+                    onClick={() => setView('STUDENT_DASHBOARD')} 
+                    className="mt-10 w-full bg-gray-900 text-white font-bold py-4 rounded-2xl hover:bg-black transition-all"
+                  >
+                    ← Kembali ke Ujian Tersedia
+                  </button>
+                )}
               </div>
             )
           )}
