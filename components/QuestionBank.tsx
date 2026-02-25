@@ -307,6 +307,9 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
     <div className="fixed inset-0 bg-white z-[60] flex flex-col font-sans text-left overflow-hidden animate-in slide-in-from-bottom-10">
       <header className="px-6 md:px-8 py-4 border-b border-gray-100 flex justify-between items-center bg-white shadow-sm shrink-0">
         <div className="flex items-center gap-4">
+          <div className="bg-indigo-50 p-2 rounded-xl border border-indigo-100 hidden md:block">
+            <Database className="w-5 h-5 text-indigo-600" />
+          </div>
           <button onClick={onCancel} className="md:hidden p-2 -ml-2 text-gray-400 hover:text-gray-900"><ArrowLeft className="w-6 h-6" /></button>
           <h2 className="text-xl font-black text-gray-900">Editor Soal</h2>
         </div>
@@ -322,9 +325,9 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto bg-gray-50 p-4 md:p-8">
-        <div className="max-w-3xl mx-auto space-y-6 pb-20">
-          <div className="bg-white p-6 md:p-8 rounded-[30px] shadow-sm border border-gray-100 space-y-6">
+      <div className="flex-1 overflow-y-auto bg-gray-50/50 p-4 md:p-8 pb-32 md:pb-10">
+        <div className="max-w-4xl mx-auto space-y-6 md:space-y-10">
+          <div className="bg-white p-6 md:p-10 rounded-[30px] shadow-sm border border-gray-100 space-y-6">
             <div>
               <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Tipe Soal</label>
               <select

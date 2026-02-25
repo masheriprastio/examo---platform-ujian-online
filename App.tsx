@@ -1667,6 +1667,7 @@ export default function App() {
                   setActiveExam(exam);
                   setView('EXAM_PREVIEW' as AppView);
                 }}
+                bankQuestions={bankQuestions}
               />
             ) : view === ('EXAM_PREVIEW' as AppView) && activeExam ? (
               <ExamRunner 

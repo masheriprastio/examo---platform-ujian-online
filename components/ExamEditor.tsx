@@ -16,6 +16,7 @@ interface ExamEditorProps {
   onCancel: () => void;
   onSaveToBank?: (q: Question) => void;
   onPreview?: (exam: Exam) => void;
+  bankQuestions?: Question[]; // Prop to receive questions from the bank
 }
 
 // Helper function untuk format datetime-local input dengan timezone awareness
@@ -144,7 +145,7 @@ const uploadImageToSupabase = async (file: File, examId: string): Promise<string
   }
 };
 
-const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveToBank, onPreview }) => {
+const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveToBank, onPreview, bankQuestions = [] }) => {
   // Parse initial dates if they exist, or keep them empty/null
   // Try to recover from backup if available
   const [formData, setFormData] = useState<Exam>(() => recoverBackup(exam.id, exam));
@@ -154,6 +155,10 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   const [uploadMode, setUploadMode] = useState<Record<string, 'url' | 'file'>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [pointsErrors, setPointsErrors] = useState<Record<string, string>>({}); // Track validation errors per question
+  const [showBankImport, setShowBankImport] = useState(false); // State for Bank Import Modal
+  const [selectedBankQuestions, setSelectedBankQuestions] = useState<string[]>([]); // Track selected IDs for import
+  const [bankSearchTerm, setBankSearchTerm] = useState(''); // Search in Bank Modal
+
   const backupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedRef = useRef<string>(JSON.stringify(exam));
 
@@ -666,11 +671,21 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
           </section>
 
           <section className="space-y-4">
-            <div className="flex justify-between items-center mb-2">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-2 gap-3">
               <h3 className="text-xl font-black text-gray-900 tracking-tight">Daftar Pertanyaan</h3>
-              <div className="flex gap-2">
+              <div className="flex gap-2 w-full md:w-auto">
+                <button
+                  onClick={() => {
+                    setShowBankImport(true);
+                    setSelectedBankQuestions([]);
+                    setBankSearchTerm('');
+                  }}
+                  className="flex-1 md:flex-none px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold border border-indigo-100 hover:bg-indigo-100 transition flex items-center justify-center gap-2 text-xs"
+                >
+                  <Database className="w-4 h-4" /> Ambil dari Bank Soal
+                </button>
                 <select 
-                  className="bg-white border border-gray-200 text-gray-700 px-3 py-2 rounded-xl text-xs font-bold outline-none"
+                  className="flex-1 md:flex-none bg-white border border-gray-200 text-gray-700 px-3 py-2 rounded-xl text-xs font-bold outline-none cursor-pointer hover:border-gray-300 transition"
                   onChange={(e) => {
                     if (e.target.value) {
                       addQuestion(e.target.value as QuestionType);
@@ -679,7 +694,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                   }}
                   defaultValue=""
                 >
-                  <option value="" disabled>+ Tambah Soal</option>
+                  <option value="" disabled>+ Tambah Soal Baru</option>
                   <option value="mcq">Pilihan Ganda</option>
                   <option value="multiple_select">Pilihan Ganda (Banyak Jawaban)</option>
                   <option value="true_false">Benar / Salah</option>
@@ -1189,6 +1204,92 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                 })); 
                 setQuestionToDelete(null); 
               }} className="flex-1 py-3 bg-red-600 text-white rounded-xl font-black hover:bg-red-700 transition">Hapus</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bank Import Modal */}
+      {showBankImport && (
+        <div className="fixed inset-0 bg-gray-900/60 flex items-center justify-center z-[80] p-4 animate-in fade-in backdrop-blur-sm">
+          <div className="bg-white w-full max-w-4xl h-[85vh] rounded-[30px] shadow-2xl flex flex-col overflow-hidden">
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+              <div>
+                <h3 className="text-xl font-black text-gray-900">Ambil dari Bank Soal</h3>
+                <p className="text-sm text-gray-500">Pilih soal untuk ditambahkan ke ujian ini.</p>
+              </div>
+              <button onClick={() => setShowBankImport(false)} className="p-2 text-gray-400 hover:bg-white hover:text-gray-900 rounded-xl transition"><X className="w-5 h-5" /></button>
+            </div>
+
+            <div className="p-4 border-b border-gray-100 bg-white">
+              <input
+                type="text"
+                placeholder="Cari soal..."
+                value={bankSearchTerm}
+                onChange={(e) => setBankSearchTerm(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none transition text-sm font-bold"
+              />
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 bg-gray-50/50 space-y-3">
+              {bankQuestions
+                .filter(q => (q.text || '').toLowerCase().includes(bankSearchTerm.toLowerCase()) || (q.topic || '').toLowerCase().includes(bankSearchTerm.toLowerCase()))
+                .map(q => {
+                  const isSelected = selectedBankQuestions.includes(q.id);
+                  return (
+                    <div
+                      key={q.id}
+                      onClick={() => {
+                        setSelectedBankQuestions(prev =>
+                          prev.includes(q.id) ? prev.filter(id => id !== q.id) : [...prev, q.id]
+                        );
+                      }}
+                      className={`p-5 rounded-2xl border-2 cursor-pointer transition-all hover:shadow-md ${isSelected ? 'border-indigo-500 bg-indigo-50/50' : 'border-gray-100 bg-white hover:border-indigo-200'}`}
+                    >
+                      <div className="flex items-start gap-4">
+                        <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center shrink-0 mt-0.5 transition-colors ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-300 bg-white'}`}>
+                          {isSelected && <Check className="w-4 h-4" />}
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="px-2 py-0.5 rounded-md bg-gray-100 text-gray-600 text-[10px] font-black uppercase">{q.type}</span>
+                            <span className="px-2 py-0.5 rounded-md bg-gray-100 text-gray-600 text-[10px] font-black uppercase">{q.difficulty}</span>
+                            {q.topic && <span className="px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-600 text-[10px] font-black uppercase">{q.topic}</span>}
+                          </div>
+                          <p className="font-bold text-gray-800 text-sm line-clamp-2">{q.text}</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+              })}
+              {bankQuestions.length === 0 && (
+                <div className="text-center py-10 text-gray-400 font-medium">Bank soal kosong.</div>
+              )}
+            </div>
+
+            <div className="p-6 border-t border-gray-100 bg-white flex justify-between items-center">
+              <span className="text-sm font-bold text-gray-500">{selectedBankQuestions.length} soal dipilih</span>
+              <div className="flex gap-3">
+                <button onClick={() => setShowBankImport(false)} className="px-6 py-3 text-gray-500 font-bold hover:bg-gray-50 rounded-xl transition text-sm">Batal</button>
+                <button
+                  onClick={() => {
+                    const questionsToAdd = bankQuestions
+                      .filter(q => selectedBankQuestions.includes(q.id))
+                      .map(q => ({ ...q, id: generateUUID() })); // Clone with new IDs
+
+                    setFormData(prev => ({
+                      ...prev,
+                      questions: [...prev.questions, ...questionsToAdd]
+                    }));
+                    setShowBankImport(false);
+                    alert(`${questionsToAdd.length} soal berhasil ditambahkan!`);
+                  }}
+                  disabled={selectedBankQuestions.length === 0}
+                  className="px-6 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-black shadow-lg shadow-indigo-100 flex items-center gap-2 transition-all active:scale-95 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Plus className="w-4 h-4" /> Tambahkan ke Ujian
+                </button>
+              </div>
             </div>
           </div>
         </div>
