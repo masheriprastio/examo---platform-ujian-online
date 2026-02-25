@@ -107,8 +107,12 @@ const recoverBackup = (examId: string, fallback: Exam): Exam => {
 
 // Helper function untuk upload image ke Supabase Storage
 const uploadImageToSupabase = async (file: File, examId: string): Promise<string> => {
+  if (!supabase) {
+    throw new Error('Supabase client belum dikonfigurasi. Pastikan environment variables sudah diset.');
+  }
+
   try {
-    const fileName = `exams/${examId}/${Date.now()}_${file.name}`;
+    const fileName = `exams/${examId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
     
     const { data: uploadData, error: uploadError } = await supabase
       .storage
@@ -148,7 +152,6 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   const [questionToDelete, setQuestionToDelete] = useState<string | null>(null);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [uploadMode, setUploadMode] = useState<Record<string, 'url' | 'file'>>({});
-  const [optionUploadMode, setOptionUploadMode] = useState<Record<string, 'url' | 'file'>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [pointsErrors, setPointsErrors] = useState<Record<string, string>>({}); // Track validation errors per question
   const backupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -196,22 +199,20 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
             }
           }
         }
-        // Check size before saving (rough estimate: 1 char = 1 byte)
-        if (backup.length > 4000000) { // ~4MB limit to be safe
-          // Clear old backups to free space
-          const keys = Object.keys(localStorage);
-          keys.forEach(key => {
-            if (key.startsWith('exam_draft_') && key !== `exam_draft_${exam.id}`) {
-              try {
-                localStorage.removeItem(key);
-              } catch (e) {
-                // Ignore errors
+
+        // Clean up old backups occasionally
+        if (Math.random() < 0.1) {
+            const keys = Object.keys(localStorage);
+            keys.forEach(key => {
+              if (key.startsWith('exam_draft_') && key !== `exam_draft_${exam.id}`) {
+                try {
+                  localStorage.removeItem(key);
+                } catch (e) {
+                  // Ignore errors
+                }
               }
-            }
-          });
+            });
         }
-        
-        localStorage.setItem(`exam_draft_${exam.id}`, backup);
       } catch (e) {
         if (e instanceof DOMException && e.code === 22) {
           // QuotaExceededError - clear all old backups and try again
@@ -256,13 +257,17 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   };
 
   const handleQuestionChange = (qIndex: number, field: keyof Question, value: any) => {
-    const newQuestions = [...formData.questions];
-    newQuestions[qIndex] = { 
-      ...newQuestions[qIndex], 
-      [field]: value,
-      updatedAt: new Date().toISOString() // Update timestamp setiap ada perubahan
-    };
-    setFormData(prev => ({ ...prev, questions: newQuestions }));
+    setFormData(prev => {
+        const newQuestions = [...prev.questions];
+        if (!newQuestions[qIndex]) return prev;
+
+        newQuestions[qIndex] = {
+            ...newQuestions[qIndex],
+            [field]: value,
+            updatedAt: new Date().toISOString() // Update timestamp setiap ada perubahan
+        };
+        return { ...prev, questions: newQuestions };
+    });
   };
 
   // Handler khusus untuk points dengan validasi
@@ -288,17 +293,21 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   };
 
   const handleAttachmentChange = (qIndex: number, url: string) => {
-    const newQuestions = [...formData.questions];
-    if (url) {
-        newQuestions[qIndex] = {
-            ...newQuestions[qIndex],
-            attachment: { type: 'image', url: url, caption: '' }
-        };
-    } else {
-        const { attachment, ...rest } = newQuestions[qIndex];
-        newQuestions[qIndex] = rest;
-    }
-    setFormData(prev => ({ ...prev, questions: newQuestions }));
+    setFormData(prev => {
+        const newQuestions = [...prev.questions];
+        if (!newQuestions[qIndex]) return prev;
+
+        if (url) {
+            newQuestions[qIndex] = {
+                ...newQuestions[qIndex],
+                attachment: { type: 'image', url: url, caption: '' }
+            };
+        } else {
+            const { attachment, ...rest } = newQuestions[qIndex];
+            newQuestions[qIndex] = rest;
+        }
+        return { ...prev, questions: newQuestions };
+    });
   };
 
   const handleFileUpload = async (qIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
@@ -311,16 +320,23 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
 
       try {
         // Show loading state while uploading
-        const newQuestions = [...formData.questions];
-        newQuestions[qIndex] = {
-          ...newQuestions[qIndex],
-          attachment: { type: 'image', url: 'uploading...', caption: '' }
-        };
-        setFormData(prev => ({ ...prev, questions: newQuestions }));
+        setFormData(prev => {
+            const newQuestions = [...prev.questions];
+            if (!newQuestions[qIndex]) return prev;
+
+            newQuestions[qIndex] = {
+                ...newQuestions[qIndex],
+                attachment: { type: 'image', url: 'uploading...', caption: '' }
+            };
+            return { ...prev, questions: newQuestions };
+        });
 
         // Upload to Supabase Storage
         const publicUrl = await uploadImageToSupabase(file, formData.id);
+
+        // Update with real URL
         handleAttachmentChange(qIndex, publicUrl);
+
       } catch (error) {
         alert(`Gagal upload gambar: ${error instanceof Error ? error.message : 'Unknown error'}`);
         // Remove attachment on error
@@ -334,26 +350,41 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   };
 
   const handleOptionChange = (qIndex: number, oIndex: number, value: string) => {
-    const newQuestions = [...formData.questions];
-    const newOptions = [...newQuestions[qIndex].options!];
-    newOptions[oIndex] = value;
-    newQuestions[qIndex] = { ...newQuestions[qIndex], options: newOptions };
-    setFormData(prev => ({ ...prev, questions: newQuestions }));
+    setFormData(prev => {
+        const newQuestions = [...prev.questions];
+        if (!newQuestions[qIndex]) return prev;
+
+        const currentQ = newQuestions[qIndex];
+        if (!currentQ.options) return prev;
+
+        const newOptions = [...currentQ.options];
+        newOptions[oIndex] = value;
+        newQuestions[qIndex] = { ...currentQ, options: newOptions };
+
+        return { ...prev, questions: newQuestions };
+    });
   };
 
   const handleOptionAttachmentChange = (qIndex: number, oIndex: number, url: string) => {
-    const newQuestions = [...formData.questions];
-    const newAttachments = [...(newQuestions[qIndex].optionAttachments || Array(newQuestions[qIndex].options?.length || 0).fill(null))];
-    if (url) {
-      newAttachments[oIndex] = { type: 'image', url: url, caption: '' };
-    } else {
-      newAttachments[oIndex] = { url: undefined };
-    }
-    newQuestions[qIndex] = { ...newQuestions[qIndex], optionAttachments: newAttachments };
-    setFormData(prev => ({ ...prev, questions: newQuestions }));
+    setFormData(prev => {
+        const newQuestions = [...prev.questions];
+        if (!newQuestions[qIndex]) return prev;
+
+        const currentQ = newQuestions[qIndex];
+        const newAttachments = [...(currentQ.optionAttachments || Array(currentQ.options?.length || 0).fill(null))];
+
+        if (url) {
+            newAttachments[oIndex] = { type: 'image', url: url, caption: '' };
+        } else {
+            newAttachments[oIndex] = { url: undefined };
+        }
+
+        newQuestions[qIndex] = { ...currentQ, optionAttachments: newAttachments };
+        return { ...prev, questions: newQuestions };
+    });
   };
 
-  const handleOptionFileUpload = (qIndex: number, oIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleOptionFileUpload = async (qIndex: number, oIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 15 * 1024 * 1024) { // 15MB limit
@@ -362,12 +393,33 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         return;
       }
 
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        handleOptionAttachmentChange(qIndex, oIndex, reader.result as string);
-        e.target.value = ''; // Reset input after successful upload
-      };
-      reader.readAsDataURL(file);
+      try {
+        // Show loading state
+        setFormData(prev => {
+            const newQuestions = [...prev.questions];
+            if (!newQuestions[qIndex]) return prev;
+
+            const currentQ = newQuestions[qIndex];
+            const newAttachments = [...(currentQ.optionAttachments || Array(currentQ.options?.length || 0).fill(null))];
+
+            newAttachments[oIndex] = { type: 'image', url: 'uploading...', caption: '' };
+            newQuestions[qIndex] = { ...currentQ, optionAttachments: newAttachments };
+            return { ...prev, questions: newQuestions };
+        });
+
+        // Upload to Supabase Storage
+        const publicUrl = await uploadImageToSupabase(file, formData.id);
+
+        // Update with URL
+        handleOptionAttachmentChange(qIndex, oIndex, publicUrl);
+
+      } catch (error) {
+        alert(`Gagal upload gambar opsi: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        // Reset loading state
+        handleOptionAttachmentChange(qIndex, oIndex, '');
+      } finally {
+        e.target.value = ''; // Reset input
+      }
     }
   };
 
@@ -388,17 +440,20 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
       ...(type === 'short_answer' ? { shortAnswer: '' } : {}),
       ...(type === 'essay' ? { essayAnswer: '' } : {})
     };
+
     setFormData(prev => ({ ...prev, questions: [...prev.questions, newQuestion] }));
     setActiveQuestionId(newQuestion.id);
   };
 
   const moveQuestion = (idx: number, dir: 'up' | 'down') => {
-    const target = dir === 'up' ? idx - 1 : idx + 1;
-    if (target < 0 || target >= formData.questions.length) return;
-    
-    const newQs = [...formData.questions];
-    [newQs[idx], newQs[target]] = [newQs[target], newQs[idx]];
-    setFormData(prev => ({ ...prev, questions: newQs }));
+    setFormData(prev => {
+        const target = dir === 'up' ? idx - 1 : idx + 1;
+        if (target < 0 || target >= prev.questions.length) return prev;
+
+        const newQs = [...prev.questions];
+        [newQs[idx], newQs[target]] = [newQs[target], newQs[idx]];
+        return { ...prev, questions: newQs };
+    });
   };
 
   // DnD Handlers
@@ -411,24 +466,38 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     e.preventDefault();
     if (draggedIndex === null || draggedIndex === index) return;
     
-    // Validate indices
-    if (draggedIndex < 0 || draggedIndex >= formData.questions.length || 
-        index < 0 || index >= formData.questions.length) {
-      setDraggedIndex(null);
-      return;
-    }
+    // We cannot use functional update here efficiently because we need the current state for logic
+    // But drag operations are usually synchronous and rapid.
+    // However, to be safe, we should rely on current state `formData` BUT use functional update for set.
+    // Wait, if `formData` is stale, we might have issues.
+    // But DragOver fires continuously.
+    // Let's use functional update to be safe against stale closures if this handler is closed over old state.
     
-    const newQs = [...formData.questions];
-    const draggedItem = newQs[draggedIndex];
-    
-    // Safely splice and insert
-    if (draggedItem) {
-      newQs.splice(draggedIndex, 1);
-      newQs.splice(index, 0, draggedItem);
-      
-      setDraggedIndex(index);
-      setFormData(prev => ({ ...prev, questions: newQs }));
-    }
+    setFormData(prev => {
+        // Validate indices against PREV state
+        if (draggedIndex < 0 || draggedIndex >= prev.questions.length ||
+            index < 0 || index >= prev.questions.length) {
+          // If invalid, just return prev
+          return prev;
+        }
+
+        const newQs = [...prev.questions];
+        const draggedItem = newQs[draggedIndex];
+
+        // Safely splice and insert
+        if (draggedItem) {
+          newQs.splice(draggedIndex, 1);
+          newQs.splice(index, 0, draggedItem);
+
+          // Side effect: update dragged index to new position
+          // We can't update draggedIndex state here synchronously inside setFormData
+          // But we can update it after.
+          // For now, let's just update the list.
+          return { ...prev, questions: newQs };
+        }
+        return prev;
+    });
+    setDraggedIndex(index);
   };
 
   // Helper function untuk mendapatkan soal yang paling terakhir dibuat
@@ -747,12 +816,12 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                     />
                                     <div className="w-full px-4 py-2.5 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-center hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-gray-400 font-bold text-xs">
                                         <Upload className="w-3 h-3" />
-                                        {q.attachment?.url?.startsWith('data:') ? 'Ganti File...' : 'Klik untuk Upload'}
+                                        {q.attachment?.url?.startsWith('uploading') ? 'Mengupload...' : (q.attachment?.url?.startsWith('data:') ? 'Ganti File...' : 'Klik untuk Upload')}
                                     </div>
                                 </div>
                             )}
 
-                            {q.attachment?.url && (
+                            {q.attachment?.url && q.attachment.url !== 'uploading...' && (
                                 <div className="relative group shrink-0">
                                     <div className="w-10 h-10 rounded-lg bg-gray-200 border border-gray-300 overflow-hidden">
                                         <img src={q.attachment.url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
@@ -841,7 +910,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                   </button>
                                 </div>
 
-                                {/* Rich Text Editor for Option - PERTAMA */}
+                                {/* Rich Text Editor for Option */}
                                 <div>
                                   <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Teks Pilihan</label>
                                   <RichTextEditor 
@@ -852,15 +921,68 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                   />
                                 </div>
 
-                                {/* Delete Option Button - KEDUA */}
+                                {/* Option Image Attachment */}
+                                <div>
+                                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Gambar Pilihan (Opsional)</label>
+                                  <div className="flex gap-2 items-center">
+                                      {q.optionAttachments?.[oIndex]?.url ? (
+                                          <div className="relative group shrink-0">
+                                              <div className="w-20 h-20 rounded-lg bg-white border border-gray-200 overflow-hidden flex items-center justify-center">
+                                                  {q.optionAttachments[oIndex]?.url === 'uploading...' ? (
+                                                     <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                                                  ) : (
+                                                     <img src={q.optionAttachments[oIndex]?.url} alt="Option" className="w-full h-full object-cover" />
+                                                  )}
+                                              </div>
+                                              <button
+                                                  onClick={() => handleOptionAttachmentChange(qIndex, oIndex, '')}
+                                                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                                  title="Hapus Gambar"
+                                              >
+                                                  <X className="w-3 h-3" />
+                                              </button>
+                                          </div>
+                                      ) : (
+                                          <div className="relative">
+                                              <input
+                                                  type="file"
+                                                  accept="image/*"
+                                                  onChange={(e) => handleOptionFileUpload(qIndex, oIndex, e)}
+                                                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                              />
+                                              <button className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-xs font-bold text-gray-500 hover:bg-gray-50 flex items-center gap-2">
+                                                  <Upload className="w-3 h-3" /> Upload Gambar
+                                              </button>
+                                          </div>
+                                      )}
+                                  </div>
+                                </div>
+
+                                {/* Delete Option Button */}
                                 {(q.options?.length || 0) > 2 && (
                                   <button
                                     onClick={() => {
-                                      const newOptions = q.options?.filter((_, i) => i !== oIndex) || [];
-                                      handleQuestionChange(qIndex, 'options', newOptions);
-                                      if (q.correctAnswerIndex === oIndex) {
-                                        handleQuestionChange(qIndex, 'correctAnswerIndex', 0);
-                                      }
+                                      setFormData(prev => {
+                                         const newQs = [...prev.questions];
+                                         const currentQ = newQs[qIndex];
+                                         const newOptions = currentQ.options?.filter((_, i) => i !== oIndex) || [];
+                                         const newAttachments = currentQ.optionAttachments?.filter((_, i) => i !== oIndex) || [];
+
+                                         let newCorrectIndex = currentQ.correctAnswerIndex;
+                                         if (newCorrectIndex === oIndex) {
+                                            newCorrectIndex = 0;
+                                         } else if (newCorrectIndex !== undefined && newCorrectIndex > oIndex) {
+                                            newCorrectIndex--;
+                                         }
+
+                                         newQs[qIndex] = {
+                                             ...currentQ,
+                                             options: newOptions,
+                                             optionAttachments: newAttachments,
+                                             correctAnswerIndex: newCorrectIndex
+                                         };
+                                         return { ...prev, questions: newQs };
+                                      });
                                     }}
                                     className="w-full py-2 rounded-lg bg-red-50 text-red-600 font-bold hover:bg-red-100 transition-all flex items-center justify-center gap-2"
                                     title="Hapus Pilihan"
@@ -875,8 +997,15 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                           {(q.options?.length || 0) < 8 && (
                             <button
                               onClick={() => {
-                                const newOptions = [...(q.options || []), ''];
-                                handleQuestionChange(qIndex, 'options', newOptions);
+                                setFormData(prev => {
+                                    const newQs = [...prev.questions];
+                                    const currentQ = newQs[qIndex];
+                                    const newOptions = [...(currentQ.options || []), ''];
+                                    const newAttachments = [...(currentQ.optionAttachments || []), undefined];
+
+                                    newQs[qIndex] = { ...currentQ, options: newOptions, optionAttachments: newAttachments };
+                                    return { ...prev, questions: newQs };
+                                });
                               }}
                               className="w-full py-2 border-2 border-dashed border-indigo-300 rounded-xl text-indigo-600 font-bold hover:bg-indigo-50 transition-colors flex items-center justify-center gap-2 text-sm mt-3"
                             >
@@ -924,11 +1053,16 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                   </div>
                                   <button
                                     onClick={() => {
-                                      const currentIndices = q.correctAnswerIndices || [];
-                                      const newIndices = currentIndices.includes(oIndex) 
-                                        ? currentIndices.filter(i => i !== oIndex) 
-                                        : [...currentIndices, oIndex];
-                                      handleQuestionChange(qIndex, 'correctAnswerIndices', newIndices);
+                                      setFormData(prev => {
+                                         const newQs = [...prev.questions];
+                                         const currentQ = newQs[qIndex];
+                                         const currentIndices = currentQ.correctAnswerIndices || [];
+                                         const newIndices = currentIndices.includes(oIndex)
+                                            ? currentIndices.filter(i => i !== oIndex)
+                                            : [...currentIndices, oIndex];
+                                         newQs[qIndex] = { ...currentQ, correctAnswerIndices: newIndices };
+                                         return { ...prev, questions: newQs };
+                                      });
                                     }}
                                     className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 text-xs font-bold ${q.correctAnswerIndices?.includes(oIndex) ? 'bg-green-600 text-white shadow-lg shadow-green-200' : 'bg-gray-200 text-gray-400 hover:bg-gray-300'}`}
                                   >
@@ -936,7 +1070,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                   </button>
                                 </div>
 
-                                {/* Rich Text Editor for Option - PERTAMA */}
+                                {/* Rich Text Editor for Option */}
                                 <div>
                                   <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Teks Pilihan</label>
                                   <RichTextEditor 
@@ -947,15 +1081,68 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                   />
                                 </div>
 
-                                {/* Delete Option Button - KEDUA */}
+                                 {/* Option Image Attachment */}
+                                 <div>
+                                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Gambar Pilihan (Opsional)</label>
+                                  <div className="flex gap-2 items-center">
+                                      {q.optionAttachments?.[oIndex]?.url ? (
+                                          <div className="relative group shrink-0">
+                                              <div className="w-20 h-20 rounded-lg bg-white border border-gray-200 overflow-hidden flex items-center justify-center">
+                                                  {q.optionAttachments[oIndex]?.url === 'uploading...' ? (
+                                                     <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                                                  ) : (
+                                                     <img src={q.optionAttachments[oIndex]?.url} alt="Option" className="w-full h-full object-cover" />
+                                                  )}
+                                              </div>
+                                              <button
+                                                  onClick={() => handleOptionAttachmentChange(qIndex, oIndex, '')}
+                                                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                                  title="Hapus Gambar"
+                                              >
+                                                  <X className="w-3 h-3" />
+                                              </button>
+                                          </div>
+                                      ) : (
+                                          <div className="relative">
+                                              <input
+                                                  type="file"
+                                                  accept="image/*"
+                                                  onChange={(e) => handleOptionFileUpload(qIndex, oIndex, e)}
+                                                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                              />
+                                              <button className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-xs font-bold text-gray-500 hover:bg-gray-50 flex items-center gap-2">
+                                                  <Upload className="w-3 h-3" /> Upload Gambar
+                                              </button>
+                                          </div>
+                                      )}
+                                  </div>
+                                </div>
+
+                                {/* Delete Option Button */}
                                 {(q.options?.length || 0) > 2 && (
                                   <button
                                     onClick={() => {
-                                      const newOptions = q.options?.filter((_, i) => i !== oIndex) || [];
-                                      handleQuestionChange(qIndex, 'options', newOptions);
-                                      const currentIndices = q.correctAnswerIndices || [];
-                                      const newIndices = currentIndices.filter(i => i !== oIndex);
-                                      handleQuestionChange(qIndex, 'correctAnswerIndices', newIndices);
+                                      setFormData(prev => {
+                                        const newQs = [...prev.questions];
+                                        const currentQ = newQs[qIndex];
+
+                                        const newOptions = currentQ.options?.filter((_, i) => i !== oIndex) || [];
+                                        const newAttachments = currentQ.optionAttachments?.filter((_, i) => i !== oIndex) || [];
+
+                                        // Update indices
+                                        const currentIndices = currentQ.correctAnswerIndices || [];
+                                        const newIndices = currentIndices
+                                            .filter(i => i !== oIndex)
+                                            .map(i => (i > oIndex ? i - 1 : i));
+
+                                        newQs[qIndex] = {
+                                            ...currentQ,
+                                            options: newOptions,
+                                            optionAttachments: newAttachments,
+                                            correctAnswerIndices: newIndices
+                                        };
+                                        return { ...prev, questions: newQs };
+                                      });
                                     }}
                                     className="w-full py-2 rounded-lg bg-red-50 text-red-600 font-bold hover:bg-red-100 transition-all flex items-center justify-center gap-2"
                                     title="Hapus Pilihan"
@@ -970,8 +1157,15 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                           {(q.options?.length || 0) < 8 && (
                             <button
                               onClick={() => {
-                                const newOptions = [...(q.options || []), ''];
-                                handleQuestionChange(qIndex, 'options', newOptions);
+                                setFormData(prev => {
+                                    const newQs = [...prev.questions];
+                                    const currentQ = newQs[qIndex];
+                                    const newOptions = [...(currentQ.options || []), ''];
+                                    const newAttachments = [...(currentQ.optionAttachments || []), undefined];
+
+                                    newQs[qIndex] = { ...currentQ, options: newOptions, optionAttachments: newAttachments };
+                                    return { ...prev, questions: newQs };
+                                });
                               }}
                               className="w-full py-2 border-2 border-dashed border-indigo-300 rounded-xl text-indigo-600 font-bold hover:bg-indigo-50 transition-colors flex items-center justify-center gap-2 text-sm mt-3"
                             >
