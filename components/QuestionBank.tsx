@@ -4,7 +4,8 @@ import { generateUUID } from '../lib/uuid';
 import { Question, QuestionType } from '../types';
 import { 
   Plus, Search, Filter, Trash2, Edit2, Check, X,
-  ChevronDown, ChevronUp, Database, Tag, AlertCircle, Save, ArrowLeft, GripVertical, Image as ImageIcon, Upload, Link as LinkIcon
+  ChevronDown, ChevronUp, Database, Tag, AlertCircle, Save, ArrowLeft, GripVertical, Image as ImageIcon, Upload, Link as LinkIcon,
+  AlignLeft, AlignCenter, AlignRight
 } from 'lucide-react';
 
 interface QuestionBankProps {
@@ -432,6 +433,20 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                     Acak Pilihan
                   </label>
                 </div>
+
+                {/* Toolbar */}
+                <div className="flex gap-1 bg-gray-100 p-2 rounded-lg w-fit">
+                  <button className="p-2 rounded hover:bg-gray-200 text-gray-600 font-bold text-sm transition-colors" title="Align Left">
+                    <AlignLeft className="w-4 h-4" />
+                  </button>
+                  <button className="p-2 rounded hover:bg-gray-200 text-gray-600 font-bold text-sm transition-colors" title="Align Center">
+                    <AlignCenter className="w-4 h-4" />
+                  </button>
+                  <button className="p-2 rounded hover:bg-gray-200 text-gray-600 font-bold text-sm transition-colors" title="Align Right">
+                    <AlignRight className="w-4 h-4" />
+                  </button>
+                </div>
+
                 <div className="grid grid-cols-1 gap-4">
                   {formData.options?.map((opt, idx) => (
                     <div key={idx} className="relative group">
@@ -440,19 +455,48 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                         type="text"
                         value={opt}
                         onChange={(e) => handleOptionChange(idx, e.target.value)}
-                        className={`w-full pl-14 pr-12 py-4 rounded-xl border-2 font-bold text-sm outline-none transition-all ${formData.correctAnswerIndex === idx ? 'border-green-500 bg-green-50/20' : 'border-gray-100 bg-gray-50 focus:bg-white focus:border-indigo-200'}`}
+                        className={`w-full pl-14 pr-20 py-4 rounded-xl border-2 font-bold text-sm outline-none transition-all ${formData.correctAnswerIndex === idx ? 'border-green-500 bg-green-50/20' : 'border-gray-100 bg-gray-50 focus:bg-white focus:border-indigo-200'}`}
                         placeholder={`Pilihan ${String.fromCharCode(65 + idx)}`}
                       />
-                      <button
-                        onClick={() => handleChange('correctAnswerIndex', idx)}
-                        className={`absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-lg transition-all ${formData.correctAnswerIndex === idx ? 'bg-green-500 text-white shadow-lg shadow-green-200' : 'bg-gray-200 text-gray-400 hover:bg-gray-300'}`}
-                        title="Tandai Jawaban Benar"
-                      >
-                        <Check className="w-4 h-4" />
-                      </button>
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 flex gap-1">
+                        <button
+                          onClick={() => handleChange('correctAnswerIndex', idx)}
+                          className={`p-1.5 rounded-lg transition-all ${formData.correctAnswerIndex === idx ? 'bg-green-500 text-white shadow-lg shadow-green-200' : 'bg-gray-200 text-gray-400 hover:bg-gray-300'}`}
+                          title="Tandai Jawaban Benar"
+                        >
+                          <Check className="w-4 h-4" />
+                        </button>
+                        {(formData.options?.length || 0) > 2 && (
+                          <button
+                            onClick={() => {
+                              const newOptions = formData.options?.filter((_, i) => i !== idx) || [];
+                              handleChange('options', newOptions);
+                              if (formData.correctAnswerIndex === idx) {
+                                handleChange('correctAnswerIndex', 0);
+                              }
+                            }}
+                            className="p-1.5 rounded-lg bg-gray-200 text-gray-400 hover:bg-red-200 hover:text-red-500 transition-all"
+                            title="Hapus Pilihan"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
+
+                {(formData.options?.length || 0) < 8 && (
+                  <button
+                    onClick={() => {
+                      const newOptions = [...(formData.options || []), ''];
+                      handleChange('options', newOptions);
+                    }}
+                    className="w-full py-3 border-2 border-dashed border-indigo-300 rounded-xl text-indigo-600 font-bold hover:bg-indigo-50 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Plus className="w-4 h-4" /> Tambah Pilihan
+                  </button>
+                )}
               </>
             )}
 
@@ -465,6 +509,20 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                     Acak Pilihan
                   </label>
                 </div>
+
+                {/* Toolbar */}
+                <div className="flex gap-1 bg-gray-100 p-2 rounded-lg w-fit">
+                  <button className="p-2 rounded hover:bg-gray-200 text-gray-600 font-bold text-sm transition-colors" title="Align Left">
+                    <AlignLeft className="w-4 h-4" />
+                  </button>
+                  <button className="p-2 rounded hover:bg-gray-200 text-gray-600 font-bold text-sm transition-colors" title="Align Center">
+                    <AlignCenter className="w-4 h-4" />
+                  </button>
+                  <button className="p-2 rounded hover:bg-gray-200 text-gray-600 font-bold text-sm transition-colors" title="Align Right">
+                    <AlignRight className="w-4 h-4" />
+                  </button>
+                </div>
+
                 <div className="grid grid-cols-1 gap-4">
                   {formData.options?.map((opt, idx) => {
                     const isSelected = formData.correctAnswerIndices?.includes(idx);
@@ -475,21 +533,50 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                           type="text"
                           value={opt}
                           onChange={(e) => handleOptionChange(idx, e.target.value)}
-                          className={`w-full pl-14 pr-12 py-4 rounded-xl border-2 font-bold text-sm outline-none transition-all ${isSelected ? 'border-green-500 bg-green-50/20' : 'border-gray-100 bg-gray-50 focus:bg-white focus:border-indigo-200'}`}
+                          className={`w-full pl-14 pr-20 py-4 rounded-xl border-2 font-bold text-sm outline-none transition-all ${isSelected ? 'border-green-500 bg-green-50/20' : 'border-gray-100 bg-gray-50 focus:bg-white focus:border-indigo-200'}`}
                         />
-                        <button 
-                          onClick={() => {
-                            const current = formData.correctAnswerIndices || [];
-                            handleChange('correctAnswerIndices', current.includes(idx) ? current.filter(i => i !== idx) : [...current, idx]);
-                          }} 
-                          className={`absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-lg transition-all ${isSelected ? 'bg-green-500 text-white shadow-lg shadow-green-200' : 'bg-gray-200 text-gray-400 hover:bg-gray-300'}`}
-                        >
-                          <Check className="w-4 h-4" />
-                        </button>
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex gap-1">
+                          <button 
+                            onClick={() => {
+                              const current = formData.correctAnswerIndices || [];
+                              handleChange('correctAnswerIndices', current.includes(idx) ? current.filter(i => i !== idx) : [...current, idx]);
+                            }} 
+                            className={`p-1.5 rounded-lg transition-all ${isSelected ? 'bg-green-500 text-white shadow-lg shadow-green-200' : 'bg-gray-200 text-gray-400 hover:bg-gray-300'}`}
+                          >
+                            <Check className="w-4 h-4" />
+                          </button>
+                          {(formData.options?.length || 0) > 2 && (
+                            <button
+                              onClick={() => {
+                                const newOptions = formData.options?.filter((_, i) => i !== idx) || [];
+                                handleChange('options', newOptions);
+                                const current = formData.correctAnswerIndices || [];
+                                const newIndices = current.filter(i => i !== idx);
+                                handleChange('correctAnswerIndices', newIndices);
+                              }}
+                              className="p-1.5 rounded-lg bg-gray-200 text-gray-400 hover:bg-red-200 hover:text-red-500 transition-all"
+                              title="Hapus Pilihan"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
                 </div>
+
+                {(formData.options?.length || 0) < 8 && (
+                  <button
+                    onClick={() => {
+                      const newOptions = [...(formData.options || []), ''];
+                      handleChange('options', newOptions);
+                    }}
+                    className="w-full py-3 border-2 border-dashed border-indigo-300 rounded-xl text-indigo-600 font-bold hover:bg-indigo-50 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Plus className="w-4 h-4" /> Tambah Pilihan
+                  </button>
+                )}
               </>
             )}
 
