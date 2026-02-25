@@ -265,6 +265,9 @@ export default function App() {
   // State for server error handling
   const [isOffline, setIsOffline] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  const [isLoadingData, setIsLoadingData] = useState(false);
+  const [lastFetchTime, setLastFetchTime] = useState<number>(0);
+  const FETCH_CACHE_DURATION = 30 * 1000; // Cache data for 30 seconds
 
   // Session Timeout & Warning State
   const [showTimeoutWarning, setShowTimeoutWarning] = useState(false);
@@ -327,12 +330,31 @@ export default function App() {
   }, [currentUser, addAlert]);
 
     // Load Data from Supabase. Returns fetched exams and results for callers to act on.
-    const fetchData = async () => {
+    const fetchData = async (forceRefresh = false) => {
       if (!isSupabaseConfigured || !supabase) return { exams: null as any, results: null as any };
 
+      // Check cache - don't fetch if data was recently loaded (unless forceRefresh)
+      const now = Date.now();
+      if (!forceRefresh && lastFetchTime > 0 && (now - lastFetchTime) < FETCH_CACHE_DURATION) {
+        console.log('Using cached data, last fetch was', Math.round((now - lastFetchTime) / 1000), 'seconds ago');
+        return { exams, results };
+      }
+
       try {
-        // 1. Fetch Exams
-        const { data: examsData, error: examsError } = await supabase.from('exams').select('*').order('created_at', { ascending: false });
+        setIsLoadingData(true);
+        
+        // Show loading state only if it takes more than 300ms
+        const loadingTimeout = setTimeout(() => {
+          addAlert('Memuat data dari database...', 'info', 'loading-data');
+        }, 300);
+
+        // 1. Fetch Exams with limit for performance
+        const { data: examsData, error: examsError } = await supabase
+          .from('exams')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(50); // Limit to 50 exams for performance
+
         let mappedExams: Exam[] = [];
         if (examsData && !examsError) {
           mappedExams = examsData.map((e: any) => {
@@ -350,8 +372,17 @@ export default function App() {
           setBankQuestions(mappedExams.flatMap(e => e.questions || []));
         }
 
-        // 2. Fetch Results
-        const { data: resultsData, error: resultsError } = await supabase.from('exam_results').select('*');
+        // 2. Fetch Results with limit and only recent data
+        const oneMonthAgo = new Date();
+        oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+        
+        const { data: resultsData, error: resultsError } = await supabase
+          .from('exam_results')
+          .select('*')
+          .gte('submitted_at', oneMonthAgo.toISOString())
+          .order('submitted_at', { ascending: false })
+          .limit(100); // Limit to 100 most recent results
+
         let mappedResults: ExamResult[] = [];
         if (resultsData && !resultsError) {
           mappedResults = resultsData.map((r: any) => ({
@@ -372,9 +403,20 @@ export default function App() {
           setResults(mappedResults);
         }
 
+        clearTimeout(loadingTimeout);
+        setLastFetchTime(now);
+        setIsLoadingData(false);
+        
+        // Show success message if data was actually fetched (not cached)
+        if (forceRefresh || lastFetchTime === 0) {
+          addAlert('Data berhasil dimuat!', 'success', 'data-loaded');
+        }
+        
         return { exams: mappedExams, results: mappedResults };
       } catch (err) {
         console.error("Failed to fetch data from Supabase:", err);
+        setIsLoadingData(false);
+        addAlert('Gagal memuat data dari database. Coba lagi nanti.', 'error', 'fetch-error');
         return { exams: null as any, results: null as any };
       }
     };
@@ -2014,7 +2056,24 @@ export default function App() {
               <div className="max-w-6xl mx-auto animate-in fade-in">
                 <div className="flex justify-between items-center mb-8">
                   <h1 className="text-3xl font-black text-gray-900">Dashboard Siswa</h1>
-                  <button onClick={fetchData} className="p-3 bg-gray-50 text-gray-400 hover:text-indigo-600 rounded-2xl transition-all" title="Segarkan Data"><RotateCcw className="w-5 h-5" /></button>
+                  <button 
+                    onClick={() => fetchData(true)} 
+                    disabled={isLoadingData}
+                    className={`p-3 bg-gray-50 text-gray-400 hover:text-indigo-600 rounded-2xl transition-all flex items-center gap-2 ${isLoadingData ? 'opacity-50 cursor-not-allowed' : ''}`} 
+                    title="Segarkan Data"
+                  >
+                    {isLoadingData ? (
+                      <>
+                        <RefreshCw className="w-5 h-5 animate-spin" />
+                        Memuat...
+                      </>
+                    ) : (
+                      <>
+                        <RotateCcw className="w-5 h-5" />
+                        Segarkan
+                      </>
+                    )}
+                  </button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-14">
                    <div className="bg-indigo-600 p-10 rounded-[50px] text-white shadow-2xl relative overflow-hidden">
