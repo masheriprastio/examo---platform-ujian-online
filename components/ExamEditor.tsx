@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { generateUUID } from '../lib/uuid';
 import { Exam, Question, QuestionType } from '../types';
 import RichTextEditor from './RichTextEditor';
@@ -157,11 +157,14 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   const backupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedRef = useRef<string>(JSON.stringify(exam));
 
-  // Auto-backup state to localStorage every 2 seconds
+  // Auto-backup state to localStorage every 5 seconds (reduced from 2s for better performance)
   useEffect(() => {
     if (backupTimeoutRef.current) clearTimeout(backupTimeoutRef.current);
     
     backupTimeoutRef.current = setTimeout(() => {
+      // Skip backup if we're currently saving
+      if (isSaving) return;
+      
       try {
         // Backup exam data with attachments (now they're URLs, not base64)
         const backup = JSON.stringify(formData);
@@ -200,8 +203,8 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
           }
         }
 
-        // Clean up old backups occasionally
-        if (Math.random() < 0.1) {
+        // Clean up old backups occasionally (reduced frequency)
+        if (Math.random() < 0.05) { // Reduced from 0.1 to 0.05
             const keys = Object.keys(localStorage);
             keys.forEach(key => {
               if (key.startsWith('exam_draft_') && key !== `exam_draft_${exam.id}`) {
@@ -231,12 +234,12 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
           console.warn('Failed to backup exam draft:', e);
         }
       }
-    }, 2000);
+    }, 5000); // Increased from 2000ms to 5000ms for better performance
 
     return () => {
       if (backupTimeoutRef.current) clearTimeout(backupTimeoutRef.current);
     };
-  }, [formData, exam.id]);
+  }, [formData, exam.id, isSaving]);
 
   // Warn user if they try to leave without saving
   useEffect(() => {
@@ -252,11 +255,11 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [formData]);
   
-  const handleExamChange = (field: keyof Exam, value: any) => {
+  const handleExamChange = useCallback((field: keyof Exam, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
-  };
+  }, []);
 
-  const handleQuestionChange = (qIndex: number, field: keyof Question, value: any) => {
+  const handleQuestionChange = useCallback((qIndex: number, field: keyof Question, value: any) => {
     setFormData(prev => {
         const newQuestions = [...prev.questions];
         if (!newQuestions[qIndex]) return prev;
@@ -268,7 +271,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         };
         return { ...prev, questions: newQuestions };
     });
-  };
+  }, []);
 
   // Handler khusus untuk points dengan validasi
   const handlePointsChange = (qIndex: number, value: string) => {
@@ -514,100 +517,117 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
 
   return (
     <div className="fixed inset-0 bg-white z-[60] flex flex-col font-sans text-left overflow-hidden">
-      <header className="px-6 md:px-8 py-4 md:py-5 border-b border-gray-100 flex justify-between items-center bg-white shadow-sm shrink-0">
-        <div className="flex items-center gap-4 flex-1">
-          <div className="bg-indigo-50 p-2 rounded-xl border border-indigo-100 hidden md:block">
-            <Database className="w-5 h-5 text-indigo-600" />
+      <header className="px-4 md:px-8 py-3 md:py-5 border-b border-gray-100 bg-white shadow-sm shrink-0">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex items-center gap-3 flex-1">
+            <div className="bg-indigo-50 p-2 rounded-xl border border-indigo-100 hidden md:block">
+              <Database className="w-5 h-5 text-indigo-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h2 className="text-base md:text-xl font-black text-gray-900 leading-none truncate">Editor Ujian</h2>
+              {lastQuestion && (
+                <p className="text-xs text-gray-500 mt-1 line-clamp-1 truncate">
+                  Soal terakhir dibuat: {formatQuestionTimestamp(lastQuestion.createdAt)}
+                </p>
+              )}
+            </div>
+            {/* Status Badge & Toggle - Mobile: show icon only, Desktop: show full */}
+            <div className="flex items-center gap-2 md:gap-3 md:ml-4 md:pr-2 md:border-r md:border-gray-100">
+              {formData.status === 'draft' ? (
+                <div className="flex items-center gap-1.5 px-2 py-1.5 md:px-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <Clock className="w-3 h-3 md:w-4 md:h-4 text-yellow-600" />
+                  <span className="hidden md:inline text-xs font-bold text-yellow-700">DRAFT</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 px-2 py-1.5 md:px-3 bg-green-50 border border-green-200 rounded-lg">
+                  <Check className="w-3 h-3 md:w-4 md:h-4 text-green-600" />
+                  <span className="hidden md:inline text-xs font-bold text-green-700">PUBLISHED</span>
+                </div>
+              )}
+            </div>
           </div>
-          <div className="flex-1">
-            <h2 className="text-lg md:text-xl font-black text-gray-900 leading-none">Editor Ujian</h2>
-            {lastQuestion && (
-              <p className="text-xs text-gray-500 mt-1 line-clamp-1">
-                Soal terakhir dibuat: {formatQuestionTimestamp(lastQuestion.createdAt)}
-              </p>
-            )}
-          </div>
-          {/* Status Badge & Toggle */}
-          <div className="flex items-center gap-3 ml-4 pr-2 border-r border-gray-100">
-            {formData.status === 'draft' ? (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <Clock className="w-4 h-4 text-yellow-600" />
-                <span className="text-xs font-bold text-yellow-700">DRAFT</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg">
-                <Check className="w-4 h-4 text-green-600" />
-                <span className="text-xs font-bold text-green-700">PUBLISHED</span>
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="flex gap-2 ml-4">
-          {/* Toggle Draft/Published */}
-          {formData.status === 'draft' ? (
-            <button
-              onClick={() => handleExamChange('status', 'published')}
-              className="px-4 py-2 bg-green-50 border-2 border-green-200 text-green-600 rounded-xl hover:bg-green-100 font-bold flex items-center gap-2 transition-all text-sm"
-              title="Publikasikan ujian agar siswa bisa melihat"
-            >
-              <Check className="w-4 h-4" /> Publikasikan
-            </button>
-          ) : (
-            <button
-              onClick={() => handleExamChange('status', 'draft')}
-              className="px-4 py-2 bg-yellow-50 border-2 border-yellow-200 text-yellow-600 rounded-xl hover:bg-yellow-100 font-bold flex items-center gap-2 transition-all text-sm"
-              title="Ubah ke draft agar siswa tidak bisa melihat"
-            >
-              <Clock className="w-4 h-4" /> Ke Draft
-            </button>
-          )}
-          {onPreview && (
+          
+          <div className="flex flex-wrap gap-2 justify-end">
+            {/* Mobile: icon buttons, Desktop: full buttons */}
+            <div className="flex items-center gap-1 md:gap-2">
+              {/* Toggle Draft/Published - Mobile: icon only */}
+              {formData.status === 'draft' ? (
+                <button
+                  onClick={() => handleExamChange('status', 'published')}
+                  className="p-2 md:px-4 md:py-2 bg-green-50 border-2 border-green-200 text-green-600 rounded-xl hover:bg-green-100 font-bold flex items-center gap-1 md:gap-2 transition-all text-sm"
+                  title="Publikasikan ujian agar siswa bisa melihat"
+                >
+                  <Check className="w-4 h-4" />
+                  <span className="hidden md:inline">Publikasikan</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => handleExamChange('status', 'draft')}
+                  className="p-2 md:px-4 md:py-2 bg-yellow-50 border-2 border-yellow-200 text-yellow-600 rounded-xl hover:bg-yellow-100 font-bold flex items-center gap-1 md:gap-2 transition-all text-sm"
+                  title="Ubah ke draft agar siswa tidak bisa melihat"
+                >
+                  <Clock className="w-4 h-4" />
+                  <span className="hidden md:inline">Ke Draft</span>
+                </button>
+              )}
+              
+              {onPreview && (
+                <button 
+                  onClick={() => {
+                    try {
+                      localStorage.removeItem(`exam_draft_${exam.id}`);
+                    } catch (e) {
+                      // Ignore
+                    }
+                    onPreview(formData);
+                  }}
+                  className="p-2 md:px-4 md:py-2 bg-white border-2 border-indigo-100 text-indigo-600 rounded-xl hover:bg-indigo-50 font-bold flex items-center gap-1 md:gap-2 transition-all text-sm"
+                  title="Preview Ujian"
+                >
+                  <Eye className="w-4 h-4" />
+                  <span className="hidden md:inline">Preview</span>
+                </button>
+              )}
+              
+              <button onClick={onCancel} className="p-2 md:px-4 md:py-2 text-gray-500 font-bold hover:bg-gray-50 rounded-xl transition text-sm" title="Batal">
+                <span className="hidden md:inline">Batal</span>
+                <X className="w-4 h-4 md:hidden" />
+              </button>
+            </div>
+            
+            {/* Save Button - Always visible with text on mobile */}
             <button 
-              onClick={() => {
-                // Clear backup to ensure we reload with fresh data from props when returning
+              onClick={async () => {
+                setIsSaving(true);
                 try {
-                  localStorage.removeItem(`exam_draft_${exam.id}`);
-                } catch (e) {
-                  // Ignore
+                  await Promise.resolve(onSave(formData));
+                  lastSavedRef.current = JSON.stringify(formData);
+                  try {
+                    localStorage.removeItem(`exam_draft_${exam.id}`);
+                  } catch (e) {
+                    console.warn('Failed to clear backup:', e);
+                  }
+                } finally {
+                  setIsSaving(false);
                 }
-                onPreview(formData);
-              }}
-              className="px-4 py-2 bg-white border-2 border-indigo-100 text-indigo-600 rounded-xl hover:bg-indigo-50 font-bold flex items-center gap-2 transition-all text-sm"
+              }} 
+              disabled={isSaving}
+              className="px-4 py-2 md:px-6 md:py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-black shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 transition-all active:scale-95 text-sm disabled:opacity-70 disabled:cursor-not-allowed min-w-[100px] save-button-mobile touch-target"
             >
-              <Eye className="w-4 h-4" /> Preview
+              {isSaving ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span className="hidden sm:inline">Menyimpan...</span>
+                  <span className="sm:hidden">...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  <span>Simpan</span>
+                </>
+              )}
             </button>
-          )}
-          <button onClick={onCancel} className="px-4 py-2 text-gray-500 font-bold hover:bg-gray-50 rounded-xl transition text-sm">Batal</button>
-          <button 
-            onClick={async () => {
-              setIsSaving(true);
-              try {
-                await Promise.resolve(onSave(formData));
-                lastSavedRef.current = JSON.stringify(formData);
-                // Clear backup after successful save
-                try {
-                  localStorage.removeItem(`exam_draft_${exam.id}`);
-                } catch (e) {
-                  console.warn('Failed to clear backup:', e);
-                }
-              } finally {
-                setIsSaving(false);
-              }
-            }} 
-            disabled={isSaving}
-            className="px-6 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-black shadow-lg shadow-indigo-100 flex items-center gap-2 transition-all active:scale-95 text-sm disabled:opacity-70 disabled:cursor-not-allowed"
-          >
-            {isSaving ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Menyimpan...
-              </>
-            ) : (
-              <>
-                <Save className="w-4 h-4" /> Simpan
-              </>
-            )}
-          </button>
+          </div>
         </div>
       </header>
 

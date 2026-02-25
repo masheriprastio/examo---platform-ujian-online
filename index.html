@@ -52,6 +52,9 @@
       body {
         font-family: 'Inter', sans-serif;
         background-color: #f8fafc;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
       }
       /* Custom scrollbar for question navigation */
       .scrollbar-hide::-webkit-scrollbar {
@@ -63,6 +66,44 @@
       }
       @media print {
         .no-print { display: none; }
+      }
+      
+      /* Mobile Chrome specific fixes */
+      @media (max-width: 768px) {
+        /* Ensure buttons are properly sized and visible */
+        button {
+          -webkit-appearance: none;
+          -moz-appearance: none;
+          appearance: none;
+          min-height: 44px; /* Minimum touch target size */
+          min-width: 44px;
+        }
+        
+        /* Fix for save button on mobile Chrome */
+        .save-button-mobile {
+          position: relative;
+          z-index: 10;
+          box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3) !important;
+        }
+        
+        /* Prevent text size adjustment on mobile */
+        input, textarea, select {
+          font-size: 16px !important; /* Prevents iOS zoom on focus */
+        }
+        
+        /* Improve touch targets */
+        .touch-target {
+          padding: 12px 16px !important;
+        }
+      }
+      
+      /* Fix for Chrome mobile address bar */
+      @media (max-height: 700px) and (max-width: 768px) {
+        .mobile-header-fixed {
+          position: sticky;
+          top: 0;
+          z-index: 50;
+        }
       }
     </style>
 </head>
