@@ -41,6 +41,12 @@ export interface Question {
     url: string;
     caption?: string;
   };
+  // Attachment untuk setiap opsi MCQ/Multiple Select
+  optionAttachments?: Array<{
+    type?: 'image' | 'video' | 'audio';
+    url?: string;
+    caption?: string;
+  } | undefined>;
 }
 
 export interface Exam {

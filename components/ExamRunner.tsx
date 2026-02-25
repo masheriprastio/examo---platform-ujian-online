@@ -101,10 +101,20 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
     // Randomize options for MCQ and Multiple Select if enabled (HANYA SEKALI)
     questionsToRun = questionsToRun.map(q => {
       if ((q.type === 'mcq' || q.type === 'multiple_select') && q.randomizeOptions) {
-        // Handle both legacy string[] options and new richOptions
-        const sourceOptions: { html: string; attachment?: string; idx: number }[] = q.richOptions
-            ? q.richOptions.map((ro, idx) => ({ ...ro, idx }))
-            : q.options?.map((opt, idx) => ({ html: opt, attachment: '', idx })) || [];
+        // Handle both legacy string[] options and new richOptions + optionAttachments
+        const sourceOptions: { html: string; attachment?: string; optionAttachment?: any; idx: number }[] = q.richOptions
+            ? q.richOptions.map((ro, idx) => ({ 
+                html: ro.html, 
+                attachment: ro.attachment, 
+                optionAttachment: q.optionAttachments?.[idx],
+                idx 
+              }))
+            : q.options?.map((opt, idx) => ({ 
+                html: opt, 
+                attachment: '', 
+                optionAttachment: q.optionAttachments?.[idx],
+                idx 
+              })) || [];
 
         if (sourceOptions.length > 0) {
             const shuffledOptions = fisherYatesShuffle(sourceOptions);
@@ -122,6 +132,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                 // Update both legacy and new structure to be safe, though UI should prefer richOptions
                 options: shuffledOptions.map(o => o.html),
                 richOptions: shuffledOptions.map(o => ({ html: o.html, attachment: o.attachment })),
+                optionAttachments: shuffledOptions.map(o => o.optionAttachment),
                 correctAnswerIndex: newCorrectIndex,
                 correctAnswerIndices: newCorrectIndices,
                 _originalOptionsMapping: shuffledOptions.map(o => o.idx) // Store mapping if needed
@@ -453,6 +464,8 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
             <div className="space-y-4">
               {currentQuestion.type === 'mcq' && (currentQuestion.richOptions || currentQuestion.options)?.map((opt, idx) => {
                 const htmlContent = typeof opt === 'string' ? opt : opt.html;
+                const optionAttachment = currentQuestion.optionAttachments?.[idx];
+                const hasAttachment = optionAttachment?.url;
                 return (
                     <button key={idx} onClick={() => {
                     setAnswers(prev => {
@@ -461,9 +474,19 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                         }
                         return { ...prev, [currentQuestion.id]: idx };
                     });
-                    }} className={`w-full text-left p-6 rounded-[28px] border-2 transition-all flex items-center gap-5 ${answers[currentQuestion.id] === idx ? 'bg-indigo-50 border-indigo-600 shadow-xl' : 'bg-white border-gray-50 hover:bg-gray-50/30'}`}>
-                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black shrink-0 ${answers[currentQuestion.id] === idx ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-400'}`}>{String.fromCharCode(65 + idx)}</div>
-                    <div className={`font-medium text-lg prose max-w-none ${answers[currentQuestion.id] === idx ? 'text-indigo-900' : 'text-gray-700'}`} dangerouslySetInnerHTML={{ __html: htmlContent }} />
+                    }} className={`w-full text-left p-6 rounded-[28px] border-2 transition-all flex items-start gap-5 ${answers[currentQuestion.id] === idx ? 'bg-indigo-50 border-indigo-600 shadow-xl' : 'bg-white border-gray-50 hover:bg-gray-50/30'}`}>
+                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black shrink-0 mt-1 ${answers[currentQuestion.id] === idx ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-400'}`}>{String.fromCharCode(65 + idx)}</div>
+                    <div className={`flex-1 flex flex-col gap-3 ${answers[currentQuestion.id] === idx ? 'text-indigo-900' : 'text-gray-700'}`}>
+                      <div className={`font-medium text-lg prose max-w-none`} dangerouslySetInnerHTML={{ __html: htmlContent }} />
+                      {hasAttachment && (
+                        <img 
+                          src={optionAttachment.url} 
+                          alt={`Option ${String.fromCharCode(65 + idx)}`}
+                          className="max-w-xs max-h-64 rounded-lg border border-gray-200 object-contain"
+                          onError={(e) => (e.currentTarget.src = 'https://placehold.co/300x200?text=Error')}
+                        />
+                      )}
+                    </div>
                     </button>
                 );
               })}
@@ -472,6 +495,8 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                 const htmlContent = typeof opt === 'string' ? opt : opt.html;
                 const currentAnswers = (answers[currentQuestion.id] as number[]) || [];
                 const isSelected = currentAnswers.includes(idx);
+                const optionAttachment = currentQuestion.optionAttachments?.[idx];
+                const hasAttachment = optionAttachment?.url;
                 return (
                   <button key={idx} onClick={() => {
                     setAnswers(prev => {
@@ -483,11 +508,21 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                       addLog('autosave', `Changed answer for Q${currentQuestionIndex + 1} to [${newAns.map(i => String.fromCharCode(65 + i)).join(', ')}]`);
                       return { ...prev, [currentQuestion.id]: newAns };
                     });
-                  }} className={`w-full text-left p-6 rounded-[28px] border-2 transition-all flex items-center gap-5 ${isSelected ? 'bg-indigo-50 border-indigo-600 shadow-xl' : 'bg-white border-gray-50 hover:bg-gray-50/30'}`}>
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center border-2 shrink-0 ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-transparent'}`}>
+                  }} className={`w-full text-left p-6 rounded-[28px] border-2 transition-all flex items-start gap-5 ${isSelected ? 'bg-indigo-50 border-indigo-600 shadow-xl' : 'bg-white border-gray-50 hover:bg-gray-50/30'}`}>
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center border-2 shrink-0 mt-1 ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-transparent'}`}>
                       <CheckCircle className="w-6 h-6" />
                     </div>
-                    <div className={`font-medium text-lg prose max-w-none ${isSelected ? 'text-indigo-900' : 'text-gray-700'}`} dangerouslySetInnerHTML={{ __html: htmlContent }} />
+                    <div className={`flex-1 flex flex-col gap-3 ${isSelected ? 'text-indigo-900' : 'text-gray-700'}`}>
+                      <div className={`font-medium text-lg prose max-w-none`} dangerouslySetInnerHTML={{ __html: htmlContent }} />
+                      {hasAttachment && (
+                        <img 
+                          src={optionAttachment.url} 
+                          alt={`Option ${String.fromCharCode(65 + idx)}`}
+                          className="max-w-xs max-h-64 rounded-lg border border-gray-200 object-contain"
+                          onError={(e) => (e.currentTarget.src = 'https://placehold.co/300x200?text=Error')}
+                        />
+                      )}
+                    </div>
                   </button>
                 );
               })}

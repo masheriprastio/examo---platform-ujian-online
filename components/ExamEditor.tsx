@@ -371,12 +371,12 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         if (!newQuestions[qIndex]) return prev;
 
         const currentQ = newQuestions[qIndex];
-        const newAttachments = [...(currentQ.optionAttachments || Array(currentQ.options?.length || 0).fill(null))];
+        const newAttachments = [...(currentQ.optionAttachments || Array(currentQ.options?.length || 0).fill(undefined))];
 
         if (url) {
             newAttachments[oIndex] = { type: 'image', url: url, caption: '' };
         } else {
-            newAttachments[oIndex] = { url: undefined };
+            newAttachments[oIndex] = undefined;
         }
 
         newQuestions[qIndex] = { ...currentQ, optionAttachments: newAttachments };
@@ -400,7 +400,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
             if (!newQuestions[qIndex]) return prev;
 
             const currentQ = newQuestions[qIndex];
-            const newAttachments = [...(currentQ.optionAttachments || Array(currentQ.options?.length || 0).fill(null))];
+            const newAttachments = [...(currentQ.optionAttachments || Array(currentQ.options?.length || 0).fill(undefined))];
 
             newAttachments[oIndex] = { type: 'image', url: 'uploading...', caption: '' };
             newQuestions[qIndex] = { ...currentQ, optionAttachments: newAttachments };
