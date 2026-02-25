@@ -18,6 +18,7 @@ import AIGenerator from './components/AIGenerator';
 import ExamEditor from './components/ExamEditor';
 import QuestionBank from './components/QuestionBank';
 import StudentManager from './components/StudentManager';
+import TeacherManager from './components/TeacherManager';
 import MaterialManager from './components/MaterialManager';
 import StudentMaterialList from './components/StudentMaterialList';
 import { MaterialService, Material } from './services/MaterialService';
@@ -122,11 +123,32 @@ const Sidebar: React.FC<{
   onClose: () => void;
 }> = ({ user, activeView, isOpen, onNavigate, onLogout, onClose }) => {
   const isTeacher = user.role === 'teacher';
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false); // Submenu state
+
+  // Auto expand submenu if active view is a child
+  useEffect(() => {
+    if (activeView === 'TEACHER_TEACHERS' || activeView === 'TEACHER_STUDENTS') {
+      setIsUserMenuOpen(true);
+    }
+  }, [activeView]);
+
   const menuItems = isTeacher ? [
     { id: 'TEACHER_DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'TEACHER_GRADES', label: 'Buku Nilai', icon: ClipboardList },
+    // Group "Guru & Siswa"
+    {
+      id: 'GROUP_USERS',
+      label: 'Guru & Siswa',
+      icon: Users,
+      hasSubmenu: true,
+      isOpen: isUserMenuOpen,
+      toggle: () => setIsUserMenuOpen(!isUserMenuOpen),
+      children: [
+        { id: 'TEACHER_TEACHERS', label: 'Manajemen Guru' },
+        { id: 'TEACHER_STUDENTS', label: 'Manajemen Siswa' }
+      ]
+    },
     { id: 'TEACHER_BANK', label: 'Bank Soal', icon: Database },
-    { id: 'TEACHER_STUDENTS', label: 'Manajemen Siswa', icon: Users },
     { id: 'AI_GENERATOR', label: 'Generator AI', icon: Sparkles },
     { id: 'MATERIAL_MANAGER', label: 'Manajemen Materi', icon: FileText },
   ] : [
@@ -144,10 +166,38 @@ const Sidebar: React.FC<{
           <button onClick={onClose} className="md:hidden p-2 text-gray-400 hover:bg-gray-50 rounded-xl"><CloseIcon /></button>
         </div>
         <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2 scrollbar-hide">
-          {menuItems.map((item) => (
-            <button key={item.id} onClick={() => { onNavigate(item.id as AppView); onClose(); }} className={`w-full flex items-center gap-3 px-5 py-4 rounded-2xl font-bold transition-all ${activeView === item.id ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-100' : 'text-gray-400 hover:bg-gray-50'}`}>
-              <item.icon className="w-5 h-5" />{item.label}
-            </button>
+          {menuItems.map((item: any) => (
+            item.hasSubmenu ? (
+                <div key={item.id}>
+                    <button
+                        onClick={item.toggle}
+                        className={`w-full flex items-center justify-between px-5 py-4 rounded-2xl font-bold transition-all ${item.isOpen || (activeView === 'TEACHER_TEACHERS' || activeView === 'TEACHER_STUDENTS') ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:bg-gray-50'}`}
+                    >
+                        <div className="flex items-center gap-3">
+                            <item.icon className="w-5 h-5" />
+                            {item.label}
+                        </div>
+                        <ChevronDown className={`w-4 h-4 transition-transform ${item.isOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    {item.isOpen && (
+                        <div className="mt-1 ml-4 pl-4 border-l-2 border-indigo-100 space-y-1 animate-in slide-in-from-top-2">
+                            {item.children.map((child: any) => (
+                                <button
+                                    key={child.id}
+                                    onClick={() => { onNavigate(child.id as AppView); onClose(); }}
+                                    className={`w-full text-left px-4 py-3 rounded-xl font-bold text-sm transition-all ${activeView === child.id ? 'text-indigo-600 bg-white shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                                >
+                                    {child.label}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            ) : (
+                <button key={item.id} onClick={() => { onNavigate(item.id as AppView); onClose(); }} className={`w-full flex items-center gap-3 px-5 py-4 rounded-2xl font-bold transition-all ${activeView === item.id ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-100' : 'text-gray-400 hover:bg-gray-50'}`}>
+                <item.icon className="w-5 h-5" />{item.label}
+                </button>
+            )
           ))}
         </div>
         <div className="p-4 border-t border-gray-50 shrink-0 bg-white">
@@ -206,6 +256,7 @@ export default function App() {
   const [exams, setExams] = useState<Exam[]>(isSupabaseConfigured ? [] : MOCK_EXAMS);
   const [bankQuestions, setBankQuestions] = useState<Question[]>(isSupabaseConfigured ? [] : MOCK_EXAMS.flatMap(e => e.questions));
   const [students, setStudents] = useState<User[]>(isSupabaseConfigured ? [] : [MOCK_STUDENT]);
+  const [teachers, setTeachers] = useState<User[]>(isSupabaseConfigured ? [] : [MOCK_TEACHER]); // New teacher state
   const [results, setResults] = useState<ExamResult[]>([]);
   const [studentMaterials, setStudentMaterials] = useState<Material[]>([]);
 
@@ -412,6 +463,19 @@ export default function App() {
         }
      };
      fetchStudents();
+  }, [currentUser]);
+
+  // Fetch Teachers (only if Teacher/Admin logged in - for now handled by teachers state)
+  useEffect(() => {
+     const fetchTeachers = async () => {
+        if (currentUser?.role === 'teacher' && isSupabaseConfigured && supabase) {
+            const { data, error } = await supabase.from('users').select('*').eq('role', 'teacher');
+            if (data && !error) {
+                setTeachers(data as User[]);
+            }
+        }
+     };
+     fetchTeachers();
   }, [currentUser]);
 
   // Realtime Violation Monitoring for Teacher
@@ -796,6 +860,97 @@ export default function App() {
       }
     }
     setView('RESULT');
+  };
+
+  // --- NEW HANDLERS FOR TEACHER MANAGEMENT ---
+
+  const handleAddTeacher = async (newTeacher: User) => {
+    setTeachers(prev => [newTeacher, ...prev]);
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase.from('users').insert({
+        name: newTeacher.name,
+        email: newTeacher.email,
+        password: newTeacher.password,
+        role: 'teacher',
+        nis: newTeacher.nis, // Storing NIP in NIS column
+        // subject: newTeacher.subject // Needs schema update if subject column exists, otherwise handling locally/metadata
+      }).select().single();
+
+      if (error) {
+        console.error("Failed to insert teacher:", error);
+        addAlert("Gagal menyimpan ke database: " + error.message, 'error');
+        setTeachers(prev => prev.filter(t => t.id !== newTeacher.id));
+      } else if (data) {
+        setTeachers(prev => prev.map(t => t.id === newTeacher.id ? { ...t, id: data.id } : t));
+      }
+    }
+  };
+
+  const handleDeleteTeacher = async (id: string) => {
+    const originalTeachers = [...teachers];
+    setTeachers(prev => prev.filter(t => t.id !== id));
+
+    if (isSupabaseConfigured && supabase) {
+      if (id.startsWith('temp-')) return;
+      const { error } = await supabase.from('users').delete().eq('id', id);
+      if (error) {
+        console.error("Failed to delete teacher:", error);
+        addAlert("Gagal menghapus dari database: " + error.message, 'error');
+        setTeachers(originalTeachers);
+      }
+    }
+  };
+
+  const handleEditTeacher = async (editedTeacher: User) => {
+    setTeachers(prev => prev.map(t => t.id === editedTeacher.id ? editedTeacher : t));
+
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from('users')
+        .update({
+          name: editedTeacher.name,
+          email: editedTeacher.email,
+          password: editedTeacher.password,
+          nis: editedTeacher.nis // Update NIP
+          // subject update if supported
+        })
+        .eq('id', editedTeacher.id);
+
+      if (error) {
+        console.error("Failed to update teacher:", error);
+        addAlert("Gagal update data guru: " + error.message, 'error');
+        // Rollback handled by re-fetching or more complex optimistic logic
+      } else {
+        addAlert('Data guru berhasil diperbarui!', 'success');
+      }
+    } else {
+      addAlert('Data guru berhasil diperbarui!', 'success');
+    }
+  };
+
+  const handleTeacherUpdate = async (newTeachers: User[]) => {
+      const existingIds = new Set(teachers.map(t => t.id));
+      const addedTeachers = newTeachers.filter(t => !existingIds.has(t.id));
+      setTeachers(newTeachers);
+
+      if (isSupabaseConfigured && supabase && addedTeachers.length > 0) {
+          const rowsToInsert = addedTeachers.map(t => ({
+            name: t.name,
+            email: t.email,
+            password: t.password,
+            role: 'teacher',
+            nis: t.nis // NIP
+          }));
+
+          const { error } = await supabase.from('users').insert(rowsToInsert);
+          if (error) {
+              console.error("Bulk insert teachers failed:", error);
+              addAlert("Gagal import ke database: " + error.message, 'error');
+              setTeachers(teachers); // Rollback
+          } else {
+              const { data } = await supabase.from('users').select('*').eq('role', 'teacher');
+              if (data) setTeachers(data as User[]);
+          }
+      }
   };
 
   // --- NEW HANDLERS FOR STUDENT MANAGEMENT ---
@@ -1642,6 +1797,14 @@ export default function App() {
               </div>
             ) : view === 'TEACHER_BANK' ? (
               <QuestionBank questions={bankQuestions} onUpdate={setBankQuestions} />
+            ) : view === 'TEACHER_TEACHERS' ? (
+              <TeacherManager
+                  teachers={teachers}
+                  onUpdate={handleTeacherUpdate}
+                  onAddTeacher={handleAddTeacher}
+                  onDeleteTeacher={handleDeleteTeacher}
+                  onEditTeacher={handleEditTeacher}
+              />
             ) : view === 'TEACHER_STUDENTS' ? (
               <StudentManager
                   students={students}

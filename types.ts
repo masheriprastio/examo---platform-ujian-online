@@ -8,6 +8,7 @@ export interface User {
   grade?: string;
   school?: string;
   nis?: string;
+  subject?: string; // Mapel for teachers
   session_token?: string;
 }
 
@@ -17,8 +18,12 @@ export interface Question {
   id: string;
   type: QuestionType;
   text: string;
-  options?: string[]; // Deprecated: Use richOptions
-  richOptions?: { html: string; attachment?: string }[];
+  options?: string[];
+  optionAttachments?: Array<{
+    url?: string;
+    type?: 'image' | 'video' | 'audio';
+    caption?: string;
+  }>;
   correctAnswerIndex?: number;
   correctAnswerIndices?: number[];
   trueFalseAnswer?: boolean;
@@ -29,9 +34,6 @@ export interface Question {
   topic?: string;
   difficulty?: 'easy' | 'medium' | 'hard';
   randomizeOptions?: boolean;
-  createdAt?: string;
-  updatedAt?: string;
-  textAlign?: 'left' | 'center' | 'right';
   // Untuk Essay Drag & Drop
   dragDropItems?: string[];                    // Item yang bisa di-drag (kiri)
   dragDropTargets?: string[];                  // Target drop zones (kanan)
@@ -41,12 +43,6 @@ export interface Question {
     url: string;
     caption?: string;
   };
-  // Attachment untuk setiap opsi MCQ/Multiple Select
-  optionAttachments?: Array<{
-    type?: 'image' | 'video' | 'audio';
-    url?: string;
-    caption?: string;
-  } | undefined>;
 }
 
 export interface Exam {
@@ -107,4 +103,4 @@ export interface Material {
   isPublic: boolean;
 }
 
-export type AppView = 'LOGIN' | 'TEACHER_DASHBOARD' | 'TEACHER_GRADES' | 'TEACHER_BANK' | 'TEACHER_STUDENTS' | 'STUDENT_DASHBOARD' | 'view-upcoming' | 'view-expired' | 'STUDENT_HISTORY' | 'STUDENT_MATERIALS' | 'EXAM_SESSION' | 'RESULT' | 'AI_GENERATOR' | 'EXAM_EDITOR' | 'CHANGE_PASSWORD' | 'MATERIAL_MANAGER';
+export type AppView = 'LOGIN' | 'TEACHER_DASHBOARD' | 'TEACHER_GRADES' | 'TEACHER_BANK' | 'TEACHER_STUDENTS' | 'TEACHER_TEACHERS' | 'STUDENT_DASHBOARD' | 'STUDENT_HISTORY' | 'STUDENT_MATERIALS' | 'EXAM_SESSION' | 'RESULT' | 'AI_GENERATOR' | 'EXAM_EDITOR' | 'CHANGE_PASSWORD' | 'MATERIAL_MANAGER';
