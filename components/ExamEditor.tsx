@@ -563,7 +563,15 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
           )}
           {onPreview && (
             <button 
-              onClick={() => onPreview(formData)} 
+              onClick={() => {
+                // Clear backup to ensure we reload with fresh data from props when returning
+                try {
+                  localStorage.removeItem(`exam_draft_${exam.id}`);
+                } catch (e) {
+                  // Ignore
+                }
+                onPreview(formData);
+              }}
               className="px-4 py-2 bg-white border-2 border-indigo-100 text-indigo-600 rounded-xl hover:bg-indigo-50 font-bold flex items-center gap-2 transition-all text-sm"
             >
               <Eye className="w-4 h-4" /> Preview
@@ -921,43 +929,6 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                   />
                                 </div>
 
-                                {/* Option Image Attachment */}
-                                <div>
-                                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Gambar Pilihan (Opsional)</label>
-                                  <div className="flex gap-2 items-center">
-                                      {q.optionAttachments?.[oIndex]?.url ? (
-                                          <div className="relative group shrink-0">
-                                              <div className="w-20 h-20 rounded-lg bg-white border border-gray-200 overflow-hidden flex items-center justify-center">
-                                                  {q.optionAttachments[oIndex]?.url === 'uploading...' ? (
-                                                     <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-                                                  ) : (
-                                                     <img src={q.optionAttachments[oIndex]?.url} alt="Option" className="w-full h-full object-cover" />
-                                                  )}
-                                              </div>
-                                              <button
-                                                  onClick={() => handleOptionAttachmentChange(qIndex, oIndex, '')}
-                                                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                                                  title="Hapus Gambar"
-                                              >
-                                                  <X className="w-3 h-3" />
-                                              </button>
-                                          </div>
-                                      ) : (
-                                          <div className="relative">
-                                              <input
-                                                  type="file"
-                                                  accept="image/*"
-                                                  onChange={(e) => handleOptionFileUpload(qIndex, oIndex, e)}
-                                                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                                              />
-                                              <button className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-xs font-bold text-gray-500 hover:bg-gray-50 flex items-center gap-2">
-                                                  <Upload className="w-3 h-3" /> Upload Gambar
-                                              </button>
-                                          </div>
-                                      )}
-                                  </div>
-                                </div>
-
                                 {/* Delete Option Button */}
                                 {(q.options?.length || 0) > 2 && (
                                   <button
@@ -1079,43 +1050,6 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                     placeholder={`Masukkan teks untuk pilihan ${String.fromCharCode(65 + oIndex)}...`}
                                     height="120px"
                                   />
-                                </div>
-
-                                 {/* Option Image Attachment */}
-                                 <div>
-                                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Gambar Pilihan (Opsional)</label>
-                                  <div className="flex gap-2 items-center">
-                                      {q.optionAttachments?.[oIndex]?.url ? (
-                                          <div className="relative group shrink-0">
-                                              <div className="w-20 h-20 rounded-lg bg-white border border-gray-200 overflow-hidden flex items-center justify-center">
-                                                  {q.optionAttachments[oIndex]?.url === 'uploading...' ? (
-                                                     <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-                                                  ) : (
-                                                     <img src={q.optionAttachments[oIndex]?.url} alt="Option" className="w-full h-full object-cover" />
-                                                  )}
-                                              </div>
-                                              <button
-                                                  onClick={() => handleOptionAttachmentChange(qIndex, oIndex, '')}
-                                                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                                                  title="Hapus Gambar"
-                                              >
-                                                  <X className="w-3 h-3" />
-                                              </button>
-                                          </div>
-                                      ) : (
-                                          <div className="relative">
-                                              <input
-                                                  type="file"
-                                                  accept="image/*"
-                                                  onChange={(e) => handleOptionFileUpload(qIndex, oIndex, e)}
-                                                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                                              />
-                                              <button className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-xs font-bold text-gray-500 hover:bg-gray-50 flex items-center gap-2">
-                                                  <Upload className="w-3 h-3" /> Upload Gambar
-                                              </button>
-                                          </div>
-                                      )}
-                                  </div>
                                 </div>
 
                                 {/* Delete Option Button */}
