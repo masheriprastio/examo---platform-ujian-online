@@ -8,6 +8,8 @@ import {
   ChevronDown, ChevronUp, Database, GripVertical, Shuffle, Tag, AlertCircle, Eye, Image as ImageIcon, Upload, Link as LinkIcon,
   AlignLeft, AlignCenter, AlignRight
 } from 'lucide-react';
+import ReactQuill from 'react-quill';
+import 'react-quill/dist/quill.snow.css';
 
 interface ExamEditorProps {
   exam: Exam;
@@ -351,9 +353,74 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
 
   const handleOptionChange = (qIndex: number, oIndex: number, value: string) => {
     const newQuestions = [...formData.questions];
-    const newOptions = [...newQuestions[qIndex].options!];
-    newOptions[oIndex] = value;
-    newQuestions[qIndex] = { ...newQuestions[qIndex], options: newOptions };
+    // Backward compatibility: If options exists but richOptions doesn't, sync them.
+    if (!newQuestions[qIndex].richOptions && newQuestions[qIndex].options) {
+      newQuestions[qIndex].richOptions = newQuestions[qIndex].options!.map(opt => ({ html: opt, attachment: '' }));
+    }
+
+    // Update richOptions
+    if (newQuestions[qIndex].richOptions) {
+      const newRichOptions = [...newQuestions[qIndex].richOptions!];
+      newRichOptions[oIndex] = { ...newRichOptions[oIndex], html: value };
+      newQuestions[qIndex] = { ...newQuestions[qIndex], richOptions: newRichOptions };
+    }
+    // Fallback/Legacy
+    else if (newQuestions[qIndex].options) {
+       const newOptions = [...newQuestions[qIndex].options!];
+       newOptions[oIndex] = value;
+       newQuestions[qIndex] = { ...newQuestions[qIndex], options: newOptions };
+    }
+
+    setFormData(prev => ({ ...prev, questions: newQuestions }));
+  };
+
+  const handleAddOption = (qIndex: number) => {
+    const newQuestions = [...formData.questions];
+    const q = newQuestions[qIndex];
+
+    if (!q.richOptions && q.options) {
+        // Migrate
+        q.richOptions = q.options.map(opt => ({ html: opt }));
+    }
+
+    if (q.richOptions) {
+        q.richOptions.push({ html: '' });
+    } else {
+        q.richOptions = [{ html: '' }, { html: '' }];
+    }
+
+    // Also sync legacy options array for safety if needed, or just deprecate it.
+    // We will rely on richOptions primarily now.
+
+    setFormData(prev => ({ ...prev, questions: newQuestions }));
+  };
+
+  const handleRemoveOption = (qIndex: number, oIndex: number) => {
+    const newQuestions = [...formData.questions];
+    const q = newQuestions[qIndex];
+
+    if (!q.richOptions && q.options) {
+         q.richOptions = q.options.map(opt => ({ html: opt }));
+    }
+
+    if (q.richOptions && q.richOptions.length > 1) {
+        q.richOptions.splice(oIndex, 1);
+
+        // Adjust correct answer index if needed
+        if (q.correctAnswerIndex === oIndex) {
+            q.correctAnswerIndex = -1; // Invalid
+        } else if (q.correctAnswerIndex !== undefined && q.correctAnswerIndex > oIndex) {
+            q.correctAnswerIndex = q.correctAnswerIndex - 1;
+        }
+
+        // Adjust correct answer indices for multiple select
+        if (q.correctAnswerIndices) {
+            q.correctAnswerIndices = q.correctAnswerIndices
+                .filter(idx => idx !== oIndex)
+                .map(idx => idx > oIndex ? idx - 1 : idx);
+        }
+    }
+
     setFormData(prev => ({ ...prev, questions: newQuestions }));
   };
 
@@ -368,8 +435,22 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
       difficulty: 'medium',
       createdAt: now, // Timestamp ketika soal dibuat
       updatedAt: now, // Timestamp pembaruan awal
-      ...(type === 'mcq' ? { options: ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D'], correctAnswerIndex: 0, randomizeOptions: false } : {}),
-      ...(type === 'multiple_select' ? { options: ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D'], correctAnswerIndices: [], randomizeOptions: false } : {}),
+      ...(type === 'mcq' ? {
+          options: ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D'],
+          richOptions: [
+              { html: 'Pilihan A' }, { html: 'Pilihan B' }, { html: 'Pilihan C' }, { html: 'Pilihan D' }
+          ],
+          correctAnswerIndex: 0,
+          randomizeOptions: false
+      } : {}),
+      ...(type === 'multiple_select' ? {
+          options: ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D'],
+          richOptions: [
+              { html: 'Pilihan A' }, { html: 'Pilihan B' }, { html: 'Pilihan C' }, { html: 'Pilihan D' }
+          ],
+          correctAnswerIndices: [],
+          randomizeOptions: false
+      } : {}),
       ...(type === 'true_false' ? { trueFalseAnswer: true } : {}),
       ...(type === 'short_answer' ? { shortAnswer: '' } : {}),
       ...(type === 'essay' ? { essayAnswer: '' } : {})
@@ -795,48 +876,81 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                         </div>
                       </div>
 
-                      {q.type === 'mcq' && (
+                      {(q.type === 'mcq' || q.type === 'multiple_select') && (
                         <>
                           <div className="flex items-center justify-between mb-2">
                             <label className="block text-[10px] font-black text-gray-400 uppercase">Pilihan Jawaban</label>
-                            <label className="flex items-center gap-2 text-xs font-bold text-gray-600 cursor-pointer">
-                              <input type="checkbox" checked={q.randomizeOptions || false} onChange={(e) => handleQuestionChange(qIndex, 'randomizeOptions', e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500" />
-                              Acak Pilihan
-                            </label>
+                            <div className="flex gap-4">
+                                <button
+                                    onClick={() => handleAddOption(qIndex)}
+                                    className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-lg hover:bg-indigo-100 flex items-center gap-1"
+                                >
+                                    <Plus className="w-3 h-3" /> Tambah Opsi
+                                </button>
+                                <label className="flex items-center gap-2 text-xs font-bold text-gray-600 cursor-pointer">
+                                <input type="checkbox" checked={q.randomizeOptions || false} onChange={(e) => handleQuestionChange(qIndex, 'randomizeOptions', e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500" />
+                                Acak Pilihan
+                                </label>
+                            </div>
                           </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {q.options?.map((opt, oIndex) => (
-                              <div key={oIndex} className="relative">
-                                <input type="text" value={opt} onChange={(e) => handleOptionChange(qIndex, oIndex, e.target.value)} className={`w-full pl-10 pr-10 py-3 rounded-xl border-2 font-bold text-sm outline-none transition-all ${q.correctAnswerIndex === oIndex ? 'border-green-600 bg-green-50/30' : 'border-gray-50 bg-white'}`} />
-                                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-300">{String.fromCharCode(65 + oIndex)}</div>
-                                <button onClick={() => handleQuestionChange(qIndex, 'correctAnswerIndex', oIndex)} className={`absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg ${q.correctAnswerIndex === oIndex ? 'bg-green-600 text-white' : 'text-gray-200 hover:text-green-500'}`}><Check className="w-4 h-4" /></button>
-                              </div>
-                            ))}
-                          </div>
-                        </>
-                      )}
-
-                      {q.type === 'multiple_select' && (
-                        <>
-                          <div className="flex items-center justify-between mb-2">
-                            <label className="block text-[10px] font-black text-gray-400 uppercase">Pilihan Jawaban (Centang Semua yang Benar)</label>
-                            <label className="flex items-center gap-2 text-xs font-bold text-gray-600 cursor-pointer">
-                              <input type="checkbox" checked={q.randomizeOptions || false} onChange={(e) => handleQuestionChange(qIndex, 'randomizeOptions', e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500" />
-                              Acak Pilihan
-                            </label>
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {q.options?.map((opt, oIndex) => (
-                              <div key={oIndex} className="relative">
-                                <input type="text" value={opt} onChange={(e) => handleOptionChange(qIndex, oIndex, e.target.value)} className={`w-full pl-10 pr-10 py-3 rounded-xl border-2 font-bold text-sm outline-none transition-all ${q.correctAnswerIndices?.includes(oIndex) ? 'border-green-600 bg-green-50/30' : 'border-gray-50 bg-white'}`} />
-                                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-300">{String.fromCharCode(65 + oIndex)}</div>
-                                <button onClick={() => {
-                                  const currentIndices = q.correctAnswerIndices || [];
-                                  const newIndices = currentIndices.includes(oIndex) 
-                                    ? currentIndices.filter(i => i !== oIndex) 
-                                    : [...currentIndices, oIndex];
-                                  handleQuestionChange(qIndex, 'correctAnswerIndices', newIndices);
-                                }} className={`absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg ${q.correctAnswerIndices?.includes(oIndex) ? 'bg-green-600 text-white' : 'text-gray-200 hover:text-green-500'}`}><Check className="w-4 h-4" /></button>
+                          <div className="space-y-4">
+                            {(q.richOptions || q.options?.map(o => ({ html: o, attachment: '' })))?.map((opt, oIndex) => (
+                              <div key={oIndex} className={`relative p-4 rounded-2xl border-2 transition-all ${
+                                (q.type === 'mcq' && q.correctAnswerIndex === oIndex) || (q.type === 'multiple_select' && q.correctAnswerIndices?.includes(oIndex))
+                                    ? 'border-green-500 bg-green-50/20'
+                                    : 'border-gray-100 bg-white'
+                              }`}>
+                                <div className="flex gap-3 items-start">
+                                    <div className="mt-2 w-6 h-6 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center text-xs font-black shrink-0">
+                                        {String.fromCharCode(65 + oIndex)}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <ReactQuill
+                                            theme="snow"
+                                            value={opt.html || ''}
+                                            onChange={(val) => handleOptionChange(qIndex, oIndex, val)}
+                                            modules={{
+                                                toolbar: [
+                                                    ['bold', 'italic', 'underline'],
+                                                    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                                                    [{ 'align': [] }],
+                                                    ['image']
+                                                ]
+                                            }}
+                                            className="bg-white rounded-lg"
+                                        />
+                                    </div>
+                                    <div className="flex flex-col gap-2 shrink-0">
+                                        <button
+                                            onClick={() => {
+                                                if (q.type === 'mcq') {
+                                                    handleQuestionChange(qIndex, 'correctAnswerIndex', oIndex);
+                                                } else {
+                                                    const currentIndices = q.correctAnswerIndices || [];
+                                                    const newIndices = currentIndices.includes(oIndex)
+                                                        ? currentIndices.filter(i => i !== oIndex)
+                                                        : [...currentIndices, oIndex];
+                                                    handleQuestionChange(qIndex, 'correctAnswerIndices', newIndices);
+                                                }
+                                            }}
+                                            className={`p-2 rounded-lg transition-all ${
+                                                (q.type === 'mcq' && q.correctAnswerIndex === oIndex) || (q.type === 'multiple_select' && q.correctAnswerIndices?.includes(oIndex))
+                                                    ? 'bg-green-600 text-white shadow-lg shadow-green-200'
+                                                    : 'bg-gray-100 text-gray-300 hover:bg-green-50 hover:text-green-500'
+                                            }`}
+                                            title="Tandai sebagai jawaban benar"
+                                        >
+                                            <Check className="w-5 h-5" />
+                                        </button>
+                                        <button
+                                            onClick={() => handleRemoveOption(qIndex, oIndex)}
+                                            className="p-2 rounded-lg bg-red-50 text-red-400 hover:bg-red-600 hover:text-white transition-all"
+                                            title="Hapus Opsi"
+                                        >
+                                            <Trash2 className="w-5 h-5" />
+                                        </button>
+                                    </div>
+                                </div>
                               </div>
                             ))}
                           </div>

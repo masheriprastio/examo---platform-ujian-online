@@ -100,26 +100,43 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
 
     // Randomize options for MCQ and Multiple Select if enabled (HANYA SEKALI)
     questionsToRun = questionsToRun.map(q => {
-      if ((q.type === 'mcq' || q.type === 'multiple_select') && q.randomizeOptions && q.options) {
-        const optionsWithIndex: { opt: string; idx: number }[] = q.options.map((opt, idx) => ({ opt, idx }));
-        const shuffledOptions = fisherYatesShuffle(optionsWithIndex);
-        
-        // Find the new index of the correct answer(s)
-        const newCorrectIndex = q.type === 'mcq' ? shuffledOptions.findIndex(o => o.idx === q.correctAnswerIndex) : undefined;
-        
-        let newCorrectIndices: number[] | undefined;
-        if (q.type === 'multiple_select' && q.correctAnswerIndices) {
-          newCorrectIndices = q.correctAnswerIndices.map(oldIdx => shuffledOptions.findIndex(o => o.idx === oldIdx));
+      if ((q.type === 'mcq' || q.type === 'multiple_select') && q.randomizeOptions) {
+        // Handle both legacy string[] options and new richOptions
+        const sourceOptions: { html: string; attachment?: string; idx: number }[] = q.richOptions
+            ? q.richOptions.map((ro, idx) => ({ ...ro, idx }))
+            : q.options?.map((opt, idx) => ({ html: opt, attachment: '', idx })) || [];
+
+        if (sourceOptions.length > 0) {
+            const shuffledOptions = fisherYatesShuffle(sourceOptions);
+
+            // Find the new index of the correct answer(s)
+            const newCorrectIndex = q.type === 'mcq' ? shuffledOptions.findIndex(o => o.idx === q.correctAnswerIndex) : undefined;
+
+            let newCorrectIndices: number[] | undefined;
+            if (q.type === 'multiple_select' && q.correctAnswerIndices) {
+                newCorrectIndices = q.correctAnswerIndices.map(oldIdx => shuffledOptions.findIndex(o => o.idx === oldIdx));
+            }
+
+            return {
+                ...q,
+                // Update both legacy and new structure to be safe, though UI should prefer richOptions
+                options: shuffledOptions.map(o => o.html),
+                richOptions: shuffledOptions.map(o => ({ html: o.html, attachment: o.attachment })),
+                correctAnswerIndex: newCorrectIndex,
+                correctAnswerIndices: newCorrectIndices,
+                _originalOptionsMapping: shuffledOptions.map(o => o.idx) // Store mapping if needed
+            };
         }
-        
-        return {
-          ...q,
-          options: shuffledOptions.map(o => o.opt),
-          correctAnswerIndex: newCorrectIndex,
-          correctAnswerIndices: newCorrectIndices,
-          _originalOptionsMapping: shuffledOptions.map(o => o.idx) // Store mapping if needed
-        };
       }
+
+      // If not randomized or no options, but we need to normalize richOptions for legacy data
+      if (!q.richOptions && q.options) {
+          return {
+              ...q,
+              richOptions: q.options.map(opt => ({ html: opt }))
+          };
+      }
+
       return q;
     });
 
@@ -434,21 +451,25 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
             </div>
 
             <div className="space-y-4">
-              {currentQuestion.type === 'mcq' && currentQuestion.options?.map((opt, idx) => (
-                <button key={idx} onClick={() => {
-                  setAnswers(prev => {
-                    if (prev[currentQuestion.id] !== idx) {
-                      addLog('autosave', `Changed answer for Q${currentQuestionIndex + 1} to option ${String.fromCharCode(65 + idx)}`);
-                    }
-                    return { ...prev, [currentQuestion.id]: idx };
-                  });
-                }} className={`w-full text-left p-6 rounded-[28px] border-2 transition-all flex items-center gap-5 ${answers[currentQuestion.id] === idx ? 'bg-indigo-50 border-indigo-600 shadow-xl' : 'bg-white border-gray-50 hover:bg-gray-50/30'}`}>
-                  <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black ${answers[currentQuestion.id] === idx ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-400'}`}>{String.fromCharCode(65 + idx)}</div>
-                  <span className={`font-bold text-lg ${answers[currentQuestion.id] === idx ? 'text-indigo-900' : 'text-gray-700'}`}>{opt}</span>
-                </button>
-              ))}
+              {currentQuestion.type === 'mcq' && (currentQuestion.richOptions || currentQuestion.options)?.map((opt, idx) => {
+                const htmlContent = typeof opt === 'string' ? opt : opt.html;
+                return (
+                    <button key={idx} onClick={() => {
+                    setAnswers(prev => {
+                        if (prev[currentQuestion.id] !== idx) {
+                        addLog('autosave', `Changed answer for Q${currentQuestionIndex + 1} to option ${String.fromCharCode(65 + idx)}`);
+                        }
+                        return { ...prev, [currentQuestion.id]: idx };
+                    });
+                    }} className={`w-full text-left p-6 rounded-[28px] border-2 transition-all flex items-center gap-5 ${answers[currentQuestion.id] === idx ? 'bg-indigo-50 border-indigo-600 shadow-xl' : 'bg-white border-gray-50 hover:bg-gray-50/30'}`}>
+                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black shrink-0 ${answers[currentQuestion.id] === idx ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-400'}`}>{String.fromCharCode(65 + idx)}</div>
+                    <div className={`font-medium text-lg prose max-w-none ${answers[currentQuestion.id] === idx ? 'text-indigo-900' : 'text-gray-700'}`} dangerouslySetInnerHTML={{ __html: htmlContent }} />
+                    </button>
+                );
+              })}
 
-              {currentQuestion.type === 'multiple_select' && currentQuestion.options?.map((opt, idx) => {
+              {currentQuestion.type === 'multiple_select' && (currentQuestion.richOptions || currentQuestion.options)?.map((opt, idx) => {
+                const htmlContent = typeof opt === 'string' ? opt : opt.html;
                 const currentAnswers = (answers[currentQuestion.id] as number[]) || [];
                 const isSelected = currentAnswers.includes(idx);
                 return (
@@ -463,10 +484,10 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                       return { ...prev, [currentQuestion.id]: newAns };
                     });
                   }} className={`w-full text-left p-6 rounded-[28px] border-2 transition-all flex items-center gap-5 ${isSelected ? 'bg-indigo-50 border-indigo-600 shadow-xl' : 'bg-white border-gray-50 hover:bg-gray-50/30'}`}>
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center border-2 ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-transparent'}`}>
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center border-2 shrink-0 ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-transparent'}`}>
                       <CheckCircle className="w-6 h-6" />
                     </div>
-                    <span className={`font-bold text-lg ${isSelected ? 'text-indigo-900' : 'text-gray-700'}`}>{opt}</span>
+                    <div className={`font-medium text-lg prose max-w-none ${isSelected ? 'text-indigo-900' : 'text-gray-700'}`} dangerouslySetInnerHTML={{ __html: htmlContent }} />
                   </button>
                 );
               })}
