@@ -838,7 +838,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                   </button>
                                 </div>
 
-                                {/* Rich Text Editor for Option */}
+                                {/* Rich Text Editor for Option - PERTAMA */}
                                 <div>
                                   <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Teks Pilihan</label>
                                   <RichTextEditor 
@@ -849,7 +849,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                   />
                                 </div>
 
-                                {/* Delete Option Button */}
+                                {/* Delete Option Button - KEDUA */}
                                 {(q.options?.length || 0) > 2 && (
                                   <button
                                     onClick={() => {
@@ -933,7 +933,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                   </button>
                                 </div>
 
-                                {/* Rich Text Editor for Option */}
+                                {/* Rich Text Editor for Option - PERTAMA */}
                                 <div>
                                   <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Teks Pilihan</label>
                                   <RichTextEditor 
@@ -944,7 +944,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                   />
                                 </div>
 
-                                {/* Delete Option Button */}
+                                {/* Delete Option Button - KEDUA */}
                                 {(q.options?.length || 0) > 2 && (
                                   <button
                                     onClick={() => {

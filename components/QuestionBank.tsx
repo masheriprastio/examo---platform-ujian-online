@@ -497,7 +497,7 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                         </button>
                       </div>
 
-                      {/* Rich Text Editor for Option */}
+                      {/* Rich Text Editor for Option - PERTAMA */}
                       <div>
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Teks Pilihan</label>
                         <RichTextEditor 
@@ -508,24 +508,7 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                         />
                       </div>
 
-                      {/* Delete Option Button */}
-                      {(formData.options?.length || 0) > 2 && (
-                        <button
-                          onClick={() => {
-                            const newOptions = formData.options?.filter((_, i) => i !== idx) || [];
-                            handleChange('options', newOptions);
-                            if (formData.correctAnswerIndex === idx) {
-                              handleChange('correctAnswerIndex', 0);
-                            }
-                          }}
-                          className="w-full py-2 rounded-lg bg-red-50 text-red-600 font-bold hover:bg-red-100 transition-all flex items-center justify-center gap-2"
-                          title="Hapus Pilihan"
-                        >
-                          <Trash2 className="w-4 h-4" /> Hapus Pilihan
-                        </button>
-                      )}
-
-                      {/* Attachment Section */}
+                      {/* Attachment Section - KEDUA */}
                       <div className="border-t border-gray-200 pt-4">
                         <div className="flex justify-between items-center mb-3">
                           <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1 flex items-center gap-2">
@@ -572,11 +555,18 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                           )}
                         </div>
 
-                        <div className="flex justify-start mt-2">
+                        <div className="flex justify-start mt-3">
                           {formData.optionAttachments?.[idx]?.url && (
                             <div className="relative group shrink-0">
-                              <div className="w-12 h-12 rounded-xl bg-gray-200 border border-gray-300 overflow-hidden">
-                                <img src={formData.optionAttachments[idx].url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
+                              <div className="w-20 h-20 rounded-xl bg-gray-200 border border-gray-300 overflow-hidden">
+                                <img 
+                                  src={formData.optionAttachments[idx].url!} 
+                                  alt={`Preview ${String.fromCharCode(65 + idx)}`} 
+                                  className="w-full h-full object-cover" 
+                                  onError={(e) => {
+                                    (e.currentTarget as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100"%3E%3Crect fill="%23e5e7eb" width="100" height="100"/%3E%3Ctext x="50" y="50" text-anchor="middle" dy=".3em" fill="%236b7280" font-size="12" font-family="system-ui"%3EError%3C/text%3E%3C/svg%3E';
+                                  }}
+                                />
                               </div>
                               <button
                                 onClick={() => handleOptionAttachmentChange(idx, '')}
@@ -589,6 +579,25 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                           )}
                         </div>
                       </div>
+
+                      {/* Delete Option Button - KETIGA */}
+                      {(formData.options?.length || 0) > 2 && (
+                        <button
+                          onClick={() => {
+                            const newOptions = formData.options?.filter((_, i) => i !== idx) || [];
+                            const newAttachments = formData.optionAttachments?.filter((_, i) => i !== idx);
+                            handleChange('options', newOptions);
+                            if (newAttachments) handleChange('optionAttachments', newAttachments);
+                            if (formData.correctAnswerIndex === idx) {
+                              handleChange('correctAnswerIndex', 0);
+                            }
+                          }}
+                          className="w-full py-2 rounded-lg bg-red-50 text-red-600 font-bold hover:bg-red-100 transition-all flex items-center justify-center gap-2"
+                          title="Hapus Pilihan"
+                        >
+                          <Trash2 className="w-4 h-4" /> Hapus Pilihan
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -656,7 +665,7 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                           </button>
                         </div>
 
-                        {/* Rich Text Editor for Option */}
+                        {/* Rich Text Editor for Option - PERTAMA */}
                         <div>
                           <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Teks Pilihan</label>
                           <RichTextEditor 
@@ -667,26 +676,7 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                           />
                         </div>
 
-                        {/* Delete Option Button */}
-                        {(formData.options?.length || 0) > 2 && (
-                          <button
-                            onClick={() => {
-                              const newOptions = formData.options?.filter((_, i) => i !== idx) || [];
-                              const newAttachments = formData.optionAttachments?.filter((_, i) => i !== idx);
-                              handleChange('options', newOptions);
-                              if (newAttachments) handleChange('optionAttachments', newAttachments);
-                              const current = formData.correctAnswerIndices || [];
-                              const newIndices = current.filter(i => i !== idx);
-                              handleChange('correctAnswerIndices', newIndices);
-                            }}
-                            className="w-full py-2 rounded-lg bg-red-50 text-red-600 font-bold hover:bg-red-100 transition-all flex items-center justify-center gap-2"
-                            title="Hapus Pilihan"
-                          >
-                            <Trash2 className="w-4 h-4" /> Hapus Pilihan
-                          </button>
-                        )}
-
-                        {/* Attachment Section */}
+                        {/* Attachment Section - KEDUA */}
                         <div className="border-t border-gray-200 pt-4">
                           <div className="flex justify-between items-center mb-3">
                             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1 flex items-center gap-2">
@@ -733,11 +723,18 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                             )}
                           </div>
 
-                          <div className="flex justify-start mt-2">
+                          <div className="flex justify-start mt-3">
                             {formData.optionAttachments?.[idx]?.url && (
                               <div className="relative group shrink-0">
-                                <div className="w-12 h-12 rounded-xl bg-gray-200 border border-gray-300 overflow-hidden">
-                                  <img src={formData.optionAttachments[idx].url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
+                                <div className="w-20 h-20 rounded-xl bg-gray-200 border border-gray-300 overflow-hidden">
+                                  <img 
+                                    src={formData.optionAttachments[idx].url!} 
+                                    alt={`Preview ${String.fromCharCode(65 + idx)}`} 
+                                    className="w-full h-full object-cover" 
+                                    onError={(e) => {
+                                      (e.currentTarget as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100"%3E%3Crect fill="%23e5e7eb" width="100" height="100"/%3E%3Ctext x="50" y="50" text-anchor="middle" dy=".3em" fill="%236b7280" font-size="12" font-family="system-ui"%3EError%3C/text%3E%3C/svg%3E';
+                                    }}
+                                  />
                                 </div>
                                 <button
                                   onClick={() => handleOptionAttachmentChange(idx, '')}
@@ -750,6 +747,25 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                             )}
                           </div>
                         </div>
+
+                        {/* Delete Option Button - KETIGA */}
+                        {(formData.options?.length || 0) > 2 && (
+                          <button
+                            onClick={() => {
+                              const newOptions = formData.options?.filter((_, i) => i !== idx) || [];
+                              const newAttachments = formData.optionAttachments?.filter((_, i) => i !== idx);
+                              handleChange('options', newOptions);
+                              if (newAttachments) handleChange('optionAttachments', newAttachments);
+                              const current = formData.correctAnswerIndices || [];
+                              const newIndices = current.filter(i => i !== idx);
+                              handleChange('correctAnswerIndices', newIndices);
+                            }}
+                            className="w-full py-2 rounded-lg bg-red-50 text-red-600 font-bold hover:bg-red-100 transition-all flex items-center justify-center gap-2"
+                            title="Hapus Pilihan"
+                          >
+                            <Trash2 className="w-4 h-4" /> Hapus Pilihan
+                          </button>
+                        )}
                       </div>
                     );
                   })}
