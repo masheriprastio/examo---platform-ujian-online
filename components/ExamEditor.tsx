@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { generateUUID } from '../lib/uuid';
 import { Exam, Question, QuestionType } from '../types';
-import RichTextEditor from './RichTextEditor';
 import { supabase } from '../lib/supabase';
 import { 
   Save, Plus, Trash2, Check, Clock, Type, Star, X, 
@@ -90,6 +89,16 @@ const validatePointsInput = (value: string): { isValid: boolean; error?: string;
   return { isValid: true, parsedValue: parsed };
 };
 
+// Helper function to convert file to Base64
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = (error) => reject(error);
+  });
+};
+
 // Helper function untuk recover backup dari localStorage
 const recoverBackup = (examId: string, fallback: Exam): Exam => {
   try {
@@ -107,6 +116,9 @@ const recoverBackup = (examId: string, fallback: Exam): Exam => {
 
 // Helper function untuk upload image ke Supabase Storage
 const uploadImageToSupabase = async (file: File, examId: string): Promise<string> => {
+  if (!supabase) {
+    throw new Error("Supabase is not configured.");
+  }
   try {
     const fileName = `exams/${examId}/${Date.now()}_${file.name}`;
     
@@ -148,7 +160,6 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   const [questionToDelete, setQuestionToDelete] = useState<string | null>(null);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [uploadMode, setUploadMode] = useState<Record<string, 'url' | 'file'>>({});
-  const [optionUploadMode, setOptionUploadMode] = useState<Record<string, 'url' | 'file'>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [pointsErrors, setPointsErrors] = useState<Record<string, string>>({}); // Track validation errors per question
   const backupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -173,8 +184,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
             ...formData,
             questions: formData.questions.map(q => ({
               ...q,
-              attachment: undefined, // Remove main attachments to save space
-              optionAttachments: undefined // Also remove option attachments to save space
+              attachment: undefined // Remove attachments to save space
             }))
           };
           const compressedBackup = JSON.stringify(compressedData);
@@ -309,22 +319,28 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         return;
       }
 
-      try {
-        // Show loading state while uploading
-        const newQuestions = [...formData.questions];
-        newQuestions[qIndex] = {
-          ...newQuestions[qIndex],
-          attachment: { type: 'image', url: 'uploading...', caption: '' }
-        };
-        setFormData(prev => ({ ...prev, questions: newQuestions }));
+      // Show loading state while uploading
+      const newQuestions = [...formData.questions];
+      newQuestions[qIndex] = {
+        ...newQuestions[qIndex],
+        attachment: { type: 'image', url: 'uploading...', caption: '' }
+      };
+      setFormData(prev => ({ ...prev, questions: newQuestions }));
 
+      try {
         // Upload to Supabase Storage
         const publicUrl = await uploadImageToSupabase(file, formData.id);
         handleAttachmentChange(qIndex, publicUrl);
       } catch (error) {
-        alert(`Gagal upload gambar: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        // Remove attachment on error
-        handleAttachmentChange(qIndex, '');
+        console.warn("Upload failed, attempting local fallback:", error);
+        // Fallback: Convert to Base64 (Data URI) for offline/mock mode
+        try {
+          const base64 = await fileToBase64(file);
+          handleAttachmentChange(qIndex, base64);
+        } catch (base64Error) {
+          alert(`Gagal upload gambar: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          handleAttachmentChange(qIndex, '');
+        }
       }
     }
   };
@@ -341,36 +357,6 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     setFormData(prev => ({ ...prev, questions: newQuestions }));
   };
 
-  const handleOptionAttachmentChange = (qIndex: number, oIndex: number, url: string) => {
-    const newQuestions = [...formData.questions];
-    const newAttachments = [...(newQuestions[qIndex].optionAttachments || Array(newQuestions[qIndex].options?.length || 0).fill(null))];
-    if (url) {
-      newAttachments[oIndex] = { type: 'image', url: url, caption: '' };
-    } else {
-      newAttachments[oIndex] = { url: undefined };
-    }
-    newQuestions[qIndex] = { ...newQuestions[qIndex], optionAttachments: newAttachments };
-    setFormData(prev => ({ ...prev, questions: newQuestions }));
-  };
-
-  const handleOptionFileUpload = (qIndex: number, oIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 15 * 1024 * 1024) { // 15MB limit
-        alert("Ukuran file maksimal 15MB");
-        e.target.value = ''; // Reset input
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        handleOptionAttachmentChange(qIndex, oIndex, reader.result as string);
-        e.target.value = ''; // Reset input after successful upload
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
   const addQuestion = (type: QuestionType = 'mcq') => {
     const now = new Date().toISOString();
     const newQuestion: Question = {
@@ -382,8 +368,8 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
       difficulty: 'medium',
       createdAt: now, // Timestamp ketika soal dibuat
       updatedAt: now, // Timestamp pembaruan awal
-      ...(type === 'mcq' ? { options: ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D'], correctAnswerIndex: 0, randomizeOptions: false, optionAttachments: [undefined, undefined, undefined, undefined] } : {}),
-      ...(type === 'multiple_select' ? { options: ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D'], correctAnswerIndices: [], randomizeOptions: false, optionAttachments: [undefined, undefined, undefined, undefined] } : {}),
+      ...(type === 'mcq' ? { options: ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D'], correctAnswerIndex: 0, randomizeOptions: false } : {}),
+      ...(type === 'multiple_select' ? { options: ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D'], correctAnswerIndices: [], randomizeOptions: false } : {}),
       ...(type === 'true_false' ? { trueFalseAnswer: true } : {}),
       ...(type === 'short_answer' ? { shortAnswer: '' } : {}),
       ...(type === 'essay' ? { essayAnswer: '' } : {})
@@ -818,71 +804,15 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                               Acak Pilihan
                             </label>
                           </div>
-                          
-                          <div className="grid grid-cols-1 gap-6">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {q.options?.map((opt, oIndex) => (
-                              <div key={oIndex} className="bg-gray-50 p-4 rounded-2xl border-2 border-gray-100 space-y-4">
-                                {/* Option Label */}
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-6 h-6 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-black text-gray-400 border border-gray-200">
-                                      {String.fromCharCode(65 + oIndex)}
-                                    </div>
-                                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest">
-                                      Jawaban {String.fromCharCode(65 + oIndex)}
-                                    </label>
-                                  </div>
-                                  <button
-                                    onClick={() => handleQuestionChange(qIndex, 'correctAnswerIndex', oIndex)}
-                                    className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 text-xs font-bold ${q.correctAnswerIndex === oIndex ? 'bg-green-600 text-white shadow-lg shadow-green-200' : 'bg-gray-200 text-gray-400 hover:bg-gray-300'}`}
-                                    title="Tandai Jawaban Benar"
-                                  >
-                                    <Check className="w-4 h-4" /> {q.correctAnswerIndex === oIndex ? 'Jawaban Benar' : 'Tandai Benar'}
-                                  </button>
-                                </div>
-
-                                {/* Rich Text Editor for Option - PERTAMA */}
-                                <div>
-                                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Teks Pilihan</label>
-                                  <RichTextEditor 
-                                    value={opt} 
-                                    onChange={(value) => handleOptionChange(qIndex, oIndex, value)}
-                                    placeholder={`Masukkan teks untuk pilihan ${String.fromCharCode(65 + oIndex)}...`}
-                                    height="120px"
-                                  />
-                                </div>
-
-                                {/* Delete Option Button - KEDUA */}
-                                {(q.options?.length || 0) > 2 && (
-                                  <button
-                                    onClick={() => {
-                                      const newOptions = q.options?.filter((_, i) => i !== oIndex) || [];
-                                      handleQuestionChange(qIndex, 'options', newOptions);
-                                      if (q.correctAnswerIndex === oIndex) {
-                                        handleQuestionChange(qIndex, 'correctAnswerIndex', 0);
-                                      }
-                                    }}
-                                    className="w-full py-2 rounded-lg bg-red-50 text-red-600 font-bold hover:bg-red-100 transition-all flex items-center justify-center gap-2"
-                                    title="Hapus Pilihan"
-                                  >
-                                    <Trash2 className="w-4 h-4" /> Hapus Pilihan
-                                  </button>
-                                )}
+                              <div key={oIndex} className="relative">
+                                <input type="text" value={opt} onChange={(e) => handleOptionChange(qIndex, oIndex, e.target.value)} className={`w-full pl-10 pr-10 py-3 rounded-xl border-2 font-bold text-sm outline-none transition-all ${q.correctAnswerIndex === oIndex ? 'border-green-600 bg-green-50/30' : 'border-gray-50 bg-white'}`} />
+                                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-300">{String.fromCharCode(65 + oIndex)}</div>
+                                <button onClick={() => handleQuestionChange(qIndex, 'correctAnswerIndex', oIndex)} className={`absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg ${q.correctAnswerIndex === oIndex ? 'bg-green-600 text-white' : 'text-gray-200 hover:text-green-500'}`}><Check className="w-4 h-4" /></button>
                               </div>
                             ))}
                           </div>
-
-                          {(q.options?.length || 0) < 8 && (
-                            <button
-                              onClick={() => {
-                                const newOptions = [...(q.options || []), ''];
-                                handleQuestionChange(qIndex, 'options', newOptions);
-                              }}
-                              className="w-full py-2 border-2 border-dashed border-indigo-300 rounded-xl text-indigo-600 font-bold hover:bg-indigo-50 transition-colors flex items-center justify-center gap-2 text-sm mt-3"
-                            >
-                              <Plus className="w-4 h-4" /> Tambah Pilihan
-                            </button>
-                          )}
                         </>
                       )}
 
@@ -895,89 +825,21 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                               Acak Pilihan
                             </label>
                           </div>
-
-                          {/* Toolbar */}
-                          <div className="flex gap-1 bg-gray-100 p-2 rounded-lg w-fit mb-4">
-                            <button className="p-2 rounded hover:bg-gray-200 text-gray-600 font-bold text-sm transition-colors" title="Align Left">
-                              <AlignLeft className="w-4 h-4" />
-                            </button>
-                            <button className="p-2 rounded hover:bg-gray-200 text-gray-600 font-bold text-sm transition-colors" title="Align Center">
-                              <AlignCenter className="w-4 h-4" />
-                            </button>
-                            <button className="p-2 rounded hover:bg-gray-200 text-gray-600 font-bold text-sm transition-colors" title="Align Right">
-                              <AlignRight className="w-4 h-4" />
-                            </button>
-                          </div>
-
-                          <div className="grid grid-cols-1 gap-6">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {q.options?.map((opt, oIndex) => (
-                              <div key={oIndex} className="bg-gray-50 p-4 rounded-2xl border-2 border-gray-100 space-y-4">
-                                {/* Option Label */}
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-6 h-6 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-black text-gray-400 border border-gray-200">
-                                      {String.fromCharCode(65 + oIndex)}
-                                    </div>
-                                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest">
-                                      Jawaban {String.fromCharCode(65 + oIndex)}
-                                    </label>
-                                  </div>
-                                  <button
-                                    onClick={() => {
-                                      const currentIndices = q.correctAnswerIndices || [];
-                                      const newIndices = currentIndices.includes(oIndex) 
-                                        ? currentIndices.filter(i => i !== oIndex) 
-                                        : [...currentIndices, oIndex];
-                                      handleQuestionChange(qIndex, 'correctAnswerIndices', newIndices);
-                                    }}
-                                    className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 text-xs font-bold ${q.correctAnswerIndices?.includes(oIndex) ? 'bg-green-600 text-white shadow-lg shadow-green-200' : 'bg-gray-200 text-gray-400 hover:bg-gray-300'}`}
-                                  >
-                                    <Check className="w-4 h-4" /> {q.correctAnswerIndices?.includes(oIndex) ? 'Jawaban Benar' : 'Tandai Benar'}
-                                  </button>
-                                </div>
-
-                                {/* Rich Text Editor for Option - PERTAMA */}
-                                <div>
-                                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Teks Pilihan</label>
-                                  <RichTextEditor 
-                                    value={opt} 
-                                    onChange={(value) => handleOptionChange(qIndex, oIndex, value)}
-                                    placeholder={`Masukkan teks untuk pilihan ${String.fromCharCode(65 + oIndex)}...`}
-                                    height="120px"
-                                  />
-                                </div>
-
-                                {/* Delete Option Button - KEDUA */}
-                                {(q.options?.length || 0) > 2 && (
-                                  <button
-                                    onClick={() => {
-                                      const newOptions = q.options?.filter((_, i) => i !== oIndex) || [];
-                                      handleQuestionChange(qIndex, 'options', newOptions);
-                                      const currentIndices = q.correctAnswerIndices || [];
-                                      const newIndices = currentIndices.filter(i => i !== oIndex);
-                                      handleQuestionChange(qIndex, 'correctAnswerIndices', newIndices);
-                                    }}
-                                    className="w-full py-2 rounded-lg bg-red-50 text-red-600 font-bold hover:bg-red-100 transition-all flex items-center justify-center gap-2"
-                                    title="Hapus Pilihan"
-                                  >
-                                    <Trash2 className="w-4 h-4" /> Hapus Pilihan
-                                  </button>
-                                )}
+                              <div key={oIndex} className="relative">
+                                <input type="text" value={opt} onChange={(e) => handleOptionChange(qIndex, oIndex, e.target.value)} className={`w-full pl-10 pr-10 py-3 rounded-xl border-2 font-bold text-sm outline-none transition-all ${q.correctAnswerIndices?.includes(oIndex) ? 'border-green-600 bg-green-50/30' : 'border-gray-50 bg-white'}`} />
+                                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-300">{String.fromCharCode(65 + oIndex)}</div>
+                                <button onClick={() => {
+                                  const currentIndices = q.correctAnswerIndices || [];
+                                  const newIndices = currentIndices.includes(oIndex) 
+                                    ? currentIndices.filter(i => i !== oIndex) 
+                                    : [...currentIndices, oIndex];
+                                  handleQuestionChange(qIndex, 'correctAnswerIndices', newIndices);
+                                }} className={`absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg ${q.correctAnswerIndices?.includes(oIndex) ? 'bg-green-600 text-white' : 'text-gray-200 hover:text-green-500'}`}><Check className="w-4 h-4" /></button>
                               </div>
                             ))}
                           </div>
-
-                          {(q.options?.length || 0) < 8 && (
-                            <button
-                              onClick={() => {
-                                const newOptions = [...(q.options || []), ''];
-                                handleQuestionChange(qIndex, 'options', newOptions);
-                              }}
-                              className="w-full py-2 border-2 border-dashed border-indigo-300 rounded-xl text-indigo-600 font-bold hover:bg-indigo-50 transition-colors flex items-center justify-center gap-2 text-sm mt-3"
-                            >
-                              <Plus className="w-4 h-4" /> Tambah Pilihan
-                            </button>
-                          )}
                         </>
                       )}
 

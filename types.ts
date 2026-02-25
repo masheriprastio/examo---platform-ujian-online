@@ -18,11 +18,6 @@ export interface Question {
   type: QuestionType;
   text: string;
   options?: string[];
-  optionAttachments?: Array<{
-    url?: string;
-    type?: 'image' | 'video' | 'audio';
-    caption?: string;
-  }>;
   correctAnswerIndex?: number;
   correctAnswerIndices?: number[];
   trueFalseAnswer?: boolean;
@@ -33,6 +28,9 @@ export interface Question {
   topic?: string;
   difficulty?: 'easy' | 'medium' | 'hard';
   randomizeOptions?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  textAlign?: 'left' | 'center' | 'right';
   // Untuk Essay Drag & Drop
   dragDropItems?: string[];                    // Item yang bisa di-drag (kiri)
   dragDropTargets?: string[];                  // Target drop zones (kanan)

@@ -101,7 +101,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
     // Randomize options for MCQ and Multiple Select if enabled (HANYA SEKALI)
     questionsToRun = questionsToRun.map(q => {
       if ((q.type === 'mcq' || q.type === 'multiple_select') && q.randomizeOptions && q.options) {
-        const optionsWithIndex = q.options.map((opt, idx) => ({ opt, idx }));
+        const optionsWithIndex: { opt: string; idx: number }[] = q.options.map((opt, idx) => ({ opt, idx }));
         const shuffledOptions = fisherYatesShuffle(optionsWithIndex);
         
         // Find the new index of the correct answer(s)
@@ -434,49 +434,23 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
             </div>
 
             <div className="space-y-4">
-              {currentQuestion.type === 'mcq' && currentQuestion.options?.map((opt, idx) => {
-                const attachment = currentQuestion.optionAttachments?.[idx];
-                return (
-                  <button key={idx} onClick={() => {
-                    setAnswers(prev => {
-                      if (prev[currentQuestion.id] !== idx) {
-                        addLog('autosave', `Changed answer for Q${currentQuestionIndex + 1} to option ${String.fromCharCode(65 + idx)}`);
-                      }
-                      return { ...prev, [currentQuestion.id]: idx };
-                    });
-                  }} className={`w-full text-left p-6 rounded-[28px] border-2 transition-all flex items-start gap-5 ${answers[currentQuestion.id] === idx ? 'bg-indigo-50 border-indigo-600 shadow-xl' : 'bg-white border-gray-50 hover:bg-gray-50/30'}`}>
-                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black flex-shrink-0 mt-1 ${answers[currentQuestion.id] === idx ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-400'}`}>{String.fromCharCode(65 + idx)}</div>
-                    <div className="flex-1 space-y-2">
-                      <div className={`font-bold text-lg ${answers[currentQuestion.id] === idx ? 'text-indigo-900' : 'text-gray-700'}`} dangerouslySetInnerHTML={{__html: opt}}></div>
-                      {attachment?.url && (
-                        <div className="flex gap-2 items-center">
-                          <img
-                            src={attachment.url}
-                            alt="Option"
-                            className="h-20 rounded-lg object-cover"
-                            onError={(e) => {
-                              const src = attachment.url;
-                              // Log the failing URL to help debugging inaccessible/incorrect paths
-                              // eslint-disable-next-line no-console
-                              console.error('Failed to load option attachment:', src);
-                              (e.currentTarget as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="80" height="80"%3E%3Crect fill="%23e5e7eb" width="80" height="80"/%3E%3Ctext x="40" y="44" text-anchor="middle" fill="%236b7280" font-size="10" font-family="system-ui"%3EUnavailable%3C/text%3E%3C/svg%3E';
-                            }}
-                          />
-                          <div className="flex flex-col">
-                            {attachment.caption && <span className="text-xs text-gray-600 italic">{attachment.caption}</span>}
-                            <a href={attachment.url} target="_blank" rel="noreferrer" className="text-xs text-indigo-600 mt-1">Buka gambar</a>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
+              {currentQuestion.type === 'mcq' && currentQuestion.options?.map((opt, idx) => (
+                <button key={idx} onClick={() => {
+                  setAnswers(prev => {
+                    if (prev[currentQuestion.id] !== idx) {
+                      addLog('autosave', `Changed answer for Q${currentQuestionIndex + 1} to option ${String.fromCharCode(65 + idx)}`);
+                    }
+                    return { ...prev, [currentQuestion.id]: idx };
+                  });
+                }} className={`w-full text-left p-6 rounded-[28px] border-2 transition-all flex items-center gap-5 ${answers[currentQuestion.id] === idx ? 'bg-indigo-50 border-indigo-600 shadow-xl' : 'bg-white border-gray-50 hover:bg-gray-50/30'}`}>
+                  <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black ${answers[currentQuestion.id] === idx ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-400'}`}>{String.fromCharCode(65 + idx)}</div>
+                  <span className={`font-bold text-lg ${answers[currentQuestion.id] === idx ? 'text-indigo-900' : 'text-gray-700'}`}>{opt}</span>
+                </button>
+              ))}
 
               {currentQuestion.type === 'multiple_select' && currentQuestion.options?.map((opt, idx) => {
                 const currentAnswers = (answers[currentQuestion.id] as number[]) || [];
                 const isSelected = currentAnswers.includes(idx);
-                const attachment = currentQuestion.optionAttachments?.[idx];
                 return (
                   <button key={idx} onClick={() => {
                     setAnswers(prev => {
@@ -488,32 +462,11 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                       addLog('autosave', `Changed answer for Q${currentQuestionIndex + 1} to [${newAns.map(i => String.fromCharCode(65 + i)).join(', ')}]`);
                       return { ...prev, [currentQuestion.id]: newAns };
                     });
-                  }} className={`w-full text-left p-6 rounded-[28px] border-2 transition-all flex items-start gap-5 ${isSelected ? 'bg-indigo-50 border-indigo-600 shadow-xl' : 'bg-white border-gray-50 hover:bg-gray-50/30'}`}>
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center border-2 flex-shrink-0 mt-1 ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-transparent'}`}>
+                  }} className={`w-full text-left p-6 rounded-[28px] border-2 transition-all flex items-center gap-5 ${isSelected ? 'bg-indigo-50 border-indigo-600 shadow-xl' : 'bg-white border-gray-50 hover:bg-gray-50/30'}`}>
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center border-2 ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-transparent'}`}>
                       <CheckCircle className="w-6 h-6" />
                     </div>
-                    <div className="flex-1 space-y-2">
-                      <div className={`font-bold text-lg ${isSelected ? 'text-indigo-900' : 'text-gray-700'}`} dangerouslySetInnerHTML={{__html: opt}}></div>
-                      {attachment?.url && (
-                        <div className="flex gap-2 items-center">
-                          <img
-                            src={attachment.url}
-                            alt="Option"
-                            className="h-20 rounded-lg object-cover"
-                            onError={(e) => {
-                              const src = attachment.url;
-                              // eslint-disable-next-line no-console
-                              console.error('Failed to load option attachment:', src);
-                              (e.currentTarget as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="80" height="80"%3E%3Crect fill="%23e5e7eb" width="80" height="80"/%3E%3Ctext x="40" y="44" text-anchor="middle" fill="%236b7280" font-size="10" font-family="system-ui"%3EUnavailable%3C/text%3E%3C/svg%3E';
-                            }}
-                          />
-                          <div className="flex flex-col">
-                            {attachment.caption && <span className="text-xs text-gray-600 italic">{attachment.caption}</span>}
-                            <a href={attachment.url} target="_blank" rel="noreferrer" className="text-xs text-indigo-600 mt-1">Buka gambar</a>
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                    <span className={`font-bold text-lg ${isSelected ? 'text-indigo-900' : 'text-gray-700'}`}>{opt}</span>
                   </button>
                 );
               })}
