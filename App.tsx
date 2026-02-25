@@ -31,11 +31,10 @@ const formatDate = (iso: string) => new Date(iso).toLocaleDateString('id-ID', {
 });
 
 const LoginView: React.FC<{
-  onLogin: (role: 'teacher' | 'student' | 'admin', email: string, password?: string) => Promise<string | null>;
+  onLogin: (email: string, password?: string) => Promise<string | null>;
 }> = ({ onLogin }) => {
-  const [role, setRole] = useState<'student' | 'teacher' | 'admin'>('student');
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('password');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -43,21 +42,16 @@ const LoginView: React.FC<{
   useEffect(() => {
     // Only autofill if using mocks
     if (!isSupabaseConfigured) {
-        if (role === 'teacher') setEmail(MOCK_TEACHER.email);
-        else if (role === 'admin') setEmail('admin@sekolah.id');
-        else setEmail(MOCK_STUDENT.email);
+        setEmail(MOCK_STUDENT.email);
         setPassword('password');
-    } else {
-        setEmail('');
-        setPassword('');
     }
     setErrorMsg(null);
-  }, [role]);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    const error = await onLogin(role, email, password);
+    const error = await onLogin(email, password);
     setIsLoading(false);
     if (error) setErrorMsg(error);
   };
@@ -74,12 +68,6 @@ const LoginView: React.FC<{
         </div>
         
         <form onSubmit={handleSubmit} className="p-10 space-y-6">
-          <div className="flex bg-gray-100 p-1 rounded-2xl">
-            <button type="button" onClick={() => setRole('student')} className={`flex-1 py-3 rounded-xl text-sm font-black transition-all ${role === 'student' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Siswa</button>
-            <button type="button" onClick={() => setRole('teacher')} className={`flex-1 py-3 rounded-xl text-sm font-black transition-all ${role === 'teacher' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Guru</button>
-            <button type="button" onClick={() => setRole('admin')} className={`flex-1 py-3 rounded-xl text-sm font-black transition-all ${role === 'admin' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Admin</button>
-          </div>
-
           {errorMsg && (
             <div className="bg-red-50 border border-red-100 text-red-600 px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-2 animate-shake">
               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
@@ -574,7 +562,7 @@ export default function App() {
   }, [currentUser]);
 
 
-  const handleLogin = async (role: 'teacher' | 'student' | 'admin', email: string, password?: string): Promise<string | null> => {
+  const handleLogin = async (email: string, password?: string): Promise<string | null> => {
     const pwd = password || 'password';
 
     if (isSupabaseConfigured && supabase) {
@@ -583,10 +571,9 @@ export default function App() {
             .from('users')
             .select('*')
             .or(`email.eq.${email},nis.eq.${email}`)
-            .eq('role', role)
             .single();
 
-        if (error || !data) return `${role === 'teacher' ? 'Guru' : role === 'admin' ? 'Admin' : 'Siswa'} tidak ditemukan.`;
+        if (error || !data) return "User tidak ditemukan.";
 
         // Simple password check (In production, use bcrypt/argon2 on backend or Supabase Auth)
         if (data.password && data.password !== pwd) {
@@ -612,10 +599,12 @@ export default function App() {
         const userWithToken = { ...data, session_token: sessionToken };
         setCurrentUser(userWithToken);
 
-        setView(role === 'teacher' || role === 'admin' ? 'TEACHER_DASHBOARD' : 'STUDENT_DASHBOARD');
+        const isStaff = userWithToken.role === 'teacher' || userWithToken.role === 'admin';
+        setView(isStaff ? 'TEACHER_DASHBOARD' : 'STUDENT_DASHBOARD');
+
         // Fetch fresh data and notify existing violations to teacher
         const fetched = await fetchData();
-        if ((role === 'teacher' || role === 'admin') && fetched.results) {
+        if (isStaff && fetched.results) {
           fetched.results.forEach(r => {
             if (r.violation_alert) {
               const msg = r.logs && Array.isArray(r.logs) && r.logs.some((l: any) => l.event === 'violation_disqualified')
@@ -631,11 +620,24 @@ export default function App() {
 
     } else {
         // Fallback to Mock
-        if (role === 'teacher' || role === 'admin') {
-            const mockUser = role === 'teacher' ? MOCK_TEACHER : { id: 'admin-01', email: 'admin@sekolah.id', name: 'Administrator', role: 'admin', school: 'SMA Negeri 1 Digital', password: 'password' };
-            if (email === mockUser.email && pwd === 'password') {
-                setCurrentUser(mockUser as User);
-                setView('TEACHER_DASHBOARD');
+        const mockAdmin = { id: 'admin-01', email: 'admin@sekolah.id', name: 'Administrator', role: 'admin', school: 'SMA Negeri 1 Digital', password: 'password' };
+
+        let foundUser: User | undefined;
+
+        if (email === MOCK_TEACHER.email) foundUser = MOCK_TEACHER;
+        else if (email === mockAdmin.email) foundUser = mockAdmin as User;
+        else foundUser = students.find(s => s.email === email || s.nis === email);
+
+        if (foundUser) {
+            if (foundUser.password && foundUser.password !== pwd) {
+                return "Password salah.";
+            }
+            setCurrentUser(foundUser);
+
+            const isStaff = foundUser.role === 'teacher' || foundUser.role === 'admin';
+            setView(isStaff ? 'TEACHER_DASHBOARD' : 'STUDENT_DASHBOARD');
+
+            if (isStaff) {
                 // For mock mode, check any existing results in state and notify
                 results.forEach(r => {
                   if (r.logs && Array.isArray(r.logs) && r.logs.some(l => l.event === 'tab_blur' || l.event === 'violation_disqualified')) {
@@ -644,18 +646,10 @@ export default function App() {
                     setResults(prev => prev.map(p => p.id === r.id ? { ...p, violation_alert: true } : p));
                   }
                 });
-                return null; }
-            return `${role === 'teacher' ? 'Guru' : 'Admin'} tidak ditemukan.`;
-        } else {
-            const found = students.find(s => s.email === email || s.nis === email);
-            if (found) {
-                if (found.password && found.password !== pwd) {
-                    return "Password salah.";
-                }
-                setCurrentUser(found); setView('STUDENT_DASHBOARD'); return null;
             }
-            return "Siswa tidak terdaftar.";
+            return null;
         }
+        return "User tidak ditemukan.";
     }
   };
 
