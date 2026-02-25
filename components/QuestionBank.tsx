@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { generateUUID } from '../lib/uuid';
 import { Question, QuestionType } from '../types';
+import RichTextEditor from './RichTextEditor';
 import { 
   Plus, Search, Filter, Trash2, Edit2, Check, X,
   ChevronDown, ChevronUp, Database, Tag, AlertCircle, Save, ArrowLeft, GripVertical, Image as ImageIcon, Upload, Link as LinkIcon,
@@ -477,43 +478,52 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                 <div className="grid grid-cols-1 gap-6">
                   {formData.options?.map((opt, idx) => (
                     <div key={idx} className="bg-gray-50 p-4 rounded-2xl border-2 border-gray-100 space-y-4">
-                      {/* Option Input */}
-                      <div className="relative group">
-                        <div className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-black text-gray-400 border border-gray-200">{String.fromCharCode(65 + idx)}</div>
-                        <input
-                          type="text"
-                          value={opt}
-                          onChange={(e) => handleOptionChange(idx, e.target.value)}
-                          className={`w-full pl-14 pr-20 py-4 rounded-xl border-2 font-bold text-sm outline-none transition-all ${formData.correctAnswerIndex === idx ? 'border-green-500 bg-green-50/20' : 'border-gray-100 bg-gray-50 focus:bg-white focus:border-indigo-200'}`}
-                          placeholder={`Pilihan ${String.fromCharCode(65 + idx)}`}
-                        />
-                        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex gap-1">
-                          <button
-                            onClick={() => handleChange('correctAnswerIndex', idx)}
-                            className={`p-1.5 rounded-lg transition-all ${formData.correctAnswerIndex === idx ? 'bg-green-500 text-white shadow-lg shadow-green-200' : 'bg-gray-200 text-gray-400 hover:bg-gray-300'}`}
-                            title="Tandai Jawaban Benar"
-                          >
-                            <Check className="w-4 h-4" />
-                          </button>
-                          {(formData.options?.length || 0) > 2 && (
-                            <button
-                              onClick={() => {
-                                const newOptions = formData.options?.filter((_, i) => i !== idx) || [];
-                                const newAttachments = formData.optionAttachments?.filter((_, i) => i !== idx);
-                                handleChange('options', newOptions);
-                                if (newAttachments) handleChange('optionAttachments', newAttachments);
-                                if (formData.correctAnswerIndex === idx) {
-                                  handleChange('correctAnswerIndex', 0);
-                                }
-                              }}
-                              className="p-1.5 rounded-lg bg-gray-200 text-gray-400 hover:bg-red-200 hover:text-red-500 transition-all"
-                              title="Hapus Pilihan"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
+                      {/* Option Label */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-6 h-6 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-black text-gray-400 border border-gray-200">
+                            {String.fromCharCode(65 + idx)}
+                          </div>
+                          <label className="text-xs font-black text-gray-400 uppercase tracking-widest">
+                            Jawaban {String.fromCharCode(65 + idx)}
+                          </label>
                         </div>
+                        <button
+                          onClick={() => handleChange('correctAnswerIndex', idx)}
+                          className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 text-xs font-bold ${formData.correctAnswerIndex === idx ? 'bg-green-500 text-white shadow-lg shadow-green-200' : 'bg-gray-200 text-gray-400 hover:bg-gray-300'}`}
+                          title="Tandai Jawaban Benar"
+                        >
+                          <Check className="w-4 h-4" /> {formData.correctAnswerIndex === idx ? 'Jawaban Benar' : 'Tandai Benar'}
+                        </button>
                       </div>
+
+                      {/* Rich Text Editor for Option */}
+                      <div>
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Teks Pilihan</label>
+                        <RichTextEditor 
+                          value={opt} 
+                          onChange={(value) => handleOptionChange(idx, value)}
+                          placeholder={`Masukkan teks untuk pilihan ${String.fromCharCode(65 + idx)}...`}
+                          height="150px"
+                        />
+                      </div>
+
+                      {/* Delete Option Button */}
+                      {(formData.options?.length || 0) > 2 && (
+                        <button
+                          onClick={() => {
+                            const newOptions = formData.options?.filter((_, i) => i !== idx) || [];
+                            handleChange('options', newOptions);
+                            if (formData.correctAnswerIndex === idx) {
+                              handleChange('correctAnswerIndex', 0);
+                            }
+                          }}
+                          className="w-full py-2 rounded-lg bg-red-50 text-red-600 font-bold hover:bg-red-100 transition-all flex items-center justify-center gap-2"
+                          title="Hapus Pilihan"
+                        >
+                          <Trash2 className="w-4 h-4" /> Hapus Pilihan
+                        </button>
+                      )}
 
                       {/* Attachment Section */}
                       <div className="border-t border-gray-200 pt-4">
@@ -625,44 +635,56 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
                     const isSelected = formData.correctAnswerIndices?.includes(idx);
                     return (
                       <div key={idx} className="bg-gray-50 p-4 rounded-2xl border-2 border-gray-100 space-y-4">
-                        {/* Option Input */}
-                        <div className="relative group">
-                          <div className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-black text-gray-400 border border-gray-200">{String.fromCharCode(65 + idx)}</div>
-                          <input
-                            type="text"
-                            value={opt}
-                            onChange={(e) => handleOptionChange(idx, e.target.value)}
-                            className={`w-full pl-14 pr-20 py-4 rounded-xl border-2 font-bold text-sm outline-none transition-all ${isSelected ? 'border-green-500 bg-green-50/20' : 'border-gray-100 bg-gray-50 focus:bg-white focus:border-indigo-200'}`}
-                          />
-                          <div className="absolute right-3 top-1/2 -translate-y-1/2 flex gap-1">
-                            <button 
-                              onClick={() => {
-                                const current = formData.correctAnswerIndices || [];
-                                handleChange('correctAnswerIndices', current.includes(idx) ? current.filter(i => i !== idx) : [...current, idx]);
-                              }} 
-                              className={`p-1.5 rounded-lg transition-all ${isSelected ? 'bg-green-500 text-white shadow-lg shadow-green-200' : 'bg-gray-200 text-gray-400 hover:bg-gray-300'}`}
-                            >
-                              <Check className="w-4 h-4" />
-                            </button>
-                            {(formData.options?.length || 0) > 2 && (
-                              <button
-                                onClick={() => {
-                                  const newOptions = formData.options?.filter((_, i) => i !== idx) || [];
-                                  const newAttachments = formData.optionAttachments?.filter((_, i) => i !== idx);
-                                  handleChange('options', newOptions);
-                                  if (newAttachments) handleChange('optionAttachments', newAttachments);
-                                  const current = formData.correctAnswerIndices || [];
-                                  const newIndices = current.filter(i => i !== idx);
-                                  handleChange('correctAnswerIndices', newIndices);
-                                }}
-                                className="p-1.5 rounded-lg bg-gray-200 text-gray-400 hover:bg-red-200 hover:text-red-500 transition-all"
-                                title="Hapus Pilihan"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
+                        {/* Option Label */}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="w-6 h-6 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-black text-gray-400 border border-gray-200">
+                              {String.fromCharCode(65 + idx)}
+                            </div>
+                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest">
+                              Jawaban {String.fromCharCode(65 + idx)}
+                            </label>
                           </div>
+                          <button 
+                            onClick={() => {
+                              const current = formData.correctAnswerIndices || [];
+                              handleChange('correctAnswerIndices', current.includes(idx) ? current.filter(i => i !== idx) : [...current, idx]);
+                            }} 
+                            className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 text-xs font-bold ${isSelected ? 'bg-green-500 text-white shadow-lg shadow-green-200' : 'bg-gray-200 text-gray-400 hover:bg-gray-300'}`}
+                          >
+                            <Check className="w-4 h-4" /> {isSelected ? 'Jawaban Benar' : 'Tandai Benar'}
+                          </button>
                         </div>
+
+                        {/* Rich Text Editor for Option */}
+                        <div>
+                          <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Teks Pilihan</label>
+                          <RichTextEditor 
+                            value={opt} 
+                            onChange={(value) => handleOptionChange(idx, value)}
+                            placeholder={`Masukkan teks untuk pilihan ${String.fromCharCode(65 + idx)}...`}
+                            height="150px"
+                          />
+                        </div>
+
+                        {/* Delete Option Button */}
+                        {(formData.options?.length || 0) > 2 && (
+                          <button
+                            onClick={() => {
+                              const newOptions = formData.options?.filter((_, i) => i !== idx) || [];
+                              const newAttachments = formData.optionAttachments?.filter((_, i) => i !== idx);
+                              handleChange('options', newOptions);
+                              if (newAttachments) handleChange('optionAttachments', newAttachments);
+                              const current = formData.correctAnswerIndices || [];
+                              const newIndices = current.filter(i => i !== idx);
+                              handleChange('correctAnswerIndices', newIndices);
+                            }}
+                            className="w-full py-2 rounded-lg bg-red-50 text-red-600 font-bold hover:bg-red-100 transition-all flex items-center justify-center gap-2"
+                            title="Hapus Pilihan"
+                          >
+                            <Trash2 className="w-4 h-4" /> Hapus Pilihan
+                          </button>
+                        )}
 
                         {/* Attachment Section */}
                         <div className="border-t border-gray-200 pt-4">

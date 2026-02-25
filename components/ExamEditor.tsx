@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { generateUUID } from '../lib/uuid';
 import { Exam, Question, QuestionType } from '../types';
+import RichTextEditor from './RichTextEditor';
 import { supabase } from '../lib/supabase';
 import { 
   Save, Plus, Trash2, Check, Clock, Type, Star, X, 
@@ -815,41 +816,55 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                             </label>
                           </div>
                           
-                          {/* Toolbar */}
-                          <div className="flex gap-1 bg-gray-100 p-2 rounded-lg w-fit mb-4">
-                            <button className="p-2 rounded hover:bg-gray-200 text-gray-600 font-bold text-sm transition-colors" title="Align Left">
-                              <AlignLeft className="w-4 h-4" />
-                            </button>
-                            <button className="p-2 rounded hover:bg-gray-200 text-gray-600 font-bold text-sm transition-colors" title="Align Center">
-                              <AlignCenter className="w-4 h-4" />
-                            </button>
-                            <button className="p-2 rounded hover:bg-gray-200 text-gray-600 font-bold text-sm transition-colors" title="Align Right">
-                              <AlignRight className="w-4 h-4" />
-                            </button>
-                          </div>
-
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 gap-6">
                             {q.options?.map((opt, oIndex) => (
-                              <div key={oIndex} className="relative">
-                                <input type="text" value={opt} onChange={(e) => handleOptionChange(qIndex, oIndex, e.target.value)} className={`w-full pl-10 pr-20 py-3 rounded-xl border-2 font-bold text-sm outline-none transition-all ${q.correctAnswerIndex === oIndex ? 'border-green-600 bg-green-50/30' : 'border-gray-50 bg-white'}`} />
-                                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-300">{String.fromCharCode(65 + oIndex)}</div>
-                                <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-1">
-                                  <button onClick={() => handleQuestionChange(qIndex, 'correctAnswerIndex', oIndex)} className={`p-1 rounded-lg ${q.correctAnswerIndex === oIndex ? 'bg-green-600 text-white' : 'text-gray-200 hover:text-green-500'}`}><Check className="w-4 h-4" /></button>
-                                  {(q.options?.length || 0) > 2 && (
-                                    <button 
-                                      onClick={() => {
-                                        const newOptions = q.options?.filter((_, i) => i !== oIndex) || [];
-                                        handleQuestionChange(qIndex, 'options', newOptions);
-                                        if (q.correctAnswerIndex === oIndex) {
-                                          handleQuestionChange(qIndex, 'correctAnswerIndex', 0);
-                                        }
-                                      }}
-                                      className="p-1 rounded-lg text-gray-200 hover:text-red-500"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
-                                  )}
+                              <div key={oIndex} className="bg-gray-50 p-4 rounded-2xl border-2 border-gray-100 space-y-4">
+                                {/* Option Label */}
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-6 h-6 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-black text-gray-400 border border-gray-200">
+                                      {String.fromCharCode(65 + oIndex)}
+                                    </div>
+                                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest">
+                                      Jawaban {String.fromCharCode(65 + oIndex)}
+                                    </label>
+                                  </div>
+                                  <button
+                                    onClick={() => handleQuestionChange(qIndex, 'correctAnswerIndex', oIndex)}
+                                    className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 text-xs font-bold ${q.correctAnswerIndex === oIndex ? 'bg-green-600 text-white shadow-lg shadow-green-200' : 'bg-gray-200 text-gray-400 hover:bg-gray-300'}`}
+                                    title="Tandai Jawaban Benar"
+                                  >
+                                    <Check className="w-4 h-4" /> {q.correctAnswerIndex === oIndex ? 'Jawaban Benar' : 'Tandai Benar'}
+                                  </button>
                                 </div>
+
+                                {/* Rich Text Editor for Option */}
+                                <div>
+                                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Teks Pilihan</label>
+                                  <RichTextEditor 
+                                    value={opt} 
+                                    onChange={(value) => handleOptionChange(qIndex, oIndex, value)}
+                                    placeholder={`Masukkan teks untuk pilihan ${String.fromCharCode(65 + oIndex)}...`}
+                                    height="120px"
+                                  />
+                                </div>
+
+                                {/* Delete Option Button */}
+                                {(q.options?.length || 0) > 2 && (
+                                  <button
+                                    onClick={() => {
+                                      const newOptions = q.options?.filter((_, i) => i !== oIndex) || [];
+                                      handleQuestionChange(qIndex, 'options', newOptions);
+                                      if (q.correctAnswerIndex === oIndex) {
+                                        handleQuestionChange(qIndex, 'correctAnswerIndex', 0);
+                                      }
+                                    }}
+                                    className="w-full py-2 rounded-lg bg-red-50 text-red-600 font-bold hover:bg-red-100 transition-all flex items-center justify-center gap-2"
+                                    title="Hapus Pilihan"
+                                  >
+                                    <Trash2 className="w-4 h-4" /> Hapus Pilihan
+                                  </button>
+                                )}
                               </div>
                             ))}
                           </div>
@@ -891,34 +906,60 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                             </button>
                           </div>
 
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 gap-6">
                             {q.options?.map((opt, oIndex) => (
-                              <div key={oIndex} className="relative">
-                                <input type="text" value={opt} onChange={(e) => handleOptionChange(qIndex, oIndex, e.target.value)} className={`w-full pl-10 pr-20 py-3 rounded-xl border-2 font-bold text-sm outline-none transition-all ${q.correctAnswerIndices?.includes(oIndex) ? 'border-green-600 bg-green-50/30' : 'border-gray-50 bg-white'}`} />
-                                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-300">{String.fromCharCode(65 + oIndex)}</div>
-                                <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-1">
-                                  <button onClick={() => {
-                                    const currentIndices = q.correctAnswerIndices || [];
-                                    const newIndices = currentIndices.includes(oIndex) 
-                                      ? currentIndices.filter(i => i !== oIndex) 
-                                      : [...currentIndices, oIndex];
-                                    handleQuestionChange(qIndex, 'correctAnswerIndices', newIndices);
-                                  }} className={`p-1 rounded-lg ${q.correctAnswerIndices?.includes(oIndex) ? 'bg-green-600 text-white' : 'text-gray-200 hover:text-green-500'}`}><Check className="w-4 h-4" /></button>
-                                  {(q.options?.length || 0) > 2 && (
-                                    <button 
-                                      onClick={() => {
-                                        const newOptions = q.options?.filter((_, i) => i !== oIndex) || [];
-                                        handleQuestionChange(qIndex, 'options', newOptions);
-                                        const currentIndices = q.correctAnswerIndices || [];
-                                        const newIndices = currentIndices.filter(i => i !== oIndex);
-                                        handleQuestionChange(qIndex, 'correctAnswerIndices', newIndices);
-                                      }}
-                                      className="p-1 rounded-lg text-gray-200 hover:text-red-500"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
-                                  )}
+                              <div key={oIndex} className="bg-gray-50 p-4 rounded-2xl border-2 border-gray-100 space-y-4">
+                                {/* Option Label */}
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-6 h-6 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-black text-gray-400 border border-gray-200">
+                                      {String.fromCharCode(65 + oIndex)}
+                                    </div>
+                                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest">
+                                      Jawaban {String.fromCharCode(65 + oIndex)}
+                                    </label>
+                                  </div>
+                                  <button
+                                    onClick={() => {
+                                      const currentIndices = q.correctAnswerIndices || [];
+                                      const newIndices = currentIndices.includes(oIndex) 
+                                        ? currentIndices.filter(i => i !== oIndex) 
+                                        : [...currentIndices, oIndex];
+                                      handleQuestionChange(qIndex, 'correctAnswerIndices', newIndices);
+                                    }}
+                                    className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 text-xs font-bold ${q.correctAnswerIndices?.includes(oIndex) ? 'bg-green-600 text-white shadow-lg shadow-green-200' : 'bg-gray-200 text-gray-400 hover:bg-gray-300'}`}
+                                  >
+                                    <Check className="w-4 h-4" /> {q.correctAnswerIndices?.includes(oIndex) ? 'Jawaban Benar' : 'Tandai Benar'}
+                                  </button>
                                 </div>
+
+                                {/* Rich Text Editor for Option */}
+                                <div>
+                                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Teks Pilihan</label>
+                                  <RichTextEditor 
+                                    value={opt} 
+                                    onChange={(value) => handleOptionChange(qIndex, oIndex, value)}
+                                    placeholder={`Masukkan teks untuk pilihan ${String.fromCharCode(65 + oIndex)}...`}
+                                    height="120px"
+                                  />
+                                </div>
+
+                                {/* Delete Option Button */}
+                                {(q.options?.length || 0) > 2 && (
+                                  <button
+                                    onClick={() => {
+                                      const newOptions = q.options?.filter((_, i) => i !== oIndex) || [];
+                                      handleQuestionChange(qIndex, 'options', newOptions);
+                                      const currentIndices = q.correctAnswerIndices || [];
+                                      const newIndices = currentIndices.filter(i => i !== oIndex);
+                                      handleQuestionChange(qIndex, 'correctAnswerIndices', newIndices);
+                                    }}
+                                    className="w-full py-2 rounded-lg bg-red-50 text-red-600 font-bold hover:bg-red-100 transition-all flex items-center justify-center gap-2"
+                                    title="Hapus Pilihan"
+                                  >
+                                    <Trash2 className="w-4 h-4" /> Hapus Pilihan
+                                  </button>
+                                )}
                               </div>
                             ))}
                           </div>
