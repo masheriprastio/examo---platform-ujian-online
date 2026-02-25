@@ -105,6 +105,28 @@ const recoverBackup = (examId: string, fallback: Exam): Exam => {
   return fallback;
 };
 
+// Helper: Normalize questions to ensure all MCQ/MultipleSelect have optionAttachments
+const normalizeQuestionsForEditor = (questions: Question[]): Question[] => {
+  return questions.map(q => {
+    if ((q.type === 'mcq' || q.type === 'multiple_select') && q.options) {
+      // Ensure optionAttachments array exists and matches options length
+      const optionCount = q.options.length;
+      const existingAttachments = q.optionAttachments || [];
+      
+      // Keep existing attachments and fill missing ones with undefined
+      const normalizedAttachments = Array(optionCount)
+        .fill(undefined)
+        .map((_, idx) => existingAttachments[idx] || undefined);
+      
+      return {
+        ...q,
+        optionAttachments: normalizedAttachments
+      };
+    }
+    return q;
+  });
+};
+
 // Helper function untuk upload image ke Supabase Storage
 const uploadImageToSupabase = async (file: File, examId: string): Promise<string> => {
   if (!supabase) {
@@ -146,8 +168,14 @@ const uploadImageToSupabase = async (file: File, examId: string): Promise<string
 
 const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveToBank, onPreview }) => {
   // Parse initial dates if they exist, or keep them empty/null
-  // Try to recover from backup if available
-  const [formData, setFormData] = useState<Exam>(() => recoverBackup(exam.id, exam));
+  // Try to recover from backup if available, then normalize questions
+  const [formData, setFormData] = useState<Exam>(() => {
+    const recovered = recoverBackup(exam.id, exam);
+    return {
+      ...recovered,
+      questions: normalizeQuestionsForEditor(recovered.questions)
+    };
+  });
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(formData.questions[0]?.id || null);
   const [questionToDelete, setQuestionToDelete] = useState<string | null>(null);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);

@@ -29,6 +29,36 @@ const formatDate = (iso: string) => new Date(iso).toLocaleDateString('id-ID', {
   day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
 });
 
+// Helper: Normalize questions to ensure all MCQ/MultipleSelect have optionAttachments
+const normalizeQuestions = (questions: Question[]): Question[] => {
+  return questions.map(q => {
+    if ((q.type === 'mcq' || q.type === 'multiple_select') && q.options) {
+      // Ensure optionAttachments array exists and matches options length
+      const optionCount = q.options.length;
+      const existingAttachments = q.optionAttachments || [];
+      
+      // Keep existing attachments and fill missing ones with undefined
+      const normalizedAttachments = Array(optionCount)
+        .fill(undefined)
+        .map((_, idx) => existingAttachments[idx] || undefined);
+      
+      return {
+        ...q,
+        optionAttachments: normalizedAttachments
+      };
+    }
+    return q;
+  });
+};
+
+// Helper: Normalize exam to ensure all questions have proper optionAttachments
+const normalizeExam = (exam: Exam): Exam => {
+  return {
+    ...exam,
+    questions: normalizeQuestions(exam.questions)
+  };
+};
+
 const LoginView: React.FC<{
   onLogin: (role: 'teacher' | 'student', email: string, password?: string) => Promise<string | null>;
 }> = ({ onLogin }) => {
@@ -305,13 +335,17 @@ export default function App() {
         const { data: examsData, error: examsError } = await supabase.from('exams').select('*').order('created_at', { ascending: false });
         let mappedExams: Exam[] = [];
         if (examsData && !examsError) {
-          mappedExams = examsData.map((e: any) => ({
-            ...e,
-            durationMinutes: e.duration_minutes,
-            createdAt: e.created_at,
-            startDate: e.start_date,
-            endDate: e.end_date
-          }));
+          mappedExams = examsData.map((e: any) => {
+            const exam: Exam = {
+              ...e,
+              durationMinutes: e.duration_minutes,
+              createdAt: e.created_at,
+              startDate: e.start_date,
+              endDate: e.end_date
+            };
+            // Normalize questions to ensure optionAttachments is proper
+            return normalizeExam(exam);
+          });
           setExams(mappedExams);
           setBankQuestions(mappedExams.flatMap(e => e.questions || []));
         }
@@ -705,7 +739,7 @@ export default function App() {
           });
       }
     }
-    setActiveExam(exam);
+    setActiveExam(normalizeExam(exam));
     setView('EXAM_SESSION');
   };
 
@@ -1658,7 +1692,7 @@ export default function App() {
                 onCancel={() => setView('TEACHER_DASHBOARD')}
                 onSaveToBank={(q) => setBankQuestions(prev => [q, ...prev])}
                 onPreview={(exam) => {
-                  setActiveExam(exam);
+                  setActiveExam(normalizeExam(exam));
                   setView('EXAM_PREVIEW' as AppView);
                 }}
               />
