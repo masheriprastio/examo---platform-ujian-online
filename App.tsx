@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User, Exam, AppView, ExamResult, Question, ExamLog } from './types';
 import { MOCK_TEACHER, MOCK_STUDENT, MOCK_EXAMS, supabase, isSupabaseConfigured } from './lib/supabase';
 import { generateUUID } from './lib/uuid';
@@ -28,89 +28,6 @@ import autoTable from 'jspdf-autotable';
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString('id-ID', {
   day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
 });
-
-// Helper: Normalize questions to ensure all MCQ/MultipleSelect have optionAttachments
-const normalizeQuestions = (questions: Question[]): Question[] => {
-  return questions.map(q => {
-    if ((q.type === 'mcq' || q.type === 'multiple_select') && q.options) {
-      // Ensure optionAttachments array exists and matches options length
-      const optionCount = q.options.length;
-      const existingAttachments = q.optionAttachments || [];
-      
-      // Keep existing attachments and fill missing ones with undefined
-      const normalizedAttachments = Array(optionCount)
-        .fill(undefined)
-        .map((_, idx) => existingAttachments[idx] || undefined);
-      
-      return {
-        ...q,
-        optionAttachments: normalizedAttachments
-      };
-    }
-    return q;
-  });
-};
-
-// Helper: Normalize exam to ensure all questions have proper optionAttachments
-const normalizeExam = (exam: Exam): Exam => {
-  return {
-    ...exam,
-    questions: normalizeQuestions(exam.questions)
-  };
-};
-
-// Helper: Get exam schedule status (untuk bug penjadwalan ujian)
-interface ExamScheduleStatus {
-  isNotStarted: boolean;
-  isActive: boolean;
-  isExpired: boolean;
-  startDate: number | null;
-  endDate: number | null;
-  now: number;
-}
-
-const getExamScheduleStatus = (exam: Exam): ExamScheduleStatus => {
-  const now = new Date().getTime();
-  const startDate = exam.startDate ? new Date(exam.startDate).getTime() : null;
-  const endDate = exam.endDate ? new Date(exam.endDate).getTime() : null;
-
-  // Jika tidak ada startDate dan endDate, exam bisa diambil setiap saat
-  if (!startDate && !endDate) {
-    return { isNotStarted: false, isActive: true, isExpired: false, startDate, endDate, now };
-  }
-
-  // Jika ada startDate tapi belum saatnya
-  const isNotStarted = startDate ? startDate > now : false;
-  
-  // Jika ada endDate dan sudah lewat
-  const isExpired = endDate ? endDate < now : false;
-
-  // Exam aktif jika sudah mulai dan belum expired
-  const isActive = !isNotStarted && !isExpired;
-
-  return { isNotStarted, isActive, isExpired, startDate, endDate, now };
-};
-
-// Helper: Check if student can take exam right now
-const isExamAvailable = (exam: Exam): boolean => {
-  const status = getExamScheduleStatus(exam);
-  return exam.status === 'published' && status.isActive;
-};
-
-// Helper: Filter exams untuk student dashboard
-const filterStudentExams = (exams: Exam[]) => {
-  const available = exams.filter(isExamAvailable);
-  const upcoming = exams.filter(e => {
-    const status = getExamScheduleStatus(e);
-    return e.status === 'published' && status.isNotStarted;
-  });
-  const expired = exams.filter(e => {
-    const status = getExamScheduleStatus(e);
-    return e.status === 'published' && status.isExpired;
-  });
-  
-  return { available, upcoming, expired };
-};
 
 const LoginView: React.FC<{
   onLogin: (role: 'teacher' | 'student', email: string, password?: string) => Promise<string | null>;
@@ -249,6 +166,7 @@ export default function App() {
   const [view, setView] = useState<AppView>('LOGIN');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const shouldFetchRef = useRef(true); // Prevent re-fetching stale data after save
 
   const { addAlert } = useNotification();
 
@@ -318,10 +236,6 @@ export default function App() {
   // State for server error handling
   const [isOffline, setIsOffline] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
-  const [isLoadingData, setIsLoadingData] = useState(false);
-  const [lastFetchTime, setLastFetchTime] = useState<number>(0);
-  const FETCH_CACHE_DURATION = 5 * 60 * 1000; // Cache data for 5 minutes (optimized for Free Tier)
-  const [hasInitialLoad, setHasInitialLoad] = useState(false); // Track if initial load completed
 
   // Session Timeout & Warning State
   const [showTimeoutWarning, setShowTimeoutWarning] = useState(false);
@@ -384,74 +298,34 @@ export default function App() {
   }, [currentUser, addAlert]);
 
     // Load Data from Supabase. Returns fetched exams and results for callers to act on.
-    // OPTIMIZED: Select only needed columns, smaller limits, longer cache for Free Tier
-    const fetchData = async (forceRefresh = false) => {
+    const fetchData = async () => {
       if (!isSupabaseConfigured || !supabase) return { exams: null as any, results: null as any };
 
-      // Check cache - don't fetch if data was recently loaded (unless forceRefresh)
-      const now = Date.now();
-      if (!forceRefresh && lastFetchTime > 0 && (now - lastFetchTime) < FETCH_CACHE_DURATION) {
-        console.log('[Supabase Cache] Using cached data, last fetch was', Math.round((now - lastFetchTime) / 1000), 'seconds ago');
-        return { exams, results };
-      }
-
       try {
-        setIsLoadingData(true);
-        
-        // Show loading state only if it takes more than 500ms
-        const loadingTimeout = setTimeout(() => {
-          addAlert('🔄 Memuat data... (Free Tier Supabase, mungkin sedikit lambat)', 'info', 'loading-data');
-        }, 500);
-
-        // OPTIMIZATION TIP 1: Fetch requests in parallel, not sequentially
-        const examsPromise = supabase
-          .from('exams')
-          .select('id, title, category, status, created_at, duration_minutes, start_date, end_date, questions, randomize_questions, token_required, exam_token')
-          .order('created_at', { ascending: false })
-          .limit(30); // Reduced from 50 to 30 for better performance
-
-        const resultsPromise = supabase
-          .from('exam_results')
-          .select('id, exam_id, student_id, student_name, total_points_possible, points_obtained, total_questions, correct_count, incorrect_count, unanswered_count, submitted_at, started_at, logs')
-          .gte('submitted_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()) // 30 days ago
-          .order('submitted_at', { ascending: false })
-          .limit(80); // Reduced from 100 to 80
-
-        // Execute both in parallel
-        const [{ data: examsData, error: examsError }, { data: resultsData, error: resultsError }] = await Promise.all([
-          examsPromise,
-          resultsPromise
-        ]);
-
+        // 1. Fetch Exams
+        const { data: examsData, error: examsError } = await supabase.from('exams').select('*').order('created_at', { ascending: false });
         let mappedExams: Exam[] = [];
         if (examsData && !examsError) {
-          mappedExams = examsData.map((e: any) => {
-            const exam: Exam = {
-              ...e,
-              durationMinutes: e.duration_minutes,
-              createdAt: e.created_at,
-              startDate: e.start_date,
-              endDate: e.end_date,
-              randomizeQuestions: e.randomize_questions ?? false,
-              tokenRequired: e.token_required ?? false,
-              examToken: e.exam_token
-            };
-            // Normalize questions to ensure optionAttachments is proper
-            return normalizeExam(exam);
-          });
+          mappedExams = examsData.map((e: any) => ({
+            ...e,
+            durationMinutes: e.duration_minutes,
+            createdAt: e.created_at,
+            startDate: e.start_date,
+            endDate: e.end_date
+          }));
           setExams(mappedExams);
           setBankQuestions(mappedExams.flatMap(e => e.questions || []));
-        } else if (examsError) {
-          console.warn('[Supabase] Exams fetch error:', examsError);
         }
 
+        // 2. Fetch Results
+        const { data: resultsData, error: resultsError } = await supabase.from('exam_results').select('*');
         let mappedResults: ExamResult[] = [];
         if (resultsData && !resultsError) {
           mappedResults = resultsData.map((r: any) => ({
              ...r,
              examId: r.exam_id,
              studentId: r.student_id,
-             studentName: r.student_name || 'Tidak diketahui',
+             studentName: r.student_name || 'Unknown',
              totalPointsPossible: r.total_points_possible,
              pointsObtained: r.points_obtained,
              totalQuestions: r.total_questions,
@@ -463,25 +337,11 @@ export default function App() {
              violation_alert: Array.isArray(r.logs) && r.logs.some((l: any) => l.event === 'tab_blur' || l.event === 'violation_disqualified')
           }));
           setResults(mappedResults);
-        } else if (resultsError) {
-          console.warn('[Supabase] Results fetch error:', resultsError);
         }
 
-        clearTimeout(loadingTimeout);
-        setLastFetchTime(now);
-        setIsLoadingData(false);
-        setHasInitialLoad(true);
-        
-        // Show success message only if data was actually fetched (not cached)
-        if (forceRefresh || lastFetchTime === 0) {
-          addAlert('✅ Data berhasil dimuat! (Cache: 5 menit)', 'success', 'data-loaded');
-        }
-        
         return { exams: mappedExams, results: mappedResults };
       } catch (err) {
-        console.error("[Supabase] Failed to fetch data:", err);
-        setIsLoadingData(false);
-        addAlert('❌ Gagal memuat data. Periksa koneksi internet atau coba refresh page.', 'error', 'fetch-error');
+        console.error("Failed to fetch data from Supabase:", err);
         return { exams: null as any, results: null as any };
       }
     };
@@ -521,7 +381,11 @@ export default function App() {
   // Fetch Data on view change (specifically when switching to Dashboard)
   useEffect(() => {
     if (view === 'STUDENT_DASHBOARD' || view === 'TEACHER_DASHBOARD') {
-      fetchData();
+      if (shouldFetchRef.current) {
+        fetchData();
+      } else {
+        shouldFetchRef.current = true; // Reset for next time
+      }
     }
 
     if (view === 'STUDENT_MATERIALS') {
@@ -537,22 +401,13 @@ export default function App() {
     }
   }, [view]);
 
-  // Fetch Students (only if Teacher logged in) - WITH OPTIMIZED QUERY
+  // Fetch Students (only if Teacher logged in)
   useEffect(() => {
      const fetchStudents = async () => {
         if (currentUser?.role === 'teacher' && isSupabaseConfigured && supabase) {
-            // OPTIMIZATION: Select only needed columns, not all
-            const { data, error } = await supabase
-              .from('users')
-              .select('id, email, name, nis, grade, school, role')
-              .eq('role', 'student')
-              .limit(200); // Reasonable limit for most schools
-            
+            const { data, error } = await supabase.from('users').select('*').eq('role', 'student');
             if (data && !error) {
                 setStudents(data as User[]);
-                console.log('[Students] Loaded', data.length, 'students (optimized query)');
-            } else if (error) {
-                console.warn('[Students] Fetch error:', error);
             }
         }
      };
@@ -855,7 +710,7 @@ export default function App() {
           });
       }
     }
-    setActiveExam(normalizeExam(exam));
+    setActiveExam(exam);
     setView('EXAM_SESSION');
   };
 
@@ -1065,12 +920,9 @@ export default function App() {
               // Rollback optimistic
               setStudents(students);
           } else {
-              // Re-fetch to get IDs with OPTIMIZED QUERY
-              const { data } = await supabase
-                .from('users')
-                .select('id, email, name, nis, grade, school, role')
-                .eq('role', 'student')
-                .limit(200);
+              // Re-fetch to get IDs? Or just let next load handle it.
+              // For better UX, we should ideally re-fetch.
+              const { data } = await supabase.from('users').select('*').eq('role', 'student');
               if (data) setStudents(data as User[]);
           }
       }
@@ -1091,7 +943,7 @@ export default function App() {
       // Show success message immediately (optimistic)
       addAlert('Ujian berhasil disimpan!', 'success', 'save:' + updatedExam.id);
 
-      // DB save
+      // DB save in background - don't wait for it
       if (isSupabaseConfigured && supabase) {
           const dbExam = {
               id: updatedExam.id,
@@ -1107,33 +959,34 @@ export default function App() {
               created_at: exists ? undefined : updatedExam.createdAt
           };
 
-          try {
-              if (exists) {
-                  // Update existing exam
-                  const { error } = await supabase.from('exams').update(dbExam).eq('id', updatedExam.id);
-                  if (error) {
-                      console.error("Failed to update exam in database:", error);
-                      // Only show error if DB save fails
-                      addAlert("Database save gagal (tapi data lokal tersimpan): " + error.message, 'warning');
+          // Fire and forget - don't await
+          (async () => {
+              try {
+                  if (exists) {
+                      // Update existing exam
+                      const { error } = await supabase.from('exams').update(dbExam).eq('id', updatedExam.id);
+                      if (error) {
+                          console.error("Failed to update exam in database:", error);
+                          // Only show error if DB save fails
+                          addAlert("Database save gagal (tapi data lokal tersimpan): " + error.message, 'warning');
+                      }
+                  } else {
+                      // Insert new exam
+                      const { error } = await supabase.from('exams').insert(dbExam);
+                      if (error) {
+                          console.error("Failed to create exam in database:", error);
+                          addAlert("Database save gagal (tapi data lokal tersimpan): " + error.message, 'warning');
+                      }
                   }
-              } else {
-                  // Insert new exam
-                  const { error } = await supabase.from('exams').insert(dbExam);
-                  if (error) {
-                      console.error("Failed to create exam in database:", error);
-                      addAlert("Database save gagal (tapi data lokal tersimpan): " + error.message, 'warning');
-                  }
+              } catch (err) {
+                  console.error("Database operation error:", err);
               }
-          } catch (err) {
-              console.error("Database operation error:", err);
-              addAlert("Terjadi kesalahan sistem saat menyimpan ke database.", 'error');
-          }
+          })();
       }
 
-      // Navigate after DB save completes (to ensure data consistency)
-      setTimeout(() => {
-          setView('TEACHER_DASHBOARD');
-      }, 300); // Small delay for notification to show
+      // Navigate immediately - don't wait for DB
+      shouldFetchRef.current = false; // Prevent race condition where fetch gets old data
+      setView('TEACHER_DASHBOARD');
   };
 
   const handleExamCreate = async (newExam: Exam) => {
@@ -1811,7 +1664,7 @@ export default function App() {
                 onCancel={() => setView('TEACHER_DASHBOARD')}
                 onSaveToBank={(q) => setBankQuestions(prev => [q, ...prev])}
                 onPreview={(exam) => {
-                  setActiveExam(normalizeExam(exam));
+                  setActiveExam(exam);
                   setView('EXAM_PREVIEW' as AppView);
                 }}
               />
@@ -2133,24 +1986,7 @@ export default function App() {
               <div className="max-w-6xl mx-auto animate-in fade-in">
                 <div className="flex justify-between items-center mb-8">
                   <h1 className="text-3xl font-black text-gray-900">Dashboard Siswa</h1>
-                  <button 
-                    onClick={() => fetchData(true)} 
-                    disabled={isLoadingData}
-                    className={`p-3 bg-gray-50 text-gray-400 hover:text-indigo-600 rounded-2xl transition-all flex items-center gap-2 ${isLoadingData ? 'opacity-50 cursor-not-allowed' : ''}`} 
-                    title="Segarkan Data"
-                  >
-                    {isLoadingData ? (
-                      <>
-                        <RefreshCw className="w-5 h-5 animate-spin" />
-                        Memuat...
-                      </>
-                    ) : (
-                      <>
-                        <RotateCcw className="w-5 h-5" />
-                        Segarkan
-                      </>
-                    )}
-                  </button>
+                  <button onClick={fetchData} className="p-3 bg-gray-50 text-gray-400 hover:text-indigo-600 rounded-2xl transition-all" title="Segarkan Data"><RotateCcw className="w-5 h-5" /></button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-14">
                    <div className="bg-indigo-600 p-10 rounded-[50px] text-white shadow-2xl relative overflow-hidden">
@@ -2162,180 +1998,82 @@ export default function App() {
                      <div className="bg-green-50 p-8 rounded-[35px] border border-green-100"><TrendingUp className="w-12 h-12 text-green-600" /></div>
                    </div>
                 </div>
-                <h2 className="text-2xl font-black text-gray-900 mb-8 tracking-tight">Ujian</h2>
-                
-                {/* Exam Tabs */}
-                <div className="flex gap-2 mb-8 flex-wrap">
-                  {[
-                    { name: 'Tersedia', key: 'available', count: filterStudentExams(exams).available.length },
-                    { name: 'Mendatang', key: 'upcoming', count: filterStudentExams(exams).upcoming.length },
-                    { name: 'Selesai', key: 'expired', count: filterStudentExams(exams).expired.length }
-                  ].map(tab => (
-                    <button
-                      key={tab.key}
-                      onClick={() => setView(`view-${tab.key}` as any)}
-                      className={`px-6 py-3 rounded-xl font-bold transition-all ${
-                        view === `view-${tab.key}`
-                          ? 'bg-indigo-600 text-white shadow-lg'
-                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                      }`}
-                    >
-                      {tab.name} ({tab.count})
-                    </button>
-                  ))}
-                </div>
+                <h2 className="text-2xl font-black text-gray-900 mb-8 tracking-tight">Ujian Tersedia</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
+                  {exams.length === 0 ? (
+                    <div className="col-span-full text-center py-20 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
+                      <p className="text-gray-400 font-medium">Belum ada ujian yang tersedia saat ini.</p>
+                      <button onClick={fetchData} className="mt-4 text-indigo-600 font-bold hover:underline">Coba Segarkan</button>
+                    </div>
+                  ) : exams.map(e => {
+                    const progress = results.find(r => r.examId === e.id && r.studentId === currentUser?.id);
+                    const isTaken = progress?.status === 'completed';
+                    const isInProgress = progress?.status === 'in_progress';
+                    
+                    const now = new Date().getTime();
+                    const start = e.startDate ? new Date(e.startDate).getTime() : 0;
+                    const end = e.endDate ? new Date(e.endDate).getTime() : Infinity;
+                    
+                    const isNotStarted = start > now;
+                    const isExpired = end < now;
+                    const isActive = !isNotStarted && !isExpired;
 
-                {/* Available Exams */}
-                {view === 'STUDENT_DASHBOARD' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
-                    {filterStudentExams(exams).available.length === 0 ? (
-                      <div className="col-span-full text-center py-20 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
-                        <p className="text-gray-400 font-medium">Belum ada ujian yang tersedia saat ini.</p>
-                        <button onClick={() => fetchData(true)} className="mt-4 text-indigo-600 font-bold hover:underline">Coba Segarkan</button>
-                      </div>
-                    ) : filterStudentExams(exams).available.map(e => {
-                      const progress = results.find(r => r.examId === e.id && r.studentId === currentUser?.id);
-                      const isTaken = progress?.status === 'completed';
-                      const isInProgress = progress?.status === 'in_progress';
+                    let btnText = 'Mulai Sekarang';
+                    let btnClass = 'bg-indigo-600 text-white shadow-indigo-100';
+                    let btnIcon = <PlayCircle className="w-5 h-5" />;
+                    let isDisabled = false;
 
-                      let btnText = 'Mulai Sekarang';
-                      let btnClass = 'bg-indigo-600 text-white shadow-indigo-100';
-                      let btnIcon = <PlayCircle className="w-5 h-5" />;
-                      let isDisabled = false;
-
-                      if (isTaken) {
+                    if (isNotStarted) {
+                        btnText = `Belum Dimulai (${new Date(start).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })})`;
+                        btnClass = 'bg-gray-100 text-gray-400 cursor-not-allowed';
+                        isDisabled = true;
+                        btnIcon = <Clock className="w-5 h-5" />;
+                    } else if (isExpired) {
+                        btnText = 'Ujian Berakhir';
+                        btnClass = 'bg-red-50 text-red-500 cursor-not-allowed border border-red-100';
+                        isDisabled = true;
+                        btnIcon = <XCircle className="w-5 h-5" />;
+                    } else if (isTaken) {
                         btnText = 'Ulangi Ujian';
                         btnClass = 'bg-white border-2 border-indigo-600 text-indigo-600 shadow-none hover:bg-indigo-50';
                         btnIcon = <RotateCcw className="w-5 h-5" />;
-                      } else if (isInProgress) {
+                    } else if (isInProgress) {
                         btnText = 'Lanjutkan';
                         btnClass = 'bg-amber-500 text-white';
                         btnIcon = <Clock className="w-5 h-5" />;
-                      }
+                    }
 
-                      return (
-                        <div key={e.id} className="bg-white p-10 rounded-[50px] border border-gray-100 shadow-sm hover:shadow-2xl transition-all flex flex-col group">
-                          <div className="flex justify-between items-center mb-8">
+                    return (
+                      <div key={e.id} className="bg-white p-10 rounded-[50px] border border-gray-100 shadow-sm hover:shadow-2xl transition-all flex flex-col group">
+                        <div className="flex justify-between items-center mb-8">
                             <span className="bg-indigo-50 text-indigo-600 text-[10px] font-black uppercase px-4 py-1.5 rounded-full border border-indigo-100 tracking-widest">{e.category}</span>
                             {isTaken && <CheckCircle className="text-green-500" />}
-                            {isInProgress && <Clock className="text-amber-500" />}
-                          </div>
-                          <h3 className="text-2xl font-bold text-gray-900 mb-2 leading-tight group-hover:text-indigo-600 transition-colors">{e.title}</h3>
-                          <p className="text-gray-600 text-sm mb-4 line-clamp-2">{e.description}</p>
-                          
-                          {(e.startDate || e.endDate) && (
+                            {isInProgress && !isExpired && <Clock className="text-amber-500" />}
+                            {isExpired && <span className="text-[10px] font-black uppercase bg-red-100 text-red-600 px-2 py-1 rounded">Expired</span>}
+                        </div>
+                        <h3 className="text-2xl font-bold text-gray-900 mb-2 leading-tight group-hover:text-indigo-600 transition-colors">{e.title}</h3>
+                        
+                        {(e.startDate || e.endDate) && (
                             <div className="mb-4 text-xs text-gray-500 font-medium space-y-1 bg-gray-50 p-3 rounded-xl border border-gray-100">
-                              {e.startDate && <div>📅 Mulai: {new Date(e.startDate).toLocaleString('id-ID')}</div>}
-                              {e.endDate && <div>⏰ Selesai: {new Date(e.endDate).toLocaleString('id-ID')}</div>}
+                                {e.startDate && <div>Mulai: {new Date(e.startDate).toLocaleString('id-ID')}</div>}
+                                {e.endDate && <div>Selesai: {new Date(e.endDate).toLocaleString('id-ID')}</div>}
                             </div>
-                          )}
+                        )}
 
-                          <div className="mt-auto pt-6 border-t border-gray-50">
+                        <div className="mt-auto pt-6 border-t border-gray-50">
                             <button 
-                              onClick={() => handleStartExamWithToken(e)} 
-                              className={`w-full font-black py-4 rounded-[20px] shadow-xl transition-all flex items-center justify-center gap-3 active:scale-95 ${btnClass}`}
+                                onClick={() => !isDisabled && handleStartExamWithToken(e)} 
+                                disabled={isDisabled}
+                                className={`w-full font-black py-4 rounded-[20px] shadow-xl transition-all flex items-center justify-center gap-3 active:scale-95 ${btnClass} ${isDisabled ? 'shadow-none active:scale-100' : ''}`}
                             >
-                              {btnText} {btnIcon}
-                              {e.requireToken && <Key className="w-4 h-4 ml-1" />}
+                                {btnText} {btnIcon}
+                                {e.requireToken && !isDisabled && <Key className="w-4 h-4 ml-1" />}
                             </button>
-                          </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Upcoming Exams */}
-                {view === 'view-upcoming' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
-                    {filterStudentExams(exams).upcoming.length === 0 ? (
-                      <div className="col-span-full text-center py-20 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
-                        <p className="text-gray-400 font-medium">Tidak ada ujian yang akan datang.</p>
                       </div>
-                    ) : filterStudentExams(exams).upcoming.map(e => {
-                      const startDate = e.startDate ? new Date(e.startDate).getTime() : 0;
-                      const timeUntilStart = Math.max(0, startDate - new Date().getTime());
-                      const daysUntil = Math.ceil(timeUntilStart / (1000 * 60 * 60 * 24));
-                      
-                      return (
-                        <div key={e.id} className="bg-white p-10 rounded-[50px] border-2 border-amber-200 shadow-sm hover:shadow-2xl transition-all flex flex-col group bg-amber-50/30">
-                          <div className="flex justify-between items-center mb-8">
-                            <span className="bg-amber-50 text-amber-700 text-[10px] font-black uppercase px-4 py-1.5 rounded-full border border-amber-200 tracking-widest">Mendatang</span>
-                            <span className="text-[10px] font-black uppercase bg-amber-200 text-amber-800 px-3 py-1.5 rounded-lg">
-                              {daysUntil} hari lagi
-                            </span>
-                          </div>
-                          <h3 className="text-2xl font-bold text-gray-900 mb-2 leading-tight">{e.title}</h3>
-                          <p className="text-gray-600 text-sm mb-4 line-clamp-2">{e.description}</p>
-                          
-                          {(e.startDate || e.endDate) && (
-                            <div className="mb-4 text-xs text-gray-600 font-medium space-y-1 bg-white p-3 rounded-xl border border-amber-200">
-                              {e.startDate && <div>📅 Dimulai: {new Date(e.startDate).toLocaleString('id-ID')}</div>}
-                              {e.endDate && <div>⏰ Berakhir: {new Date(e.endDate).toLocaleString('id-ID')}</div>}
-                            </div>
-                          )}
-
-                          <div className="mt-auto pt-6 border-t border-amber-100">
-                            <button 
-                              disabled
-                              className="w-full font-black py-4 rounded-[20px] shadow-xl transition-all flex items-center justify-center gap-3 bg-gray-100 text-gray-400 cursor-not-allowed"
-                            >
-                              Belum Tersedia
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Expired Exams */}
-                {view === 'view-expired' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
-                    {filterStudentExams(exams).expired.length === 0 ? (
-                      <div className="col-span-full text-center py-20 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
-                        <p className="text-gray-400 font-medium">Tidak ada ujian yang sudah berakhir.</p>
-                      </div>
-                    ) : filterStudentExams(exams).expired.map(e => {
-                      return (
-                        <div key={e.id} className="bg-white p-10 rounded-[50px] border-2 border-red-200 shadow-sm hover:shadow-2xl transition-all flex flex-col group bg-red-50/30">
-                          <div className="flex justify-between items-center mb-8">
-                            <span className="bg-red-50 text-red-700 text-[10px] font-black uppercase px-4 py-1.5 rounded-full border border-red-200 tracking-widest">Selesai</span>
-                            <XCircle className="text-red-500" />
-                          </div>
-                          <h3 className="text-2xl font-bold text-gray-900 mb-2 leading-tight">{e.title}</h3>
-                          <p className="text-gray-600 text-sm mb-4 line-clamp-2">{e.description}</p>
-                          
-                          {(e.startDate || e.endDate) && (
-                            <div className="mb-4 text-xs text-gray-600 font-medium space-y-1 bg-white p-3 rounded-xl border border-red-200">
-                              {e.startDate && <div>📅 Dimulai: {new Date(e.startDate).toLocaleString('id-ID')}</div>}
-                              {e.endDate && <div>⏰ Berakhir: {new Date(e.endDate).toLocaleString('id-ID')}</div>}
-                            </div>
-                          )}
-
-                          <div className="mt-auto pt-6 border-t border-red-100">
-                            <button 
-                              disabled
-                              className="w-full font-black py-4 rounded-[20px] shadow-xl transition-all flex items-center justify-center gap-3 bg-red-50 text-red-500 cursor-not-allowed border border-red-100"
-                            >
-                              Ujian Berakhir
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Back Button for Other Tabs */}
-                {(view === 'view-upcoming' || view === 'view-expired') && (
-                  <button 
-                    onClick={() => setView('STUDENT_DASHBOARD')} 
-                    className="mt-10 w-full bg-gray-900 text-white font-bold py-4 rounded-2xl hover:bg-black transition-all"
-                  >
-                    ← Kembali ke Ujian Tersedia
-                  </button>
-                )}
+                    );
+                  })}
+                </div>
               </div>
             )
           )}
