@@ -2000,12 +2000,12 @@ export default function App() {
                 </div>
                 <h2 className="text-2xl font-black text-gray-900 mb-8 tracking-tight">Ujian Tersedia</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
-                  {exams.length === 0 ? (
+                  {exams.filter(e => e.status === 'published').length === 0 ? (
                     <div className="col-span-full text-center py-20 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
                       <p className="text-gray-400 font-medium">Belum ada ujian yang tersedia saat ini.</p>
                       <button onClick={fetchData} className="mt-4 text-indigo-600 font-bold hover:underline">Coba Segarkan</button>
                     </div>
-                  ) : exams.map(e => {
+                  ) : exams.filter(e => e.status === 'published').map(e => {
                     const progress = results.find(r => r.examId === e.id && r.studentId === currentUser?.id);
                     const isTaken = progress?.status === 'completed';
                     const isInProgress = progress?.status === 'in_progress';

@@ -1,6 +1,11 @@
 import React, { useEffect, useRef } from 'react';
 import Quill from 'quill';
 import 'quill/dist/quill.snow.css';
+import katex from 'katex';
+import 'katex/dist/katex.min.css';
+
+// Configure katex for Quill
+(window as any).katex = katex;
 
 interface RichTextEditorProps {
   value: string;
@@ -32,12 +37,13 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({ value, onChange, placeh
             [{ 'list': 'ordered'}, { 'list': 'bullet' }],
             [{ 'script': 'sub'}, { 'script': 'super' }],
             [{ 'indent': '-1'}, { 'indent': '+1' }],
+            [{ 'direction': 'rtl' }], // Arabic support
             [{ 'size': ['small', false, 'large', 'huge'] }],
             [{ 'header': [1, 2, 3, 4, 5, 6, false] }],
             [{ 'color': [] }, { 'background': [] }],
             [{ 'align': [] }],
             ['clean'],
-            ['link', 'image']
+            ['link', 'image', 'formula'] // Math formula support
           ]
         }
       });
