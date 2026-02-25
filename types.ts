@@ -8,6 +8,7 @@ export interface User {
   grade?: string;
   school?: string;
   nis?: string;
+  subject?: string; // Mapel for teachers
   session_token?: string;
 }
 
@@ -102,4 +103,4 @@ export interface Material {
   isPublic: boolean;
 }
 
-export type AppView = 'LOGIN' | 'TEACHER_DASHBOARD' | 'TEACHER_GRADES' | 'TEACHER_BANK' | 'TEACHER_STUDENTS' | 'STUDENT_DASHBOARD' | 'STUDENT_HISTORY' | 'STUDENT_MATERIALS' | 'EXAM_SESSION' | 'RESULT' | 'AI_GENERATOR' | 'EXAM_EDITOR' | 'CHANGE_PASSWORD' | 'MATERIAL_MANAGER';
+export type AppView = 'LOGIN' | 'TEACHER_DASHBOARD' | 'TEACHER_GRADES' | 'TEACHER_BANK' | 'TEACHER_STUDENTS' | 'TEACHER_TEACHERS' | 'STUDENT_DASHBOARD' | 'STUDENT_HISTORY' | 'STUDENT_MATERIALS' | 'EXAM_SESSION' | 'RESULT' | 'AI_GENERATOR' | 'EXAM_EDITOR' | 'CHANGE_PASSWORD' | 'MATERIAL_MANAGER';

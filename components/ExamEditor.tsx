@@ -113,7 +113,7 @@ const uploadImageToSupabase = async (file: File, examId: string): Promise<string
   }
 
   try {
-    const fileName = `exams/${examId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+    const fileName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
     
     const { data: uploadData, error: uploadError } = await supabase
       .storage
