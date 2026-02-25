@@ -76,18 +76,21 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
   const loadOrGenerateShuffledQuestions = (): Question[] => {
     const cacheKey = getShuffleCacheKey();
     
-    // If existing progress exists, use the questions from there (preserves order)
-    if (existingProgress?.questions) {
-      return existingProgress.questions;
-    }
+    // If NOT in preview mode, try to load from cache or existing progress
+    if (!isPreview) {
+      // If existing progress exists, use the questions from there (preserves order)
+      if (existingProgress?.questions) {
+        return existingProgress.questions;
+      }
 
-    // Try to load from session storage (persists across page refreshes during same session)
-    const cachedData = sessionStorage.getItem(cacheKey);
-    if (cachedData) {
-      try {
-        return JSON.parse(cachedData);
-      } catch (err) {
-        console.warn('Failed to parse cached shuffle data:', err);
+      // Try to load from session storage (persists across page refreshes during same session)
+      const cachedData = sessionStorage.getItem(cacheKey);
+      if (cachedData) {
+        try {
+          return JSON.parse(cachedData);
+        } catch (err) {
+          console.warn('Failed to parse cached shuffle data:', err);
+        }
       }
     }
 
@@ -124,7 +127,10 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
     });
 
     // Save to session storage untuk session berikutnya (jika user refresh)
-    sessionStorage.setItem(cacheKey, JSON.stringify(questionsToRun));
+    // BUT ONLY IF NOT IN PREVIEW MODE
+    if (!isPreview) {
+      sessionStorage.setItem(cacheKey, JSON.stringify(questionsToRun));
+    }
     
     return questionsToRun;
   };
@@ -360,6 +366,18 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
   if (!isReady) return <div className="h-screen bg-white flex items-center justify-center"><LoaderComponent text="Mempersiapkan Lembar Ujian..." /></div>;
 
   const currentQuestion = shuffledQuestions[currentQuestionIndex];
+
+  if (!currentQuestion) {
+    return (
+        <div className="h-screen bg-white flex flex-col items-center justify-center p-8 text-center">
+            <AlertTriangle className="w-12 h-12 text-amber-500 mb-4" />
+            <h3 className="text-xl font-black text-gray-900">Tidak Ada Pertanyaan</h3>
+            <p className="text-gray-500 mt-2">Ujian ini belum memiliki pertanyaan yang dapat ditampilkan.</p>
+            <button onClick={onExit} className="mt-6 px-6 py-3 bg-gray-900 text-white rounded-xl font-bold">Kembali</button>
+        </div>
+    );
+  }
+
   const totalAnswered = Object.keys(answers).length;
   const progressPercent = (totalAnswered / shuffledQuestions.length) * 100;
 
