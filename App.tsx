@@ -363,6 +363,10 @@ export default function App() {
     // Load Data from Supabase. Returns fetched exams and results for callers to act on.
     const fetchData = async () => {
       if (!isSupabaseConfigured || !supabase) {
+          // Helpful debug when Supabase isn't configured so user understands why no network logs appear
+          try { console.warn('DEBUG: Supabase not configured or supabase client missing. Running in Mock Mode.'); } catch(e) {}
+          try { console.log('DEBUG: isSupabaseConfigured', isSupabaseConfigured); } catch(e) {}
+          try { console.log('DEBUG: supabase', supabase); } catch(e) {}
           setIsFetching(false);
           return { exams: null as any, results: null as any };
       }
@@ -376,6 +380,12 @@ export default function App() {
           supabase.from('exam_rooms').select('*'),
           supabase.from('users').select('*')
         ]);
+
+        // Debug logs to help diagnose missing data issues (remove after verification)
+        try { console.log('DEBUG: examsRes', examsRes); } catch(e) {}
+        try { console.log('DEBUG: resultsRes', resultsRes); } catch(e) {}
+        try { console.log('DEBUG: roomsRes', roomsRes); } catch(e) {}
+        try { console.log('DEBUG: usersRes', usersRes); } catch(e) {}
 
         // 1. Process Exams
         let mappedExams: Exam[] = [];
@@ -391,7 +401,7 @@ export default function App() {
               const s = (e.status || '').toString().toLowerCase().trim();
               if (s === 'published' || s === 'active' || s === 'draft') return s;
               if (s === 'publish') return 'published';
-              return e.status;
+              return s;
             })(),
             createdAt: e.created_at,
             startDate: e.start_date,
@@ -412,18 +422,19 @@ export default function App() {
           }));
           setExams(mappedExams);
           setBankQuestions(mappedExams.flatMap(e => e.questions || []));
+          try { console.log('DEBUG: mappedExams', mappedExams); } catch(e) {}
         }
 
         // 2. Process Results
         let mappedResults: ExamResult[] = [];
         if (resultsRes.data && !resultsRes.error) {
           mappedResults = resultsRes.data.map((r: any) => ({
-             id: r.id,
-             examId: r.exam_id,
-             studentId: r.student_id,
+             id: String(r.id),
+             examId: String(r.exam_id),
+             studentId: String(r.student_id),
              studentName: r.student_name || 'Unknown',
              score: r.score || 0,
-             status: r.status || 'in_progress',
+             status: (r.status || 'in_progress').toString().toLowerCase().trim(),
              totalPointsPossible: r.total_points_possible || 0,
              pointsObtained: r.points_obtained || 0,
              totalQuestions: r.total_questions || 0,
@@ -437,6 +448,7 @@ export default function App() {
              violation_alert: Array.isArray(r.logs) && r.logs.some((l: any) => l.event === 'tab_blur' || l.event === 'violation_disqualified')
           }));
           setResults(mappedResults);
+          try { console.log('DEBUG: mappedResults', mappedResults); } catch(e) {}
         }
 
         // 3. Process Exam Rooms
@@ -476,6 +488,19 @@ export default function App() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Sync editingExam when exams list updates to avoid stale draft view vs published list
+  useEffect(() => {
+    try {
+      if (!editingExam) return;
+      const found = exams.find(e => e.id === editingExam.id);
+      if (found && JSON.stringify(found) !== JSON.stringify(editingExam)) {
+        setEditingExam(found);
+      }
+    } catch (err) {
+      console.warn('Failed to sync editingExam with exams list:', err);
+    }
+  }, [exams]);
 
   // Single Session Enforcement (One IP/Device Logic)
   useEffect(() => {
@@ -664,7 +689,7 @@ export default function App() {
                  const s = (newExam.status || '').toString().toLowerCase().trim();
                  if (s === 'published' || s === 'active' || s === 'draft') return s;
                  if (s === 'publish') return 'published';
-                 return newExam.status;
+                 return s;
                })(),
                createdAt: newExam.created_at,
                startDate: newExam.start_date,
@@ -687,7 +712,7 @@ export default function App() {
                  const s = (updated.status || '').toString().toLowerCase().trim();
                  if (s === 'published' || s === 'active' || s === 'draft') return s;
                  if (s === 'publish') return 'published';
-                 return updated.status;
+                 return s;
                })(),
                createdAt: updated.created_at,
                startDate: updated.start_date,
@@ -1409,6 +1434,9 @@ export default function App() {
       } else {
           setExams(prev => [updatedExam, ...prev]);
       }
+      
+      // Keep the editing exam in sync with the saved exam to avoid list/editor mismatch
+      setEditingExam(updatedExam);
 
       // DB save (Await to ensure persistence)
       if (isSupabaseConfigured && supabase) {
@@ -1636,9 +1664,13 @@ export default function App() {
         });
 
         if (validCount > 0) {
+            // Normalize file base name: remove extension and trailing " (1)" style suffix added by OS
+            const baseName = file.name.replace(/\.[^/.]+$/, "").replace(/\s*\(\d+\)$/, "").trim();
+            const defaultTitle = `${baseName} (Imported)`;
+
             const newExam: Exam = {
                 id: generateUUID(),
-                title: file.name.replace(/\.[^/.]+$/, "") + " (Imported)",
+                title: defaultTitle,
                 description: 'Diimport dari Excel',
                 durationMinutes: 60,
                 category: 'Umum',
@@ -1646,9 +1678,29 @@ export default function App() {
                 createdAt: new Date().toISOString(),
                 questions: newQuestions
             };
-            setEditingExam(newExam);
-            setView('EXAM_EDITOR');
-            addAlert(`Berhasil mengimport ${validCount} soal!`, 'success');
+
+            // Robust existing-check: compare normalized base titles so "Template_Import_Soal_Examo (1)" matches "Template_Import_Soal_Examo"
+            const normalizeTitle = (t: string) => (t || '')
+              .toString()
+              .replace(/\s*\(Imported\).*$/i, '')   // remove "(Imported)" suffix
+              .replace(/\s*\(\d+\).*$/i, '')       // remove trailing "(1)" or "(2)" etc
+              .trim()
+              .toLowerCase();
+
+            const existing = exams.find(e => {
+              return normalizeTitle(e.title) === normalizeTitle(baseName) || normalizeTitle(e.title) === normalizeTitle(defaultTitle);
+            });
+
+            if (existing) {
+              // Open existing exam to avoid duplicate visible titles caused by filename "(1)" variations
+              setEditingExam(existing);
+              setView('EXAM_EDITOR');
+              addAlert(`Ujian dengan judul serupa ditemukan. Membuka ujian yang ada untuk menghindari duplikasi.`, 'info');
+            } else {
+              setEditingExam(newExam);
+              setView('EXAM_EDITOR');
+              addAlert(`Berhasil mengimport ${validCount} soal!`, 'success');
+            }
         } else {
             addAlert('Tidak ada soal yang valid ditemukan dalam file.', 'error');
         }
