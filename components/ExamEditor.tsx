@@ -856,7 +856,12 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                             <AlignRight className="w-4 h-4" />
                           </button>
                         </div>
-                        <textarea value={q.text} onChange={(e) => handleQuestionChange(qIndex, 'text', e.target.value)} className="w-full px-4 py-3 rounded-xl border border-gray-100 focus:ring-2 focus:ring-indigo-500 h-20 font-bold outline-none" />
+                        <RichTextEditor
+                          value={q.text}
+                          onChange={(value) => handleQuestionChange(qIndex, 'text', value)}
+                          placeholder="Tulis pertanyaan Anda di sini..."
+                          height="150px"
+                        />
                       </div>
 
                       {/* Image Attachment Input */}
@@ -1205,15 +1210,24 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                       {q.type === 'essay' && (
                         <div>
                           <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Panduan Jawaban / Rubrik (Esai)</label>
-                          <textarea value={q.essayAnswer || ''} onChange={(e) => handleQuestionChange(qIndex, 'essayAnswer', e.target.value)} placeholder="Masukkan poin-poin penting yang harus ada dalam jawaban siswa..." className="w-full px-4 py-3 rounded-xl border border-gray-100 focus:ring-2 focus:ring-indigo-500 h-24 font-bold outline-none text-sm" />
+                          <RichTextEditor
+                            value={q.essayAnswer || ''}
+                            onChange={(value) => handleQuestionChange(qIndex, 'essayAnswer', value)}
+                            placeholder="Masukkan poin-poin penting yang harus ada dalam jawaban siswa..."
+                            height="120px"
+                          />
                         </div>
                       )}
 
                       <div>
                         <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Pembahasan Soal (Opsional)</label>
                         <div className="relative">
-                          <AlertCircle className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
-                          <textarea value={q.explanation || ''} onChange={(e) => handleQuestionChange(qIndex, 'explanation', e.target.value)} placeholder="Penjelasan jawaban yang benar untuk ditampilkan setelah ujian..." className="w-full pl-9 pr-4 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 h-20 text-sm font-medium outline-none" />
+                          <RichTextEditor
+                            value={q.explanation || ''}
+                            onChange={(value) => handleQuestionChange(qIndex, 'explanation', value)}
+                            placeholder="Penjelasan jawaban yang benar untuk ditampilkan setelah ujian..."
+                            height="100px"
+                          />
                         </div>
                       </div>
                     </div>

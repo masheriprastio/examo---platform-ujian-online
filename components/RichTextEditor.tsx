@@ -72,12 +72,19 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({ value, onChange, placeh
   }, []);
 
   // Update Quill content when prop value changes externally
+  // Use a safer check to avoid cursor jumping or infinite updates
   useEffect(() => {
     if (quillRef.current && value !== undefined) {
       const currentContent = quillRef.current.root.innerHTML;
-      if (currentContent !== value) {
+      // Only update if the content is truly different and we aren't typing
+      if (currentContent !== value && !quillRef.current.hasFocus()) {
         isUpdatingRef.current = true;
+        // Save selection if any (though unlikely if not focused)
+        const range = quillRef.current.getSelection();
         quillRef.current.root.innerHTML = value || '';
+        if (range) {
+             quillRef.current.setSelection(range);
+        }
         isUpdatingRef.current = false;
       }
     }
