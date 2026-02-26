@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { User, Exam } from '../types';
+import { User, Exam, ExamRoom } from '../types';
 
 // Access variables safely, checking multiple possible sources
 const SUPABASE_URL =
@@ -61,6 +61,27 @@ export const MOCK_ADMIN: User = {
   role: 'admin',
   school: 'SMA Negeri 1 Digital'
 };
+
+export const MOCK_EXAM_ROOMS: ExamRoom[] = [
+  {
+    id: 'room-1',
+    name: 'Lab Komputer 1',
+    description: 'Ruang Multimedia Utama dengan 30 PC',
+    capacity: 30,
+    status: 'available',
+    supervisorId: 'guru-01',
+    location: 'Gedung A, Lantai 2'
+  },
+  {
+    id: 'room-2',
+    name: 'Lab Bahasa',
+    description: 'Ruang Audio Visual',
+    capacity: 25,
+    status: 'occupied',
+    supervisorId: 'guru-01',
+    location: 'Gedung B, Lantai 1'
+  }
+];
 
 export const MOCK_EXAMS: Exam[] = [
   {

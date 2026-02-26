@@ -90,6 +90,16 @@ export interface ExamResult {
   violation_alert?: boolean;
 }
 
+export interface ExamRoom {
+  id: string;
+  name: string;
+  description?: string;
+  capacity: number;
+  status: 'available' | 'occupied'; // Tersedia | Terisi (No 'maintenance' as per request)
+  supervisorId: string; // Teacher ID
+  location?: string;
+}
+
 export interface Material {
   id: string;
   title: string;

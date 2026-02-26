@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User, Exam, AppView, ExamResult, Question, ExamLog } from './types';
-import { MOCK_TEACHER, MOCK_STUDENT, MOCK_ADMIN, MOCK_EXAMS, supabase, isSupabaseConfigured } from './lib/supabase';
+import { User, Exam, AppView, ExamResult, Question, ExamLog, ExamRoom } from './types';
+import { MOCK_TEACHER, MOCK_STUDENT, MOCK_ADMIN, MOCK_EXAMS, MOCK_EXAM_ROOMS, supabase, isSupabaseConfigured } from './lib/supabase';
 import { generateUUID } from './lib/uuid';
 import {
   LogOut, LayoutDashboard, ClipboardList, Sparkles,
@@ -17,6 +17,7 @@ import ExamRunner from './components/ExamRunner';
 import AIGenerator from './components/AIGenerator';
 import ExamEditor from './components/ExamEditor';
 import QuestionBank from './components/QuestionBank';
+import ExamRoomManager from './components/ExamRoomManager';
 import StudentManager from './components/StudentManager';
 import TeacherManager from './components/TeacherManager';
 import MaterialManager from './components/MaterialManager';
@@ -262,6 +263,7 @@ export default function App() {
   // State Initialization: Use Mocks only if Supabase is NOT configured
   const [exams, setExams] = useState<Exam[]>(isSupabaseConfigured ? [] : MOCK_EXAMS);
   const [bankQuestions, setBankQuestions] = useState<Question[]>(isSupabaseConfigured ? [] : MOCK_EXAMS.flatMap(e => e.questions));
+  const [examRooms, setExamRooms] = useState<ExamRoom[]>(isSupabaseConfigured ? [] : MOCK_EXAM_ROOMS);
   const [students, setStudents] = useState<User[]>(isSupabaseConfigured ? [] : [MOCK_STUDENT]);
   const [teachers, setTeachers] = useState<User[]>(isSupabaseConfigured ? [] : [MOCK_TEACHER]); // New teacher state
   const [results, setResults] = useState<ExamResult[]>([]);
@@ -395,6 +397,20 @@ export default function App() {
              violation_alert: Array.isArray(r.logs) && r.logs.some((l: any) => l.event === 'tab_blur' || l.event === 'violation_disqualified')
           }));
           setResults(mappedResults);
+        }
+
+        // 3. Fetch Exam Rooms
+        const { data: roomsData, error: roomsError } = await supabase.from('exam_rooms').select('*');
+        if (roomsData && !roomsError) {
+            setExamRooms(roomsData.map((r: any) => ({
+                id: r.id,
+                name: r.name,
+                description: r.description,
+                capacity: r.capacity,
+                status: r.status,
+                supervisorId: r.supervisor_id,
+                location: r.location
+            })));
         }
 
         return { exams: mappedExams, results: mappedResults };
@@ -1134,6 +1150,52 @@ export default function App() {
       }
   };
 
+  // --- EXAM ROOM HANDLERS ---
+
+  const handleAddExamRoom = async (newRoom: ExamRoom) => {
+    // Optimistic Update
+    setExamRooms(prev => [newRoom, ...prev]);
+
+    if (isSupabaseConfigured && supabase) {
+        const { error } = await supabase.from('exam_rooms').insert({
+            id: newRoom.id,
+            name: newRoom.name,
+            description: newRoom.description,
+            capacity: newRoom.capacity,
+            status: newRoom.status,
+            supervisor_id: newRoom.supervisorId,
+            location: newRoom.location
+        });
+
+        if (error) {
+            console.error("Failed to add room:", error);
+            addAlert("Gagal menyimpan ruang ke database.", 'error');
+            setExamRooms(prev => prev.filter(r => r.id !== newRoom.id)); // Rollback
+        } else {
+            addAlert("Ruang ujian berhasil ditambahkan!", 'success');
+        }
+    } else {
+        addAlert("Ruang ujian berhasil ditambahkan (Mock)!", 'success');
+    }
+  };
+
+  const handleDeleteExamRoom = async (roomId: string) => {
+    if (!confirm("Hapus ruang ujian ini?")) return;
+
+    // Optimistic Update
+    const prevRooms = [...examRooms];
+    setExamRooms(prev => prev.filter(r => r.id !== roomId));
+
+    if (isSupabaseConfigured && supabase) {
+        const { error } = await supabase.from('exam_rooms').delete().eq('id', roomId);
+        if (error) {
+            console.error("Failed to delete room:", error);
+            addAlert("Gagal menghapus ruang dari database.", 'error');
+            setExamRooms(prevRooms); // Rollback
+        }
+    }
+  };
+
   // Wrapper for Exam Updates (Sync with DB)
   const handleExamSave = async (updatedExam: Exam) => {
       // Check if exam exists in local state
@@ -1852,68 +1914,12 @@ export default function App() {
               <QuestionBank questions={bankQuestions} onUpdate={setBankQuestions} />
             ) : view === 'TEACHER_EXAM_ROOM' ? (
               <div className="max-w-6xl mx-auto animate-in fade-in pb-20">
-                <div className="flex flex-col md:flex-row justify-between items-end mb-6 gap-4">
-                    <div>
-                        <h1 className="text-3xl font-black text-gray-900 tracking-tight">Ruang Ujian</h1>
-                        <p className="text-gray-400">Kelola jadwal dan sesi ujian aktif.</p>
-                    </div>
-
-                    <div className="relative">
-                        <button
-                            onClick={() => setShowCreateMenu(!showCreateMenu)}
-                            className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center gap-2 active:scale-95"
-                        >
-                            <Plus className="w-5 h-5" /> Buat Ujian Baru <ChevronDown className={`w-4 h-4 transition-transform ${showCreateMenu ? 'rotate-180' : ''}`} />
-                        </button>
-
-                        {showCreateMenu && (
-                            <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden z-20 animate-in fade-in slide-in-from-top-2">
-                                <button
-                                    onClick={handleCreateManual}
-                                    className="w-full text-left px-5 py-4 hover:bg-gray-50 flex items-center gap-3 font-bold text-gray-700 transition-colors border-b border-gray-50"
-                                >
-                                    <PenTool className="w-4 h-4 text-indigo-500" />
-                                    Buat Manual
-                                </button>
-                                <button
-                                    onClick={() => { setView('AI_GENERATOR'); setShowCreateMenu(false); }}
-                                    className="w-full text-left px-5 py-4 hover:bg-indigo-50 flex items-center gap-3 font-bold text-indigo-700 transition-colors"
-                                >
-                                    <Sparkles className="w-4 h-4 text-indigo-600" />
-                                    Generate dengan AI
-                                </button>
-                            </div>
-                        )}
-                        {showCreateMenu && <div className="fixed inset-0 z-10" onClick={() => setShowCreateMenu(false)}></div>}
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-5">
-                  {exams.length === 0 ? (
-                      <div className="col-span-full text-center py-16 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
-                          <p className="text-gray-400 font-medium">Belum ada ujian yang dibuat.</p>
-                      </div>
-                  ) : (
-                      exams.map(e => (
-                        <div key={e.id} className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm flex items-center justify-between group">
-                          <div>
-                            <h3 className="font-bold text-gray-900 text-lg md:text-xl">{e.title}</h3>
-                            <div className="flex gap-4 mt-2 text-[10px] font-black text-gray-400 uppercase tracking-widest"><span>{e.category}</span><span>{e.questions.length} Soal</span></div>
-                            {(e.startDate || e.endDate) && (
-                                <div className="mt-3 flex gap-4 text-xs font-medium text-gray-500">
-                                    {e.startDate && <div className="flex items-center gap-1"><Clock className="w-3 h-3"/> Mulai: {formatDate(e.startDate)}</div>}
-                                    {e.endDate && <div className="flex items-center gap-1"><Clock className="w-3 h-3"/> Selesai: {formatDate(e.endDate)}</div>}
-                                </div>
-                            )}
-                          </div>
-                          <div className="flex gap-2">
-                            <button onClick={() => handleDeleteExam(e.id)} className="p-5 bg-gray-50 text-gray-400 rounded-3xl hover:bg-red-600 hover:text-white transition-all" title="Hapus Ujian"><Trash2 /></button>
-                            <button onClick={() => { setEditingExam(e); setView('EXAM_EDITOR'); }} className="p-5 bg-gray-50 text-gray-400 rounded-3xl hover:bg-indigo-600 hover:text-white transition-all" title="Edit Ujian"><FileText /></button>
-                          </div>
-                        </div>
-                      ))
-                  )}
-                </div>
+                  <ExamRoomManager
+                    rooms={examRooms}
+                    teachers={teachers}
+                    onAddRoom={handleAddExamRoom}
+                    onDeleteRoom={handleDeleteExamRoom}
+                  />
               </div>
             ) : view === 'TEACHER_TEACHERS' ? (
               <TeacherManager
