@@ -62,6 +62,62 @@ export const MOCK_ADMIN: User = {
   school: 'SMA Negeri 1 Digital'
 };
 
+/**
+ * Uploads an image file to Supabase storage
+ * @param file - The image file to upload
+ * @param bucketName - The storage bucket name (default: 'question-images')
+ * @returns The public URL of the uploaded image
+ */
+export async function uploadImageToSupabase(file: File, bucketName: string = 'question-images'): Promise<string> {
+  if (!supabase) {
+    throw new Error('Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY environment variables.');
+  }
+
+  // Validate file type
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Only image files are allowed');
+  }
+
+  // Validate file size (15MB limit)
+  if (file.size > 15 * 1024 * 1024) {
+    throw new Error('File size must be less than 15MB');
+  }
+
+  // Generate unique file name
+  const fileName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+
+  try {
+    // Upload to storage
+    const { data: uploadData, error: uploadError } = await supabase
+      .storage
+      .from(bucketName)
+      .upload(fileName, file, {
+        cacheControl: '3600',
+        upsert: false
+      });
+
+    if (uploadError) {
+      console.error('Storage upload error:', uploadError);
+      throw new Error('Failed to upload file: ' + uploadError.message);
+    }
+
+    // Get public URL
+    const { data: publicUrlData } = supabase
+      .storage
+      .from(bucketName)
+      .getPublicUrl(fileName);
+
+    if (!publicUrlData || !publicUrlData.publicUrl) {
+      throw new Error('Failed to get public URL');
+    }
+
+    return publicUrlData.publicUrl;
+  } catch (error) {
+    console.error('Image upload failed:', error);
+    throw error;
+  }
+}
+
 export const MOCK_EXAM_ROOMS: ExamRoom[] = [
   {
     id: 'room-1',
@@ -70,7 +126,9 @@ export const MOCK_EXAM_ROOMS: ExamRoom[] = [
     capacity: 30,
     status: 'available',
     supervisorId: 'guru-01',
-    location: 'Gedung A, Lantai 2'
+    location: 'Gedung A, Lantai 2',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
   },
   {
     id: 'room-2',
@@ -79,7 +137,9 @@ export const MOCK_EXAM_ROOMS: ExamRoom[] = [
     capacity: 25,
     status: 'occupied',
     supervisorId: 'guru-01',
-    location: 'Gedung B, Lantai 1'
+    location: 'Gedung B, Lantai 1',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
   }
 ];
 

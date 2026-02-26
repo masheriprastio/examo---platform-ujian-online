@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { generateUUID } from '../lib/uuid';
 import { Question, QuestionType } from '../types';
 import RichTextEditor from './RichTextEditor';
-import { uploadImageToSupabase } from '../lib/storage';
+import { uploadImageToSupabase } from '../lib/supabase';
 import { 
   Plus, Search, Filter, Trash2, Edit2, Check, X,
   ChevronDown, ChevronUp, Database, Tag, AlertCircle, Save, ArrowLeft, GripVertical, Image as ImageIcon, Upload, Link as LinkIcon,
