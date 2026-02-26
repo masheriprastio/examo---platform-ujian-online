@@ -328,4 +328,4 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
         <div className="max-w-4xl mx-auto space-y-6 md:space-y-10">
           <div className="bg-white p-6 md:p-10 rounded-[30px] shadow-sm border border-gray-100 space-y-6">
             <div>
-              <label className="block text-xs font
+              <label className="block text-xs font-black text-gray-400 uppercase tracking-w

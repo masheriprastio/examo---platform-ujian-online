@@ -39,3 +39,11 @@ EXAM_ROOMS_SCHEMA.sql
 create_exam_rooms_table.js
 fix_exam_rooms_data.js
 update_exam_rooms_logic.js
+FIX_EXAM_ROOMS_FINAL.sql
+
+FIX_EXAM_ROOMS_STEP_BY_STEP.sql
+debug_exam_rooms.js
+execute_fix_sql.js
+fix_exam_rooms_direct.js
+fix_exam_rooms_table.sql
+simple_fix_exam_rooms.sql

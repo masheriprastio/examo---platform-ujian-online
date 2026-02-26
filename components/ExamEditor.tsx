@@ -113,8 +113,10 @@ const uploadImageToSupabase = async (file: File, examId: string): Promise<string
   }
 
   try {
+    // Check file size (Supabase might reject > 5MB via REST if configured, but let's try)
     const fileName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
     
+    // Ensure bucket exists or handle error gracefully
     const { data: uploadData, error: uploadError } = await supabase
       .storage
       .from('materials')
@@ -124,8 +126,8 @@ const uploadImageToSupabase = async (file: File, examId: string): Promise<string
       });
 
     if (uploadError) {
-      console.error('Storage upload error:', uploadError);
-      throw new Error('Failed to upload image: ' + uploadError.message);
+      console.error('Storage upload error detail:', uploadError);
+      throw new Error(`Upload gagal: ${uploadError.message} (Code: ${uploadError.name || 'Unknown'})`);
     }
 
     // Get public URL
@@ -135,7 +137,7 @@ const uploadImageToSupabase = async (file: File, examId: string): Promise<string
       .getPublicUrl(fileName);
 
     if (!publicUrlData || !publicUrlData.publicUrl) {
-      throw new Error('Failed to get public URL');
+      throw new Error('Gagal mendapatkan URL publik gambar.');
     }
 
     return publicUrlData.publicUrl;
@@ -143,6 +145,41 @@ const uploadImageToSupabase = async (file: File, examId: string): Promise<string
     console.error('Image upload error:', error);
     throw error;
   }
+};
+
+// Helper function to compress image using Canvas (Client-side compression)
+const compressImage = async (file: File, quality = 0.7, maxWidth = 800): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Failed to get canvas context'));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        // Returns Base64 string
+        resolve(canvas.toDataURL(file.type, quality));
+      };
+      img.onerror = (error) => reject(error);
+    };
+    reader.onerror = (error) => reject(error);
+  });
 };
 
 const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveToBank, onPreview, bankQuestions = [] }) => {
@@ -342,10 +379,21 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         // Update with real URL
         handleAttachmentChange(qIndex, publicUrl);
 
-      } catch (error) {
-        alert(`Gagal upload gambar: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        // Remove attachment on error
-        handleAttachmentChange(qIndex, '');
+      } catch (error: any) {
+        console.warn('Upload to Supabase failed, attempting compressed Base64 fallback:', error);
+
+        // Notify user about the fallback
+        alert(`Gagal upload ke server (${error.message}). Menggunakan penyimpanan lokal (Base64) yang dikompresi.`);
+
+        try {
+            // Fallback to Compressed Base64
+            const compressedBase64 = await compressImage(file);
+            handleAttachmentChange(qIndex, compressedBase64);
+        } catch (compressError) {
+             console.error('Compression failed:', compressError);
+             alert(`Gagal memproses gambar: ${compressError instanceof Error ? compressError.message : String(compressError)}`);
+             handleAttachmentChange(qIndex, '');
+        }
       }
     }
   };
@@ -418,10 +466,21 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         // Update with URL
         handleOptionAttachmentChange(qIndex, oIndex, publicUrl);
 
-      } catch (error) {
-        alert(`Gagal upload gambar opsi: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        // Reset loading state
-        handleOptionAttachmentChange(qIndex, oIndex, '');
+      } catch (error: any) {
+        console.warn('Upload to Supabase failed, attempting compressed Base64 fallback:', error);
+
+        // Notify user about the fallback
+        alert(`Gagal upload ke server (${error.message}). Menggunakan penyimpanan lokal (Base64) yang dikompresi.`);
+
+        try {
+            // Fallback to Compressed Base64
+            const compressedBase64 = await compressImage(file);
+            handleOptionAttachmentChange(qIndex, oIndex, compressedBase64);
+        } catch (compressError) {
+             console.error('Compression failed:', compressError);
+             alert(`Gagal memproses gambar: ${compressError instanceof Error ? compressError.message : String(compressError)}`);
+             handleOptionAttachmentChange(qIndex, oIndex, '');
+        }
       } finally {
         e.target.value = ''; // Reset input
       }
