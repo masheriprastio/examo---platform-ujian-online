@@ -26,6 +26,7 @@ import { MaterialService, Material } from './services/MaterialService';
 
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString('id-ID', {
   day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
@@ -225,6 +226,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const shouldFetchRef = useRef(true); // Prevent re-fetching stale data after save
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { addAlert } = useNotification();
 
@@ -1312,6 +1314,160 @@ export default function App() {
     setShowCreateMenu(false);
   };
 
+  const handleDownloadTemplate = () => {
+    const headers = [
+      ['Pertanyaan', 'Tipe (PG/PG Banyak/Benar Salah/Isian/Esai)', 'Opsi A', 'Opsi B', 'Opsi C', 'Opsi D', 'Opsi E', 'Jawaban Benar (A/B/C/D/E atau True/False atau Teks)', 'Poin', 'Gambar URL (Opsional)', 'Penjelasan (Opsional)']
+    ];
+
+    // Example row
+    const example = [
+      ['Ibukota Indonesia adalah...', 'PG', 'Jakarta', 'Bandung', 'Surabaya', 'Medan', 'Makassar', 'A', '10', '', 'Jakarta adalah ibukota saat ini.'],
+      ['Air adalah benda padat.', 'Benar Salah', '', '', '', '', '', 'False', '10', 'https://example.com/image.jpg', 'Air adalah benda cair.'],
+      ['Sebutkan 3 sifat air.', 'Esai', '', '', '', '', '', 'Cair, bening, mengalir', '20', '', '']
+    ];
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([...headers, ...example]);
+
+    // Set column widths
+    const wscols = [
+      { wch: 40 }, // Pertanyaan
+      { wch: 20 }, // Tipe
+      { wch: 15 }, // Opsi A
+      { wch: 15 }, // Opsi B
+      { wch: 15 }, // Opsi C
+      { wch: 15 }, // Opsi D
+      { wch: 15 }, // Opsi E
+      { wch: 20 }, // Jawaban
+      { wch: 10 }, // Poin
+      { wch: 30 }, // Gambar URL
+      { wch: 30 }  // Penjelasan
+    ];
+    ws['!cols'] = wscols;
+
+    XLSX.utils.book_append_sheet(wb, ws, "Template Soal");
+    XLSX.writeFile(wb, "Template_Import_Soal_Examo.xlsx");
+  };
+
+  const handleImportExam = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+
+        // Remove header row
+        const rows = data.slice(1) as any[][];
+
+        const newQuestions: Question[] = [];
+        let validCount = 0;
+
+        rows.forEach((row: any[]) => {
+          if (!row[0]) return; // Skip empty rows
+
+          const qText = row[0];
+          const qTypeRaw = row[1]?.toString().toLowerCase() || 'pg';
+          let qType: 'mcq' | 'multiple_select' | 'true_false' | 'short_answer' | 'essay' = 'mcq';
+
+          if (qTypeRaw.includes('banyak')) qType = 'multiple_select';
+          else if (qTypeRaw.includes('benar') || qTypeRaw.includes('salah')) qType = 'true_false';
+          else if (qTypeRaw.includes('isian')) qType = 'short_answer';
+          else if (qTypeRaw.includes('esai') || qTypeRaw.includes('essay')) qType = 'essay';
+
+          const options = [row[2], row[3], row[4], row[5], row[6]].filter(o => o !== undefined && o !== null && o !== '').map(String);
+          const answerRaw = row[7]?.toString();
+          const points = parseInt(row[8]) || 10;
+          const imageUrl = row[9]?.toString();
+          const explanation = row[10]?.toString();
+
+          let correctAnswerIndex: number | undefined;
+          let correctAnswerIndices: number[] | undefined;
+          let trueFalseAnswer: boolean | undefined;
+          let shortAnswer: string | undefined;
+          let essayAnswer: string | undefined;
+
+          if (qType === 'mcq') {
+             if (answerRaw && /^[A-E]$/i.test(answerRaw)) {
+                 correctAnswerIndex = answerRaw.toUpperCase().charCodeAt(0) - 65;
+             } else if (answerRaw && !isNaN(parseInt(answerRaw))) {
+                 correctAnswerIndex = parseInt(answerRaw) - 1; // Assuming 1-based index input
+             } else {
+                 correctAnswerIndex = 0; // Default
+             }
+          } else if (qType === 'multiple_select') {
+             // Expect answer like "A,C" or "1,3"
+             if (answerRaw) {
+                 correctAnswerIndices = answerRaw.split(/[,;\s]+/).map(s => {
+                    s = s.trim().toUpperCase();
+                    if (/^[A-E]$/.test(s)) return s.charCodeAt(0) - 65;
+                    if (!isNaN(parseInt(s))) return parseInt(s) - 1;
+                    return -1;
+                 }).filter(i => i >= 0);
+             } else {
+                 correctAnswerIndices = [];
+             }
+          } else if (qType === 'true_false') {
+             trueFalseAnswer = answerRaw?.toLowerCase() === 'true' || answerRaw?.toLowerCase() === 'benar';
+          } else if (qType === 'short_answer') {
+             shortAnswer = answerRaw;
+          } else if (qType === 'essay') {
+             essayAnswer = answerRaw;
+          }
+
+          const newQ: Question = {
+              id: generateUUID(),
+              text: qText,
+              type: qType,
+              options: (qType === 'mcq' || qType === 'multiple_select') ? options : undefined,
+              correctAnswerIndex,
+              correctAnswerIndices,
+              trueFalseAnswer,
+              shortAnswer,
+              essayAnswer,
+              points,
+              explanation,
+              attachment: imageUrl ? { type: 'image', url: imageUrl, caption: 'Gambar Soal' } : undefined
+          };
+
+          newQuestions.push(newQ);
+          validCount++;
+        });
+
+        if (validCount > 0) {
+            const newExam: Exam = {
+                id: generateUUID(),
+                title: file.name.replace(/\.[^/.]+$/, "") + " (Imported)",
+                description: 'Diimport dari Excel',
+                durationMinutes: 60,
+                category: 'Umum',
+                status: 'draft',
+                createdAt: new Date().toISOString(),
+                questions: newQuestions
+            };
+            setEditingExam(newExam);
+            setView('EXAM_EDITOR');
+            addAlert(`Berhasil mengimport ${validCount} soal!`, 'success');
+        } else {
+            addAlert('Tidak ada soal yang valid ditemukan dalam file.', 'error');
+        }
+
+      } catch (err: any) {
+        console.error("Import Error:", err);
+        addAlert('Gagal membaca file Excel: ' + err.message, 'error');
+      }
+    };
+    reader.readAsBinaryString(file);
+    // Reset input
+    e.target.value = '';
+    setShowCreateMenu(false);
+  };
+
   const exportGradesToPDF = () => {
     const doc = new jsPDF();
     doc.text('Laporan Hasil Ujian - Examo', 14, 20);
@@ -2009,6 +2165,20 @@ export default function App() {
                                     Buat Manual
                                 </button>
                                 <button
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className="w-full text-left px-5 py-4 hover:bg-green-50 flex items-center gap-3 font-bold text-green-700 transition-colors border-b border-gray-50"
+                                >
+                                    <FileSpreadsheet className="w-4 h-4 text-green-600" />
+                                    Import dari Excel
+                                </button>
+                                <button
+                                    onClick={() => { handleDownloadTemplate(); setShowCreateMenu(false); }}
+                                    className="w-full text-left px-5 py-4 hover:bg-gray-50 flex items-center gap-3 font-bold text-gray-500 transition-colors text-xs border-b border-gray-50"
+                                >
+                                    <Download className="w-4 h-4 text-gray-400" />
+                                    Download Template
+                                </button>
+                                <button
                                     onClick={() => { setView('AI_GENERATOR'); setShowCreateMenu(false); }}
                                     className="w-full text-left px-5 py-4 hover:bg-indigo-50 flex items-center gap-3 font-bold text-indigo-700 transition-colors"
                                 >
@@ -2019,6 +2189,13 @@ export default function App() {
                         )}
                         {showCreateMenu && <div className="fixed inset-0 z-10" onClick={() => setShowCreateMenu(false)}></div>}
                     </div>
+                    <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleImportExam}
+                        accept=".xlsx, .xls"
+                        className="hidden"
+                    />
                 </div>
 
                 <div className="grid grid-cols-1 gap-5">
