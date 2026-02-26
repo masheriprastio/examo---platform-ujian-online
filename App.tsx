@@ -1674,7 +1674,7 @@ export default function App() {
                 description: 'Diimport dari Excel',
                 durationMinutes: 60,
                 category: 'Umum',
-                status: 'draft',
+                status: 'published',
                 createdAt: new Date().toISOString(),
                 questions: newQuestions
             };
