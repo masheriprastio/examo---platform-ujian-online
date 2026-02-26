@@ -298,6 +298,7 @@ export default function App() {
   // State for server error handling
   const [isOffline, setIsOffline] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  const [isFetching, setIsFetching] = useState(true);
 
   // Session Timeout & Warning State
   const [showTimeoutWarning, setShowTimeoutWarning] = useState(false);
@@ -361,8 +362,12 @@ export default function App() {
 
     // Load Data from Supabase. Returns fetched exams and results for callers to act on.
     const fetchData = async () => {
-      if (!isSupabaseConfigured || !supabase) return { exams: null as any, results: null as any };
+      if (!isSupabaseConfigured || !supabase) {
+          setIsFetching(false);
+          return { exams: null as any, results: null as any };
+      }
 
+      setIsFetching(true);
       try {
         // Fetch all data in parallel to reduce network round trips
         const [examsRes, resultsRes, roomsRes] = await Promise.all([
@@ -423,6 +428,8 @@ export default function App() {
       } catch (err) {
         console.error("Failed to fetch data from Supabase:", err);
         return { exams: null as any, results: null as any };
+      } finally {
+        setIsFetching(false);
       }
     };
 
@@ -2198,7 +2205,7 @@ export default function App() {
                 )}
               </div>
             ) : view === 'TEACHER_BANK' ? (
-              <QuestionBank questions={bankQuestions} onUpdate={setBankQuestions} />
+              <QuestionBank questions={bankQuestions} onUpdate={setBankQuestions} isLoading={isFetching} />
             ) : view === 'TEACHER_EXAM_ROOM' ? (
               <div className="max-w-6xl mx-auto animate-in fade-in pb-20">
                   <ExamRoomManager
