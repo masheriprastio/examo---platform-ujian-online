@@ -2367,7 +2367,18 @@ export default function App() {
                         <div key={e.id} className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm flex items-center justify-between group">
                           <div>
                             <h3 className="font-bold text-gray-900 text-lg md:text-xl">{e.title}</h3>
-                            <div className="flex gap-4 mt-2 text-[10px] font-black text-gray-400 uppercase tracking-widest"><span>{e.category}</span><span>{e.questions.length} Soal</span></div>
+                            <div className="flex gap-4 mt-2 text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                              <span>{e.category}</span>
+                              <span>{e.questions.length} Soal</span>
+                              <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                                e.status === 'published' ? 'bg-green-100 text-green-600' :
+                                e.status === 'draft' ? 'bg-gray-100 text-gray-600' :
+                                e.status === 'active' ? 'bg-blue-100 text-blue-600' :
+                                'bg-yellow-100 text-yellow-600'
+                              }`}>
+                                {e.status}
+                              </span>
+                            </div>
                           </div>
                           <div className="flex gap-2">
                             <button onClick={() => handleDeleteExam(e.id)} className="p-5 bg-gray-50 text-gray-400 rounded-3xl hover:bg-red-600 hover:text-white transition-all" title="Hapus Ujian"><Trash2 /></button>
