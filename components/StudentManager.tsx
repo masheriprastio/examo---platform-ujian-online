@@ -71,9 +71,10 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
           }));
 
         if (importedStudents.length > 0) {
-            // For bulk import, we pass to onUpdate which App.tsx will handle as bulk insert
+            // Combine existing students with new imported ones to prevent overwriting if simpler logic is used
+            // However, App.tsx's handleStudentUpdate filters duplicates.
+            // Passing just the new list is fine as App.tsx handles the merge.
             onUpdate(importedStudents);
-            // Note: App.tsx implementation of onUpdate for bulk should handle appending
         } else {
           alert('Format Excel salah atau tidak ada data yang valid (Nama wajib diisi).');
         }

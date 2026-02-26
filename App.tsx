@@ -362,11 +362,17 @@ export default function App() {
       if (!isSupabaseConfigured || !supabase) return { exams: null as any, results: null as any };
 
       try {
-        // 1. Fetch Exams
-        const { data: examsData, error: examsError } = await supabase.from('exams').select('*').order('created_at', { ascending: false });
+        // Fetch all data in parallel to reduce network round trips
+        const [examsRes, resultsRes, roomsRes] = await Promise.all([
+          supabase.from('exams').select('*').order('created_at', { ascending: false }),
+          supabase.from('exam_results').select('*'),
+          supabase.from('exam_rooms').select('*')
+        ]);
+
+        // 1. Process Exams
         let mappedExams: Exam[] = [];
-        if (examsData && !examsError) {
-          mappedExams = examsData.map((e: any) => ({
+        if (examsRes.data && !examsRes.error) {
+          mappedExams = examsRes.data.map((e: any) => ({
             ...e,
             durationMinutes: e.duration_minutes,
             createdAt: e.created_at,
@@ -377,11 +383,10 @@ export default function App() {
           setBankQuestions(mappedExams.flatMap(e => e.questions || []));
         }
 
-        // 2. Fetch Results
-        const { data: resultsData, error: resultsError } = await supabase.from('exam_results').select('*');
+        // 2. Process Results
         let mappedResults: ExamResult[] = [];
-        if (resultsData && !resultsError) {
-          mappedResults = resultsData.map((r: any) => ({
+        if (resultsRes.data && !resultsRes.error) {
+          mappedResults = resultsRes.data.map((r: any) => ({
              ...r,
              examId: r.exam_id,
              studentId: r.student_id,
@@ -399,10 +404,9 @@ export default function App() {
           setResults(mappedResults);
         }
 
-        // 3. Fetch Exam Rooms
-        const { data: roomsData, error: roomsError } = await supabase.from('exam_rooms').select('*');
-        if (roomsData && !roomsError) {
-            setExamRooms(roomsData.map((r: any) => ({
+        // 3. Process Exam Rooms
+        if (roomsRes.data && !roomsRes.error) {
+            setExamRooms(roomsRes.data.map((r: any) => ({
                 id: r.id,
                 name: r.name,
                 description: r.description,
