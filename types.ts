@@ -34,6 +34,9 @@ export interface Question {
   topic?: string;
   difficulty?: 'easy' | 'medium' | 'hard';
   randomizeOptions?: boolean;
+  textAlign?: 'left' | 'center' | 'right';
+  createdAt?: string;
+  updatedAt?: string;
   // Untuk Essay Drag & Drop
   dragDropItems?: string[];                    // Item yang bisa di-drag (kiri)
   dragDropTargets?: string[];                  // Target drop zones (kanan)
@@ -103,4 +106,4 @@ export interface Material {
   isPublic: boolean;
 }
 
-export type AppView = 'LOGIN' | 'TEACHER_DASHBOARD' | 'TEACHER_GRADES' | 'TEACHER_BANK' | 'TEACHER_STUDENTS' | 'TEACHER_TEACHERS' | 'STUDENT_DASHBOARD' | 'STUDENT_HISTORY' | 'STUDENT_MATERIALS' | 'EXAM_SESSION' | 'RESULT' | 'AI_GENERATOR' | 'EXAM_EDITOR' | 'CHANGE_PASSWORD' | 'MATERIAL_MANAGER';
+export type AppView = 'LOGIN' | 'TEACHER_DASHBOARD' | 'TEACHER_GRADES' | 'TEACHER_BANK' | 'TEACHER_EXAM_ROOM' | 'TEACHER_STUDENTS' | 'TEACHER_TEACHERS' | 'STUDENT_DASHBOARD' | 'STUDENT_HISTORY' | 'STUDENT_MATERIALS' | 'EXAM_SESSION' | 'RESULT' | 'AI_GENERATOR' | 'EXAM_EDITOR' | 'CHANGE_PASSWORD' | 'MATERIAL_MANAGER';

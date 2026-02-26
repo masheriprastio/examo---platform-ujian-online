@@ -25,3 +25,12 @@ dist-ssr
 
 SUPABASE_SCHEMA.sql
 .php-backend/*
+
+CREATE_USERS_TABLE.sql
+FIX_ADMIN_LOGIN_SOLUTION.md
+add_admin_fixed.js
+add_admin_to_supabase.js
+check_supabase.js
+fix_admin_constraint.js
+fix_constraint_sql.sql
+verify_fix.js
