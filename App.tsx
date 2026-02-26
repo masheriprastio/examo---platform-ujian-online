@@ -370,21 +370,30 @@ export default function App() {
       setIsFetching(true);
       try {
         // Fetch all data in parallel to reduce network round trips
-        const [examsRes, resultsRes, roomsRes] = await Promise.all([
+        const [examsRes, resultsRes, roomsRes, usersRes] = await Promise.all([
           supabase.from('exams').select('*').order('created_at', { ascending: false }),
           supabase.from('exam_results').select('*'),
-          supabase.from('exam_rooms').select('*')
+          supabase.from('exam_rooms').select('*'),
+          supabase.from('users').select('*')
         ]);
 
         // 1. Process Exams
         let mappedExams: Exam[] = [];
         if (examsRes.data && !examsRes.error) {
           mappedExams = examsRes.data.map((e: any) => ({
-            ...e,
-            durationMinutes: e.duration_minutes,
+            id: e.id,
+            title: e.title,
+            description: e.description,
+            durationMinutes: e.duration_minutes || e.durationMinutes || 60,
+            category: e.category,
+            status: e.status,
             createdAt: e.created_at,
             startDate: e.start_date,
-            endDate: e.end_date
+            endDate: e.end_date,
+            questions: e.questions || [],
+            examToken: e.exam_token,
+            requireToken: e.require_token || false,
+            roomId: e.room_id
           }));
           setExams(mappedExams);
           setBankQuestions(mappedExams.flatMap(e => e.questions || []));
@@ -394,18 +403,22 @@ export default function App() {
         let mappedResults: ExamResult[] = [];
         if (resultsRes.data && !resultsRes.error) {
           mappedResults = resultsRes.data.map((r: any) => ({
-             ...r,
+             id: r.id,
              examId: r.exam_id,
              studentId: r.student_id,
              studentName: r.student_name || 'Unknown',
-             totalPointsPossible: r.total_points_possible,
-             pointsObtained: r.points_obtained,
-             totalQuestions: r.total_questions,
-             correctCount: r.correct_count,
-             incorrectCount: r.incorrect_count,
-             unansweredCount: r.unanswered_count,
-             submittedAt: r.submitted_at,
+             score: r.score || 0,
+             status: r.status || 'in_progress',
+             totalPointsPossible: r.total_points_possible || 0,
+             pointsObtained: r.points_obtained || 0,
+             totalQuestions: r.total_questions || 0,
+             correctCount: r.correct_count || 0,
+             incorrectCount: r.incorrect_count || 0,
+             unansweredCount: r.unanswered_count || 0,
              startedAt: r.started_at,
+             submittedAt: r.submitted_at,
+             answers: r.answers || {},
+             logs: r.logs || [],
              violation_alert: Array.isArray(r.logs) && r.logs.some((l: any) => l.event === 'tab_blur' || l.event === 'violation_disqualified')
           }));
           setResults(mappedResults);
@@ -420,8 +433,20 @@ export default function App() {
                 capacity: r.capacity,
                 status: r.status,
                 supervisorId: r.supervisor_id,
-                location: r.location
+                location: r.location,
+                createdAt: r.created_at || new Date().toISOString(),
+                updatedAt: r.updated_at || new Date().toISOString()
             })));
+        }
+
+        // 4. Process Users (Students and Teachers)
+        if (usersRes.data && !usersRes.error) {
+            const users = usersRes.data as User[];
+            const studentsData = users.filter(u => u.role === 'student');
+            const teachersData = users.filter(u => u.role === 'teacher');
+            
+            setStudents(studentsData);
+            setTeachers(teachersData);
         }
 
         return { exams: mappedExams, results: mappedResults };
