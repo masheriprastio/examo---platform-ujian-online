@@ -390,7 +390,16 @@ export default function App() {
             createdAt: e.created_at,
             startDate: e.start_date,
             endDate: e.end_date,
-            questions: e.questions || [],
+            // Ensure questions is always an array (DB may return JSON string)
+            questions: (() => {
+              if (!e.questions) return [];
+              if (Array.isArray(e.questions)) return e.questions;
+              try {
+                return JSON.parse(e.questions);
+              } catch {
+                return [];
+              }
+            })(),
             examToken: e.exam_token,
             requireToken: e.require_token || false,
             roomId: e.room_id
@@ -725,7 +734,9 @@ export default function App() {
                    capacity: newRoom.capacity,
                    status: newRoom.status,
                    supervisorId: newRoom.supervisor_id,
-                   location: newRoom.location
+                   location: newRoom.location,
+                   createdAt: newRoom.created_at || new Date().toISOString(),
+                   updatedAt: newRoom.updated_at || new Date().toISOString()
                };
                setExamRooms(prev => {
                    if (prev.find(r => r.id === mappedRoom.id)) return prev;
@@ -740,7 +751,9 @@ export default function App() {
                    capacity: updated.capacity,
                    status: updated.status,
                    supervisorId: updated.supervisor_id,
-                   location: updated.location
+                   location: updated.location,
+                   createdAt: updated.created_at || new Date().toISOString(),
+                   updatedAt: updated.updated_at || new Date().toISOString()
                };
                setExamRooms(prev => prev.map(r => r.id === mappedRoom.id ? mappedRoom : r));
            } else if (payload.event === 'DELETE') {
