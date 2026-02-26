@@ -475,10 +475,10 @@ export default function App() {
     }
   }, [view]);
 
-  // Fetch Students (only if Teacher logged in)
+  // Fetch Students (if Teacher or Admin logged in)
   useEffect(() => {
      const fetchStudents = async () => {
-        if (currentUser?.role === 'teacher' && isSupabaseConfigured && supabase) {
+        if ((currentUser?.role === 'teacher' || currentUser?.role === 'admin') && isSupabaseConfigured && supabase) {
             const { data, error } = await supabase.from('users').select('*').eq('role', 'student');
             if (data && !error) {
                 setStudents(data as User[]);
@@ -488,10 +488,10 @@ export default function App() {
      fetchStudents();
   }, [currentUser]);
 
-  // Fetch Teachers (only if Teacher/Admin logged in - for now handled by teachers state)
+  // Fetch Teachers (if Teacher or Admin logged in)
   useEffect(() => {
      const fetchTeachers = async () => {
-        if (currentUser?.role === 'teacher' && isSupabaseConfigured && supabase) {
+        if ((currentUser?.role === 'teacher' || currentUser?.role === 'admin') && isSupabaseConfigured && supabase) {
             const { data, error } = await supabase.from('users').select('*').eq('role', 'teacher');
             if (data && !error) {
                 setTeachers(data as User[]);
