@@ -298,6 +298,7 @@ export default function App() {
   // State for server error handling
   const [isOffline, setIsOffline] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  const [isFetching, setIsFetching] = useState(true);
 
   // Session Timeout & Warning State
   const [showTimeoutWarning, setShowTimeoutWarning] = useState(false);
@@ -361,8 +362,12 @@ export default function App() {
 
     // Load Data from Supabase. Returns fetched exams and results for callers to act on.
     const fetchData = async () => {
-      if (!isSupabaseConfigured || !supabase) return { exams: null as any, results: null as any };
+      if (!isSupabaseConfigured || !supabase) {
+          setIsFetching(false);
+          return { exams: null as any, results: null as any };
+      }
 
+      setIsFetching(true);
       try {
         // Fetch all data in parallel to reduce network round trips
         const [examsRes, resultsRes, roomsRes] = await Promise.all([
@@ -423,6 +428,8 @@ export default function App() {
       } catch (err) {
         console.error("Failed to fetch data from Supabase:", err);
         return { exams: null as any, results: null as any };
+      } finally {
+        setIsFetching(false);
       }
     };
 
@@ -507,22 +514,23 @@ export default function App() {
      fetchTeachers();
   }, [currentUser]);
 
-  // Realtime Violation Monitoring for Teacher
+  // Realtime Subscriptions for Teacher (Results, Exams, Users, ExamRooms)
   useEffect(() => {
-    if (currentUser?.role !== 'teacher' || !isSupabaseConfigured || !supabase) return;
+    if ((currentUser?.role !== 'teacher' && currentUser?.role !== 'admin') || !isSupabaseConfigured || !supabase) return;
 
     // Request Notification Permission
     if (Notification.permission !== 'granted') {
       Notification.requestPermission();
     }
 
-    const channel = supabase
-      .channel('schema-db-changes')
+    // --- Channel 1: Exam Results (Violations & Submissions) ---
+    const resultsChannel = supabase
+      .channel('schema-db-changes-results')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'exam_results' },
         (payload: any) => { // Cast payload to any to resolve TS errors temporarily
-          console.log('Realtime update received:', payload);
+          console.log('Realtime Exam Result update received:', payload);
           
           if (payload.event === 'INSERT') {
             const newRes = payload.new as any;
@@ -594,8 +602,134 @@ export default function App() {
       )
       .subscribe();
 
+    // --- Channel 2: Exams (New Exam, Updated Exam, Deleted Exam) ---
+    const examsChannel = supabase
+      .channel('schema-db-changes-exams')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'exams' },
+        (payload: any) => {
+          console.log('Realtime Exam update received:', payload);
+
+          if (payload.event === 'INSERT') {
+            const newExam = payload.new as any;
+            const mappedExam: Exam = {
+               ...newExam,
+               durationMinutes: newExam.duration_minutes,
+               createdAt: newExam.created_at,
+               startDate: newExam.start_date,
+               endDate: newExam.end_date
+            };
+            setExams(prev => {
+                if (prev.find(e => e.id === mappedExam.id)) return prev;
+                return [mappedExam, ...prev];
+            });
+            notify(`Ujian baru ditambahkan: ${mappedExam.title}`, 'info');
+          }
+          else if (payload.event === 'UPDATE') {
+            const updated = payload.new as any;
+            const mappedExam: Exam = {
+               ...updated,
+               durationMinutes: updated.duration_minutes,
+               createdAt: updated.created_at,
+               startDate: updated.start_date,
+               endDate: updated.end_date
+            };
+            setExams(prev => prev.map(e => e.id === mappedExam.id ? mappedExam : e));
+          }
+          else if (payload.event === 'DELETE') {
+            setExams(prev => prev.filter(e => e.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
+
+    // --- Channel 3: Users (Students & Teachers) ---
+    const usersChannel = supabase
+      .channel('schema-db-changes-users')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'users' },
+        (payload: any) => {
+           console.log('Realtime User update received:', payload);
+
+           if (payload.event === 'INSERT') {
+               const newUser = payload.new as User;
+               if (newUser.role === 'student') {
+                   setStudents(prev => {
+                       if (prev.find(s => s.id === newUser.id)) return prev;
+                       return [newUser, ...prev];
+                   });
+               } else if (newUser.role === 'teacher') {
+                   setTeachers(prev => {
+                       if (prev.find(t => t.id === newUser.id)) return prev;
+                       return [newUser, ...prev];
+                   });
+               }
+           } else if (payload.event === 'UPDATE') {
+               const updatedUser = payload.new as User;
+               if (updatedUser.role === 'student') {
+                   setStudents(prev => prev.map(s => s.id === updatedUser.id ? updatedUser : s));
+               } else if (updatedUser.role === 'teacher') {
+                   setTeachers(prev => prev.map(t => t.id === updatedUser.id ? updatedUser : t));
+               }
+           } else if (payload.event === 'DELETE') {
+               const deletedId = payload.old.id;
+               setStudents(prev => prev.filter(s => s.id !== deletedId));
+               setTeachers(prev => prev.filter(t => t.id !== deletedId));
+           }
+        }
+      )
+      .subscribe();
+
+    // --- Channel 4: Exam Rooms ---
+    const roomsChannel = supabase
+      .channel('schema-db-changes-rooms')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'exam_rooms' },
+        (payload: any) => {
+           console.log('Realtime Room update received:', payload);
+
+           if (payload.event === 'INSERT') {
+               const newRoom = payload.new as any;
+               const mappedRoom: ExamRoom = {
+                   id: newRoom.id,
+                   name: newRoom.name,
+                   description: newRoom.description,
+                   capacity: newRoom.capacity,
+                   status: newRoom.status,
+                   supervisorId: newRoom.supervisor_id,
+                   location: newRoom.location
+               };
+               setExamRooms(prev => {
+                   if (prev.find(r => r.id === mappedRoom.id)) return prev;
+                   return [mappedRoom, ...prev];
+               });
+           } else if (payload.event === 'UPDATE') {
+               const updated = payload.new as any;
+               const mappedRoom: ExamRoom = {
+                   id: updated.id,
+                   name: updated.name,
+                   description: updated.description,
+                   capacity: updated.capacity,
+                   status: updated.status,
+                   supervisorId: updated.supervisor_id,
+                   location: updated.location
+               };
+               setExamRooms(prev => prev.map(r => r.id === mappedRoom.id ? mappedRoom : r));
+           } else if (payload.event === 'DELETE') {
+               setExamRooms(prev => prev.filter(r => r.id !== payload.old.id));
+           }
+        }
+      )
+      .subscribe();
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(resultsChannel);
+      supabase.removeChannel(examsChannel);
+      supabase.removeChannel(usersChannel);
+      supabase.removeChannel(roomsChannel);
     };
   }, [currentUser]);
 
@@ -2071,7 +2205,7 @@ export default function App() {
                 )}
               </div>
             ) : view === 'TEACHER_BANK' ? (
-              <QuestionBank questions={bankQuestions} onUpdate={setBankQuestions} />
+              <QuestionBank questions={bankQuestions} onUpdate={setBankQuestions} isLoading={isFetching} />
             ) : view === 'TEACHER_EXAM_ROOM' ? (
               <div className="max-w-6xl mx-auto animate-in fade-in pb-20">
                   <ExamRoomManager
