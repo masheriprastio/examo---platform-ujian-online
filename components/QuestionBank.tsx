@@ -199,7 +199,6 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions = [], onUpdate })
                   </div>
                   <div className="flex gap-2 shrink-0">
                     <button onClick={() => setEditingQuestion(q)} className="p-2 text-indigo-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"><Edit2 className="w-4 h-4" /></button>
-                    <button onClick={() => setQuestionToDelete(q.id)} className="p-2 text-red-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"><Trash2 className="w-4 h-4" /></button>
                   </div>
                 </div>
                 <div className="font-bold text-gray-800 line-clamp-2 mb-2 pl-7 md:pl-0" dangerouslySetInnerHTML={{ __html: q.text || '(Tanpa Teks Soal)' }} />
