@@ -260,10 +260,10 @@ export default function App() {
     }
   }, [currentUser, view]);
 
-  // State Initialization: Use Mocks only if Supabase is NOT configured
-  const [exams, setExams] = useState<Exam[]>(isSupabaseConfigured ? [] : MOCK_EXAMS);
-  const [bankQuestions, setBankQuestions] = useState<Question[]>(isSupabaseConfigured ? [] : MOCK_EXAMS.flatMap(e => e.questions));
-  const [examRooms, setExamRooms] = useState<ExamRoom[]>(isSupabaseConfigured ? [] : MOCK_EXAM_ROOMS);
+  // State Initialization: Use Mocks as fallback default for consistency
+  const [exams, setExams] = useState<Exam[]>(MOCK_EXAMS);
+  const [bankQuestions, setBankQuestions] = useState<Question[]>(MOCK_EXAMS.flatMap(e => e.questions));
+  const [examRooms, setExamRooms] = useState<ExamRoom[]>(MOCK_EXAM_ROOMS);
   const [students, setStudents] = useState<User[]>(isSupabaseConfigured ? [] : [MOCK_STUDENT]);
   const [teachers, setTeachers] = useState<User[]>(isSupabaseConfigured ? [] : [MOCK_TEACHER]); // New teacher state
   const [results, setResults] = useState<ExamResult[]>([]);
