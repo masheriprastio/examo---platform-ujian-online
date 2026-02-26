@@ -35,3 +35,7 @@ fix_admin_constraint.js
 fix_constraint_sql.sql
 verify_fix.js
 EXAM_ROOMS_SCHEMA.sql
+
+create_exam_rooms_table.js
+fix_exam_rooms_data.js
+update_exam_rooms_logic.js
