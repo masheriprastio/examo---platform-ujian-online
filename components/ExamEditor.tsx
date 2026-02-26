@@ -108,7 +108,8 @@ const recoverBackup = (examId: string, fallback: Exam): Exam => {
 // Helper function untuk upload image ke Supabase Storage
 const uploadImageToSupabase = async (file: File, examId: string): Promise<string> => {
   try {
-    const fileName = `exams/${examId}/${Date.now()}_${file.name}`;
+    const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const fileName = `exams/${examId}/${Date.now()}_${sanitizedName}`;
     
     const { data: uploadData, error: uploadError } = await supabase
       .storage
@@ -333,6 +334,10 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
       setUploadMode(prev => ({ ...prev, [qId]: mode }));
   };
 
+  const toggleOptionUploadMode = (key: string, mode: 'url' | 'file') => {
+      setOptionUploadMode(prev => ({ ...prev, [key]: mode }));
+  };
+
   const handleOptionChange = (qIndex: number, oIndex: number, value: string) => {
     const newQuestions = [...formData.questions];
     const newOptions = [...newQuestions[qIndex].options!];
@@ -353,7 +358,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     setFormData(prev => ({ ...prev, questions: newQuestions }));
   };
 
-  const handleOptionFileUpload = (qIndex: number, oIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleOptionFileUpload = async (qIndex: number, oIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 15 * 1024 * 1024) { // 15MB limit
@@ -362,12 +367,21 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         return;
       }
 
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        handleOptionAttachmentChange(qIndex, oIndex, reader.result as string);
-        e.target.value = ''; // Reset input after successful upload
-      };
-      reader.readAsDataURL(file);
+      try {
+        // Show loading state
+        handleOptionAttachmentChange(qIndex, oIndex, 'uploading...');
+
+        // Upload to Supabase Storage
+        const publicUrl = await uploadImageToSupabase(file, formData.id);
+        handleOptionAttachmentChange(qIndex, oIndex, publicUrl);
+      } catch (error) {
+        console.error('Option image upload failed:', error);
+        alert(`Gagal upload gambar opsi: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        // Reset on error
+        handleOptionAttachmentChange(qIndex, oIndex, '');
+      } finally {
+        e.target.value = ''; // Reset input
+      }
     }
   };
 
@@ -852,6 +866,68 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                   />
                                 </div>
 
+                                <div className="mt-2">
+                                  <div className="flex justify-between items-center mb-1">
+                                    <label className="text-[10px] font-black text-gray-400 uppercase flex items-center gap-2">
+                                        <ImageIcon className="w-3 h-3" /> Lampiran Gambar (Opsional)
+                                    </label>
+                                    <div className="flex bg-gray-100 rounded-lg p-0.5">
+                                        <button
+                                          onClick={() => toggleOptionUploadMode(`${q.id}_${oIndex}`, 'url')}
+                                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${(!optionUploadMode[`${q.id}_${oIndex}`] || optionUploadMode[`${q.id}_${oIndex}`] === 'url') ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                                        >
+                                          <LinkIcon className="w-3 h-3" /> URL
+                                        </button>
+                                        <button
+                                          onClick={() => toggleOptionUploadMode(`${q.id}_${oIndex}`, 'file')}
+                                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${optionUploadMode[`${q.id}_${oIndex}`] === 'file' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                                        >
+                                          <Upload className="w-3 h-3" /> Upload
+                                        </button>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex gap-2 items-start">
+                                      {(!optionUploadMode[`${q.id}_${oIndex}`] || optionUploadMode[`${q.id}_${oIndex}`] === 'url') ? (
+                                          <input
+                                              type="text"
+                                              value={q.optionAttachments?.[oIndex]?.url || ''}
+                                              onChange={(e) => handleOptionAttachmentChange(qIndex, oIndex, e.target.value)}
+                                              placeholder="https://example.com/image.jpg"
+                                              className="flex-1 px-3 py-2 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-xs font-bold outline-none"
+                                          />
+                                      ) : (
+                                          <div className="flex-1 relative">
+                                              <input
+                                                  type="file"
+                                                  accept="image/*"
+                                                  onChange={(e) => handleOptionFileUpload(qIndex, oIndex, e)}
+                                                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                              />
+                                              <div className="w-full px-3 py-2 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-center hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-gray-400 font-bold text-xs">
+                                                  <Upload className="w-3 h-3" />
+                                                  {q.optionAttachments?.[oIndex]?.url === 'uploading...' ? 'Mengunggah...' : 'Klik untuk Upload'}
+                                              </div>
+                                          </div>
+                                      )}
+
+                                      {q.optionAttachments?.[oIndex]?.url && (
+                                          <div className="relative group shrink-0">
+                                              <div className="w-10 h-10 rounded-lg bg-gray-200 border border-gray-300 overflow-hidden">
+                                                  <img src={q.optionAttachments[oIndex]?.url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
+                                              </div>
+                                              <button
+                                                onClick={() => handleOptionAttachmentChange(qIndex, oIndex, '')}
+                                                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                                title="Hapus Gambar"
+                                              >
+                                                <X className="w-3 h-3" />
+                                              </button>
+                                          </div>
+                                      )}
+                                  </div>
+                                </div>
+
                                 {/* Delete Option Button - KEDUA */}
                                 {(q.options?.length || 0) > 2 && (
                                   <button
@@ -945,6 +1021,68 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                     placeholder={`Masukkan teks untuk pilihan ${String.fromCharCode(65 + oIndex)}...`}
                                     height="120px"
                                   />
+                                </div>
+
+                                <div className="mt-2">
+                                  <div className="flex justify-between items-center mb-1">
+                                    <label className="text-[10px] font-black text-gray-400 uppercase flex items-center gap-2">
+                                        <ImageIcon className="w-3 h-3" /> Lampiran Gambar (Opsional)
+                                    </label>
+                                    <div className="flex bg-gray-100 rounded-lg p-0.5">
+                                        <button
+                                          onClick={() => toggleOptionUploadMode(`${q.id}_${oIndex}`, 'url')}
+                                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${(!optionUploadMode[`${q.id}_${oIndex}`] || optionUploadMode[`${q.id}_${oIndex}`] === 'url') ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                                        >
+                                          <LinkIcon className="w-3 h-3" /> URL
+                                        </button>
+                                        <button
+                                          onClick={() => toggleOptionUploadMode(`${q.id}_${oIndex}`, 'file')}
+                                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${optionUploadMode[`${q.id}_${oIndex}`] === 'file' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                                        >
+                                          <Upload className="w-3 h-3" /> Upload
+                                        </button>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex gap-2 items-start">
+                                      {(!optionUploadMode[`${q.id}_${oIndex}`] || optionUploadMode[`${q.id}_${oIndex}`] === 'url') ? (
+                                          <input
+                                              type="text"
+                                              value={q.optionAttachments?.[oIndex]?.url || ''}
+                                              onChange={(e) => handleOptionAttachmentChange(qIndex, oIndex, e.target.value)}
+                                              placeholder="https://example.com/image.jpg"
+                                              className="flex-1 px-3 py-2 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-xs font-bold outline-none"
+                                          />
+                                      ) : (
+                                          <div className="flex-1 relative">
+                                              <input
+                                                  type="file"
+                                                  accept="image/*"
+                                                  onChange={(e) => handleOptionFileUpload(qIndex, oIndex, e)}
+                                                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                              />
+                                              <div className="w-full px-3 py-2 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-center hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-gray-400 font-bold text-xs">
+                                                  <Upload className="w-3 h-3" />
+                                                  {q.optionAttachments?.[oIndex]?.url === 'uploading...' ? 'Mengunggah...' : 'Klik untuk Upload'}
+                                              </div>
+                                          </div>
+                                      )}
+
+                                      {q.optionAttachments?.[oIndex]?.url && (
+                                          <div className="relative group shrink-0">
+                                              <div className="w-10 h-10 rounded-lg bg-gray-200 border border-gray-300 overflow-hidden">
+                                                  <img src={q.optionAttachments[oIndex]?.url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
+                                              </div>
+                                              <button
+                                                onClick={() => handleOptionAttachmentChange(qIndex, oIndex, '')}
+                                                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                                title="Hapus Gambar"
+                                              >
+                                                <X className="w-3 h-3" />
+                                              </button>
+                                          </div>
+                                      )}
+                                  </div>
                                 </div>
 
                                 {/* Delete Option Button - KEDUA */}
