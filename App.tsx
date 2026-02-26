@@ -381,12 +381,18 @@ export default function App() {
         let mappedExams: Exam[] = [];
         if (examsRes.data && !examsRes.error) {
           mappedExams = examsRes.data.map((e: any) => ({
-            id: e.id,
+            id: String(e.id),
             title: e.title,
             description: e.description,
             durationMinutes: e.duration_minutes || e.durationMinutes || 60,
             category: e.category,
-            status: e.status,
+            // Normalize status to lowercase trimmed string (handle variants like "Publish"/"PUBLISHED")
+            status: (() => {
+              const s = (e.status || '').toString().toLowerCase().trim();
+              if (s === 'published' || s === 'active' || s === 'draft') return s;
+              if (s === 'publish') return 'published';
+              return e.status;
+            })(),
             createdAt: e.created_at,
             startDate: e.start_date,
             endDate: e.end_date,
@@ -402,7 +408,7 @@ export default function App() {
             })(),
             examToken: e.exam_token,
             requireToken: e.require_token || false,
-            roomId: e.room_id
+            roomId: String(e.room_id)
           }));
           setExams(mappedExams);
           setBankQuestions(mappedExams.flatMap(e => e.questions || []));
@@ -436,7 +442,7 @@ export default function App() {
         // 3. Process Exam Rooms
         if (roomsRes.data && !roomsRes.error) {
             setExamRooms(roomsRes.data.map((r: any) => ({
-                id: r.id,
+                id: String(r.id),
                 name: r.name,
                 description: r.description,
                 capacity: r.capacity,
@@ -569,9 +575,10 @@ export default function App() {
           if (payload.event === 'INSERT') {
             const newRes = payload.new as any;
             const mapped = {
+               id: String(newRes.id),
                ...newRes,
-               examId: newRes.exam_id,
-               studentId: newRes.student_id,
+               examId: String(newRes.exam_id),
+               studentId: String(newRes.student_id),
                studentName: newRes.student_name,
                totalPointsPossible: newRes.total_points_possible,
                pointsObtained: newRes.points_obtained,
@@ -591,9 +598,10 @@ export default function App() {
           else if (payload.event === 'UPDATE') {
             const newRecord = payload.new as any;
             const mapped = {
+               id: String(newRecord.id),
                ...newRecord,
-               examId: newRecord.exam_id,
-               studentId: newRecord.student_id,
+               examId: String(newRecord.exam_id),
+               studentId: String(newRecord.student_id),
                studentName: newRecord.student_name,
                totalPointsPossible: newRecord.total_points_possible,
                pointsObtained: newRecord.points_obtained,
@@ -645,17 +653,25 @@ export default function App() {
         (payload: any) => {
           console.log('Realtime Exam update received:', payload);
 
-          if (payload.event === 'INSERT') {
+            if (payload.event === 'INSERT') {
             const newExam = payload.new as any;
             const mappedExam: Exam = {
                ...newExam,
+               id: String(newExam.id),
                durationMinutes: newExam.duration_minutes,
+               // Normalize status
+               status: (() => {
+                 const s = (newExam.status || '').toString().toLowerCase().trim();
+                 if (s === 'published' || s === 'active' || s === 'draft') return s;
+                 if (s === 'publish') return 'published';
+                 return newExam.status;
+               })(),
                createdAt: newExam.created_at,
                startDate: newExam.start_date,
                endDate: newExam.end_date
             };
             setExams(prev => {
-                if (prev.find(e => e.id === mappedExam.id)) return prev;
+                if (prev.find(e => String(e.id) === mappedExam.id)) return prev;
                 return [mappedExam, ...prev];
             });
             notify(`Ujian baru ditambahkan: ${mappedExam.title}`, 'info');
@@ -664,12 +680,20 @@ export default function App() {
             const updated = payload.new as any;
             const mappedExam: Exam = {
                ...updated,
+               id: String(updated.id),
                durationMinutes: updated.duration_minutes,
+               // Normalize status
+               status: (() => {
+                 const s = (updated.status || '').toString().toLowerCase().trim();
+                 if (s === 'published' || s === 'active' || s === 'draft') return s;
+                 if (s === 'publish') return 'published';
+                 return updated.status;
+               })(),
                createdAt: updated.created_at,
                startDate: updated.start_date,
                endDate: updated.end_date
             };
-            setExams(prev => prev.map(e => e.id === mappedExam.id ? mappedExam : e));
+            setExams(prev => prev.map(e => String(e.id) === mappedExam.id ? mappedExam : e));
           }
           else if (payload.event === 'DELETE') {
             setExams(prev => prev.filter(e => e.id !== payload.old.id));
@@ -728,7 +752,7 @@ export default function App() {
            if (payload.event === 'INSERT') {
                const newRoom = payload.new as any;
                const mappedRoom: ExamRoom = {
-                   id: newRoom.id,
+                   id: String(newRoom.id),
                    name: newRoom.name,
                    description: newRoom.description,
                    capacity: newRoom.capacity,
@@ -739,13 +763,13 @@ export default function App() {
                    updatedAt: newRoom.updated_at || new Date().toISOString()
                };
                setExamRooms(prev => {
-                   if (prev.find(r => r.id === mappedRoom.id)) return prev;
+                   if (prev.find(r => String(r.id) === mappedRoom.id)) return prev;
                    return [mappedRoom, ...prev];
                });
            } else if (payload.event === 'UPDATE') {
                const updated = payload.new as any;
                const mappedRoom: ExamRoom = {
-                   id: updated.id,
+                   id: String(updated.id),
                    name: updated.name,
                    description: updated.description,
                    capacity: updated.capacity,
@@ -755,9 +779,9 @@ export default function App() {
                    createdAt: updated.created_at || new Date().toISOString(),
                    updatedAt: updated.updated_at || new Date().toISOString()
                };
-               setExamRooms(prev => prev.map(r => r.id === mappedRoom.id ? mappedRoom : r));
+               setExamRooms(prev => prev.map(r => String(r.id) === mappedRoom.id ? mappedRoom : r));
            } else if (payload.event === 'DELETE') {
-               setExamRooms(prev => prev.filter(r => r.id !== payload.old.id));
+               setExamRooms(prev => prev.filter(r => String(r.id) !== String(payload.old.id)));
            }
         }
       )
@@ -2656,12 +2680,12 @@ export default function App() {
                 </div>
                 <h2 className="text-2xl font-black text-gray-900 mb-8 tracking-tight">Ujian Tersedia</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
-                  {exams.filter(e => e.status === 'published').length === 0 ? (
+                  {exams.filter(e => ['published','active'].includes(e.status)).length === 0 ? (
                     <div className="col-span-full text-center py-20 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
                       <p className="text-gray-400 font-medium">Belum ada ujian yang tersedia saat ini.</p>
                       <button onClick={fetchData} className="mt-4 text-indigo-600 font-bold hover:underline">Coba Segarkan</button>
                     </div>
-                  ) : exams.filter(e => e.status === 'published').map(e => {
+                  ) : exams.filter(e => ['published','active'].includes(e.status)).map(e => {
                     const progress = results.find(r => r.examId === e.id && r.studentId === currentUser?.id);
                     const isTaken = progress?.status === 'completed';
                     const isInProgress = progress?.status === 'in_progress';
