@@ -48,6 +48,19 @@ export interface Question {
   };
 }
 
+export interface ExamRoom {
+  id: string;
+  name: string;
+  description?: string;
+  capacity: number;
+  supervisorId: string;
+  supervisorName?: string; // Nama guru yang mengawas
+  location?: string;
+  status: 'available' | 'occupied' | 'maintenance';
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Exam {
   id: string;
   title: string;
@@ -62,6 +75,8 @@ export interface Exam {
   endDate?: string;
   examToken?: string; // Token untuk memulai ujian
   requireToken?: boolean; // Apakah ujian memerlukan token
+  roomId?: string; // ID ruang ujian
+  room?: ExamRoom; // Data ruang ujian lengkap (optional)
 }
 
 export interface ExamLog {
@@ -88,16 +103,6 @@ export interface ExamResult {
   answers: Record<string, any>;
   logs: ExamLog[];
   violation_alert?: boolean;
-}
-
-export interface ExamRoom {
-  id: string;
-  name: string;
-  description?: string;
-  capacity: number;
-  status: 'available' | 'occupied'; // Tersedia | Terisi (No 'maintenance' as per request)
-  supervisorId: string; // Teacher ID
-  location?: string;
 }
 
 export interface Material {

@@ -328,4 +328,241 @@ const QuestionEditor: React.FC<{ question: Question, onSave: (q: Question) => vo
         <div className="max-w-4xl mx-auto space-y-6 md:space-y-10">
           <div className="bg-white p-6 md:p-10 rounded-[30px] shadow-sm border border-gray-100 space-y-6">
             <div>
-              <label className="block text-xs font
+              <label className="block text-xs font-bold text-gray-400 mb-2">Teks Soal</label>
+              <RichTextEditor
+                value={formData.text || ''}
+                onChange={(val) => handleChange('text', val)}
+                placeholder="Masukkan teks soal..."
+                className="min-h-[120px] bg-gray-50 border-gray-100 focus:border-indigo-500"
+              />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-400 mb-2">Tipe Soal</label>
+                <select
+                  value={formData.type}
+                  onChange={(e) => handleChange('type', e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold text-gray-700"
+                >
+                  <option value="mcq">Pilihan Ganda</option>
+                  <option value="multiple_select">Pilihan Ganda (Banyak)</option>
+                  <option value="true_false">Benar / Salah</option>
+                  <option value="short_answer">Isian Singkat</option>
+                  <option value="essay">Esai</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-400 mb-2">Topik</label>
+                <input
+                  type="text"
+                  value={formData.topic || ''}
+                  onChange={(e) => handleChange('topic', e.target.value)}
+                  placeholder="Matematika, IPA, dll."
+                  className="w-full px-4 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold text-gray-700"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-400 mb-2">Poin</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={formData.points}
+                  onChange={(e) => handleChange('points', parseInt(e.target.value, 10) || 1)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold text-gray-700"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-400 mb-2">Kesulitan</label>
+                <select
+                  value={formData.difficulty}
+                  onChange={(e) => handleChange('difficulty', e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold text-gray-700"
+                >
+                  <option value="easy">Mudah</option>
+                  <option value="medium">Sedang</option>
+                  <option value="hard">Sulit</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-400 mb-2">Acak Opsi</label>
+                <select
+                  value={formData.randomizeOptions ? 'yes' : 'no'}
+                  onChange={(e) => handleChange('randomizeOptions', e.target.value === 'yes')}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold text-gray-700"
+                >
+                  <option value="no">Tidak</option>
+                  <option value="yes">Ya</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-400 mb-2">Jawaban Benar</label>
+                <select
+                  value={formData.correctAnswerIndex?.toString() || '0'}
+                  onChange={(e) => handleChange('correctAnswerIndex', parseInt(e.target.value, 10))}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold text-gray-700"
+                >
+                  {Array.from({ length: formData.options?.length || 4 }, (_, i) => (
+                    <option key={i} value={i.toString()}>{i + 1}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-400 mb-2">Lampiran Soal</label>
+              <div className="flex gap-2 mb-2">
+                <button
+                  onClick={() => setUploadMode('url')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold ${uploadMode === 'url' ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100 text-gray-500'}`}
+                >
+                  URL
+                </button>
+                <button
+                  onClick={() => setUploadMode('file')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold ${uploadMode === 'file' ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100 text-gray-500'}`}
+                >
+                  File
+                </button>
+              </div>
+              {uploadMode === 'url' ? (
+                <input
+                  type="url"
+                  value={formData.attachment?.url || ''}
+                  onChange={(e) => handleAttachmentChange(e.target.value)}
+                  placeholder="https://..."
+                  className="w-full px-4 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold text-gray-700"
+                />
+              ) : (
+                <div className="flex items-center gap-3">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    id="file-upload"
+                  />
+                  <label htmlFor="file-upload" className="flex items-center gap-2 px-4 py-3 border-2 border-dashed border-gray-200 rounded-xl cursor-pointer hover:border-indigo-300 transition">
+                    <Upload className="w-5 h-5 text-gray-400" />
+                    <span className="text-sm font-bold text-gray-500">Pilih File</span>
+                  </label>
+                  {formData.attachment?.url && (
+                    <div className="flex items-center gap-2 text-sm text-gray-500">
+                      <ImageIcon className="w-4 h-4" />
+                      <span>File terpilih</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            {formData.attachment?.url && (
+              <div className="mt-4">
+                <img src={formData.attachment.url} alt="Attachment" className="max-w-full h-auto rounded-lg border border-gray-100" />
+              </div>
+            )}
+          </div>
+
+          {formData.type !== 'essay' && (
+            <div className="bg-white p-6 md:p-10 rounded-[30px] shadow-sm border border-gray-100 space-y-6">
+              <div className="flex justify-between items-center">
+                <h3 className="text-lg font-black text-gray-900">Opsi Jawaban</h3>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setFormData(prev => ({ ...prev, options: [...(prev.options || []), ''], optionAttachments: [...(prev.optionAttachments || []), undefined] }))}
+                    className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-100 transition text-sm"
+                  >
+                    + Tambah Opsi
+                  </button>
+                  <button
+                    onClick={() => {
+                      const opts = formData.options?.slice(0, -1) || [];
+                      const atts = formData.optionAttachments?.slice(0, -1) || [];
+                      setFormData(prev => ({ ...prev, options: opts, optionAttachments: atts }));
+                    }}
+                    disabled={(formData.options?.length || 0) <= 2}
+                    className="px-4 py-2 bg-red-50 text-red-600 rounded-xl font-bold hover:bg-red-100 transition text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    - Kurangi Opsi
+                  </button>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {(formData.options || []).map((opt, idx) => (
+                  <div key={idx} className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <label className="text-sm font-bold text-gray-600">Opsi {idx + 1}</label>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setOptionUploadMode(prev => ({ ...prev, [idx]: 'url' }))}
+                          className={`px-2 py-1 rounded text-xs font-bold ${optionUploadMode[idx] === 'url' ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100 text-gray-500'}`}
+                        >
+                          URL
+                        </button>
+                        <button
+                          onClick={() => setOptionUploadMode(prev => ({ ...prev, [idx]: 'file' }))}
+                          className={`px-2 py-1 rounded text-xs font-bold ${optionUploadMode[idx] === 'file' ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100 text-gray-500'}`}
+                        >
+                          File
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex gap-3">
+                      <RichTextEditor
+                        value={opt || ''}
+                        onChange={(val) => handleOptionChange(idx, val)}
+                        placeholder={`Opsi ${idx + 1}...`}
+                        className="flex-1 min-h-[80px] bg-gray-50 border-gray-100 focus:border-indigo-500"
+                      />
+                      {optionUploadMode[idx] === 'url' ? (
+                        <input
+                          type="url"
+                          value={formData.optionAttachments?.[idx]?.url || ''}
+                          onChange={(e) => handleOptionAttachmentChange(idx, e.target.value)}
+                          placeholder="https://..."
+                          className="w-48 px-4 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold text-gray-700"
+                        />
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => handleOptionFileUpload(idx, e)}
+                            className="hidden"
+                            id={`option-file-${idx}`}
+                          />
+                          <label htmlFor={`option-file-${idx}`} className="flex items-center gap-2 px-3 py-2 border-2 border-dashed border-gray-200 rounded-lg cursor-pointer hover:border-indigo-300 transition">
+                            <Upload className="w-4 h-4 text-gray-400" />
+                            <span className="text-xs font-bold text-gray-500">Pilih</span>
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                    {formData.optionAttachments?.[idx]?.url && (
+                      <div className="mt-2">
+                        <img src={formData.optionAttachments[idx].url} alt={`Option ${idx + 1}`} className="max-w-full h-auto rounded-lg border border-gray-100" />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="bg-white p-6 md:p-10 rounded-[30px] shadow-sm border border-gray-100 space-y-6">
+            <div>
+              <label className="block text-xs font-bold text-gray-400 mb-2">Penjelasan Jawaban</label>
+              <RichTextEditor
+                value={formData.explanation || ''}
+                onChange={(val) => handleChange('explanation', val)}
+                placeholder="Berikan penjelasan jawaban yang benar..."
+                className="min-h-[120px] bg-gray-50 border-gray-100 focus:border-indigo-500"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default QuestionBank;
