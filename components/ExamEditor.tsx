@@ -16,7 +16,6 @@ interface ExamEditorProps {
   onCancel: () => void;
   onSaveToBank?: (q: Question) => void;
   onPreview?: (exam: Exam) => void;
-  bankQuestions?: Question[]; // Prop to receive questions from the bank
 }
 
 // Helper function untuk format datetime-local input dengan timezone awareness
@@ -108,15 +107,10 @@ const recoverBackup = (examId: string, fallback: Exam): Exam => {
 
 // Helper function untuk upload image ke Supabase Storage
 const uploadImageToSupabase = async (file: File, examId: string): Promise<string> => {
-  if (!supabase) {
-    throw new Error('Supabase client belum dikonfigurasi. Pastikan environment variables sudah diset.');
-  }
-
   try {
-    // Check file size (Supabase might reject > 5MB via REST if configured, but let's try)
-    const fileName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+    const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const fileName = `exams/${examId}/${Date.now()}_${sanitizedName}`;
     
-    // Ensure bucket exists or handle error gracefully
     const { data: uploadData, error: uploadError } = await supabase
       .storage
       .from('materials')
@@ -126,8 +120,8 @@ const uploadImageToSupabase = async (file: File, examId: string): Promise<string
       });
 
     if (uploadError) {
-      console.error('Storage upload error detail:', uploadError);
-      throw new Error(`Upload gagal: ${uploadError.message} (Code: ${uploadError.name || 'Unknown'})`);
+      console.error('Storage upload error:', uploadError);
+      throw new Error('Failed to upload image: ' + uploadError.message);
     }
 
     // Get public URL
@@ -137,7 +131,7 @@ const uploadImageToSupabase = async (file: File, examId: string): Promise<string
       .getPublicUrl(fileName);
 
     if (!publicUrlData || !publicUrlData.publicUrl) {
-      throw new Error('Gagal mendapatkan URL publik gambar.');
+      throw new Error('Failed to get public URL');
     }
 
     return publicUrlData.publicUrl;
@@ -147,42 +141,7 @@ const uploadImageToSupabase = async (file: File, examId: string): Promise<string
   }
 };
 
-// Helper function to compress image using Canvas (Client-side compression)
-const compressImage = async (file: File, quality = 0.7, maxWidth = 800): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let width = img.width;
-        let height = img.height;
-
-        if (width > maxWidth) {
-          height = (height * maxWidth) / width;
-          width = maxWidth;
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          reject(new Error('Failed to get canvas context'));
-          return;
-        }
-        ctx.drawImage(img, 0, 0, width, height);
-        // Returns Base64 string
-        resolve(canvas.toDataURL(file.type, quality));
-      };
-      img.onerror = (error) => reject(error);
-    };
-    reader.onerror = (error) => reject(error);
-  });
-};
-
-const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveToBank, onPreview, bankQuestions = [] }) => {
+const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveToBank, onPreview }) => {
   // Parse initial dates if they exist, or keep them empty/null
   // Try to recover from backup if available
   const [formData, setFormData] = useState<Exam>(() => recoverBackup(exam.id, exam));
@@ -190,12 +149,9 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   const [questionToDelete, setQuestionToDelete] = useState<string | null>(null);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [uploadMode, setUploadMode] = useState<Record<string, 'url' | 'file'>>({});
+  const [optionUploadMode, setOptionUploadMode] = useState<Record<string, 'url' | 'file'>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [pointsErrors, setPointsErrors] = useState<Record<string, string>>({}); // Track validation errors per question
-  const [showBankImport, setShowBankImport] = useState(false); // State for Bank Import Modal
-  const [selectedBankQuestions, setSelectedBankQuestions] = useState<string[]>([]); // Track selected IDs for import
-  const [bankSearchTerm, setBankSearchTerm] = useState(''); // Search in Bank Modal
-
   const backupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedRef = useRef<string>(JSON.stringify(exam));
 
@@ -241,20 +197,22 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
             }
           }
         }
-
-        // Clean up old backups occasionally
-        if (Math.random() < 0.1) {
-            const keys = Object.keys(localStorage);
-            keys.forEach(key => {
-              if (key.startsWith('exam_draft_') && key !== `exam_draft_${exam.id}`) {
-                try {
-                  localStorage.removeItem(key);
-                } catch (e) {
-                  // Ignore errors
-                }
+        // Check size before saving (rough estimate: 1 char = 1 byte)
+        if (backup.length > 4000000) { // ~4MB limit to be safe
+          // Clear old backups to free space
+          const keys = Object.keys(localStorage);
+          keys.forEach(key => {
+            if (key.startsWith('exam_draft_') && key !== `exam_draft_${exam.id}`) {
+              try {
+                localStorage.removeItem(key);
+              } catch (e) {
+                // Ignore errors
               }
-            });
+            }
+          });
         }
+        
+        localStorage.setItem(`exam_draft_${exam.id}`, backup);
       } catch (e) {
         if (e instanceof DOMException && e.code === 22) {
           // QuotaExceededError - clear all old backups and try again
@@ -299,17 +257,13 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   };
 
   const handleQuestionChange = (qIndex: number, field: keyof Question, value: any) => {
-    setFormData(prev => {
-        const newQuestions = [...prev.questions];
-        if (!newQuestions[qIndex]) return prev;
-
-        newQuestions[qIndex] = {
-            ...newQuestions[qIndex],
-            [field]: value,
-            updatedAt: new Date().toISOString() // Update timestamp setiap ada perubahan
-        };
-        return { ...prev, questions: newQuestions };
-    });
+    const newQuestions = [...formData.questions];
+    newQuestions[qIndex] = { 
+      ...newQuestions[qIndex], 
+      [field]: value,
+      updatedAt: new Date().toISOString() // Update timestamp setiap ada perubahan
+    };
+    setFormData(prev => ({ ...prev, questions: newQuestions }));
   };
 
   // Handler khusus untuk points dengan validasi
@@ -335,21 +289,17 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   };
 
   const handleAttachmentChange = (qIndex: number, url: string) => {
-    setFormData(prev => {
-        const newQuestions = [...prev.questions];
-        if (!newQuestions[qIndex]) return prev;
-
-        if (url) {
-            newQuestions[qIndex] = {
-                ...newQuestions[qIndex],
-                attachment: { type: 'image', url: url, caption: '' }
-            };
-        } else {
-            const { attachment, ...rest } = newQuestions[qIndex];
-            newQuestions[qIndex] = rest;
-        }
-        return { ...prev, questions: newQuestions };
-    });
+    const newQuestions = [...formData.questions];
+    if (url) {
+        newQuestions[qIndex] = {
+            ...newQuestions[qIndex],
+            attachment: { type: 'image', url: url, caption: '' }
+        };
+    } else {
+        const { attachment, ...rest } = newQuestions[qIndex];
+        newQuestions[qIndex] = rest;
+    }
+    setFormData(prev => ({ ...prev, questions: newQuestions }));
   };
 
   const handleFileUpload = async (qIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
@@ -362,38 +312,20 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
 
       try {
         // Show loading state while uploading
-        setFormData(prev => {
-            const newQuestions = [...prev.questions];
-            if (!newQuestions[qIndex]) return prev;
-
-            newQuestions[qIndex] = {
-                ...newQuestions[qIndex],
-                attachment: { type: 'image', url: 'uploading...', caption: '' }
-            };
-            return { ...prev, questions: newQuestions };
-        });
+        const newQuestions = [...formData.questions];
+        newQuestions[qIndex] = {
+          ...newQuestions[qIndex],
+          attachment: { type: 'image', url: 'uploading...', caption: '' }
+        };
+        setFormData(prev => ({ ...prev, questions: newQuestions }));
 
         // Upload to Supabase Storage
         const publicUrl = await uploadImageToSupabase(file, formData.id);
-
-        // Update with real URL
         handleAttachmentChange(qIndex, publicUrl);
-
-      } catch (error: any) {
-        console.warn('Upload to Supabase failed, attempting compressed Base64 fallback:', error);
-
-        // Notify user about the fallback
-        alert(`Gagal upload ke server (${error.message}). Menggunakan penyimpanan lokal (Base64) yang dikompresi.`);
-
-        try {
-            // Fallback to Compressed Base64
-            const compressedBase64 = await compressImage(file);
-            handleAttachmentChange(qIndex, compressedBase64);
-        } catch (compressError) {
-             console.error('Compression failed:', compressError);
-             alert(`Gagal memproses gambar: ${compressError instanceof Error ? compressError.message : String(compressError)}`);
-             handleAttachmentChange(qIndex, '');
-        }
+      } catch (error) {
+        alert(`Gagal upload gambar: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        // Remove attachment on error
+        handleAttachmentChange(qIndex, '');
       }
     }
   };
@@ -402,39 +334,28 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
       setUploadMode(prev => ({ ...prev, [qId]: mode }));
   };
 
+  const toggleOptionUploadMode = (key: string, mode: 'url' | 'file') => {
+      setOptionUploadMode(prev => ({ ...prev, [key]: mode }));
+  };
+
   const handleOptionChange = (qIndex: number, oIndex: number, value: string) => {
-    setFormData(prev => {
-        const newQuestions = [...prev.questions];
-        if (!newQuestions[qIndex]) return prev;
-
-        const currentQ = newQuestions[qIndex];
-        if (!currentQ.options) return prev;
-
-        const newOptions = [...currentQ.options];
-        newOptions[oIndex] = value;
-        newQuestions[qIndex] = { ...currentQ, options: newOptions };
-
-        return { ...prev, questions: newQuestions };
-    });
+    const newQuestions = [...formData.questions];
+    const newOptions = [...newQuestions[qIndex].options!];
+    newOptions[oIndex] = value;
+    newQuestions[qIndex] = { ...newQuestions[qIndex], options: newOptions };
+    setFormData(prev => ({ ...prev, questions: newQuestions }));
   };
 
   const handleOptionAttachmentChange = (qIndex: number, oIndex: number, url: string) => {
-    setFormData(prev => {
-        const newQuestions = [...prev.questions];
-        if (!newQuestions[qIndex]) return prev;
-
-        const currentQ = newQuestions[qIndex];
-        const newAttachments = [...(currentQ.optionAttachments || Array(currentQ.options?.length || 0).fill(null))];
-
-        if (url) {
-            newAttachments[oIndex] = { type: 'image', url: url, caption: '' };
-        } else {
-            newAttachments[oIndex] = { url: undefined };
-        }
-
-        newQuestions[qIndex] = { ...currentQ, optionAttachments: newAttachments };
-        return { ...prev, questions: newQuestions };
-    });
+    const newQuestions = [...formData.questions];
+    const newAttachments = [...(newQuestions[qIndex].optionAttachments || Array(newQuestions[qIndex].options?.length || 0).fill(null))];
+    if (url) {
+      newAttachments[oIndex] = { type: 'image', url: url, caption: '' };
+    } else {
+      newAttachments[oIndex] = { url: undefined };
+    }
+    newQuestions[qIndex] = { ...newQuestions[qIndex], optionAttachments: newAttachments };
+    setFormData(prev => ({ ...prev, questions: newQuestions }));
   };
 
   const handleOptionFileUpload = async (qIndex: number, oIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
@@ -448,39 +369,16 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
 
       try {
         // Show loading state
-        setFormData(prev => {
-            const newQuestions = [...prev.questions];
-            if (!newQuestions[qIndex]) return prev;
-
-            const currentQ = newQuestions[qIndex];
-            const newAttachments = [...(currentQ.optionAttachments || Array(currentQ.options?.length || 0).fill(null))];
-
-            newAttachments[oIndex] = { type: 'image', url: 'uploading...', caption: '' };
-            newQuestions[qIndex] = { ...currentQ, optionAttachments: newAttachments };
-            return { ...prev, questions: newQuestions };
-        });
+        handleOptionAttachmentChange(qIndex, oIndex, 'uploading...');
 
         // Upload to Supabase Storage
         const publicUrl = await uploadImageToSupabase(file, formData.id);
-
-        // Update with URL
         handleOptionAttachmentChange(qIndex, oIndex, publicUrl);
-
-      } catch (error: any) {
-        console.warn('Upload to Supabase failed, attempting compressed Base64 fallback:', error);
-
-        // Notify user about the fallback
-        alert(`Gagal upload ke server (${error.message}). Menggunakan penyimpanan lokal (Base64) yang dikompresi.`);
-
-        try {
-            // Fallback to Compressed Base64
-            const compressedBase64 = await compressImage(file);
-            handleOptionAttachmentChange(qIndex, oIndex, compressedBase64);
-        } catch (compressError) {
-             console.error('Compression failed:', compressError);
-             alert(`Gagal memproses gambar: ${compressError instanceof Error ? compressError.message : String(compressError)}`);
-             handleOptionAttachmentChange(qIndex, oIndex, '');
-        }
+      } catch (error) {
+        console.error('Option image upload failed:', error);
+        alert(`Gagal upload gambar opsi: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        // Reset on error
+        handleOptionAttachmentChange(qIndex, oIndex, '');
       } finally {
         e.target.value = ''; // Reset input
       }
@@ -504,20 +402,17 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
       ...(type === 'short_answer' ? { shortAnswer: '' } : {}),
       ...(type === 'essay' ? { essayAnswer: '' } : {})
     };
-
     setFormData(prev => ({ ...prev, questions: [...prev.questions, newQuestion] }));
     setActiveQuestionId(newQuestion.id);
   };
 
   const moveQuestion = (idx: number, dir: 'up' | 'down') => {
-    setFormData(prev => {
-        const target = dir === 'up' ? idx - 1 : idx + 1;
-        if (target < 0 || target >= prev.questions.length) return prev;
-
-        const newQs = [...prev.questions];
-        [newQs[idx], newQs[target]] = [newQs[target], newQs[idx]];
-        return { ...prev, questions: newQs };
-    });
+    const target = dir === 'up' ? idx - 1 : idx + 1;
+    if (target < 0 || target >= formData.questions.length) return;
+    
+    const newQs = [...formData.questions];
+    [newQs[idx], newQs[target]] = [newQs[target], newQs[idx]];
+    setFormData(prev => ({ ...prev, questions: newQs }));
   };
 
   // DnD Handlers
@@ -530,38 +425,24 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     e.preventDefault();
     if (draggedIndex === null || draggedIndex === index) return;
     
-    // We cannot use functional update here efficiently because we need the current state for logic
-    // But drag operations are usually synchronous and rapid.
-    // However, to be safe, we should rely on current state `formData` BUT use functional update for set.
-    // Wait, if `formData` is stale, we might have issues.
-    // But DragOver fires continuously.
-    // Let's use functional update to be safe against stale closures if this handler is closed over old state.
+    // Validate indices
+    if (draggedIndex < 0 || draggedIndex >= formData.questions.length || 
+        index < 0 || index >= formData.questions.length) {
+      setDraggedIndex(null);
+      return;
+    }
     
-    setFormData(prev => {
-        // Validate indices against PREV state
-        if (draggedIndex < 0 || draggedIndex >= prev.questions.length ||
-            index < 0 || index >= prev.questions.length) {
-          // If invalid, just return prev
-          return prev;
-        }
-
-        const newQs = [...prev.questions];
-        const draggedItem = newQs[draggedIndex];
-
-        // Safely splice and insert
-        if (draggedItem) {
-          newQs.splice(draggedIndex, 1);
-          newQs.splice(index, 0, draggedItem);
-
-          // Side effect: update dragged index to new position
-          // We can't update draggedIndex state here synchronously inside setFormData
-          // But we can update it after.
-          // For now, let's just update the list.
-          return { ...prev, questions: newQs };
-        }
-        return prev;
-    });
-    setDraggedIndex(index);
+    const newQs = [...formData.questions];
+    const draggedItem = newQs[draggedIndex];
+    
+    // Safely splice and insert
+    if (draggedItem) {
+      newQs.splice(draggedIndex, 1);
+      newQs.splice(index, 0, draggedItem);
+      
+      setDraggedIndex(index);
+      setFormData(prev => ({ ...prev, questions: newQs }));
+    }
   };
 
   // Helper function untuk mendapatkan soal yang paling terakhir dibuat
@@ -575,22 +456,6 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   };
 
   const lastQuestion = getLastCreatedQuestion();
-
-  const handleSave = async () => {
-    setIsSaving(true);
-    try {
-      await Promise.resolve(onSave(formData));
-      lastSavedRef.current = JSON.stringify(formData);
-      // Clear backup after successful save
-      try {
-        localStorage.removeItem(`exam_draft_${exam.id}`);
-      } catch (e) {
-        console.warn('Failed to clear backup:', e);
-      }
-    } finally {
-      setIsSaving(false);
-    }
-  };
 
   return (
     <div className="fixed inset-0 bg-white z-[60] flex flex-col font-sans text-left overflow-hidden">
@@ -643,25 +508,31 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
           )}
           {onPreview && (
             <button 
-              onClick={() => {
-                // Clear backup to ensure we reload with fresh data from props when returning
-                try {
-                  localStorage.removeItem(`exam_draft_${exam.id}`);
-                } catch (e) {
-                  // Ignore
-                }
-                onPreview(formData);
-              }}
+              onClick={() => onPreview(formData)} 
               className="px-4 py-2 bg-white border-2 border-indigo-100 text-indigo-600 rounded-xl hover:bg-indigo-50 font-bold flex items-center gap-2 transition-all text-sm"
             >
               <Eye className="w-4 h-4" /> Preview
             </button>
           )}
-          <button onClick={onCancel} className="hidden md:block px-4 py-2 text-gray-500 font-bold hover:bg-gray-50 rounded-xl transition text-sm">Batal</button>
+          <button onClick={onCancel} className="px-4 py-2 text-gray-500 font-bold hover:bg-gray-50 rounded-xl transition text-sm">Batal</button>
           <button 
-            onClick={handleSave}
+            onClick={async () => {
+              setIsSaving(true);
+              try {
+                await Promise.resolve(onSave(formData));
+                lastSavedRef.current = JSON.stringify(formData);
+                // Clear backup after successful save
+                try {
+                  localStorage.removeItem(`exam_draft_${exam.id}`);
+                } catch (e) {
+                  console.warn('Failed to clear backup:', e);
+                }
+              } finally {
+                setIsSaving(false);
+              }
+            }} 
             disabled={isSaving}
-            className="hidden md:flex px-6 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-black shadow-lg shadow-indigo-100 items-center gap-2 transition-all active:scale-95 text-sm disabled:opacity-70 disabled:cursor-not-allowed"
+            className="px-6 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-black shadow-lg shadow-indigo-100 flex items-center gap-2 transition-all active:scale-95 text-sm disabled:opacity-70 disabled:cursor-not-allowed"
           >
             {isSaving ? (
               <>
@@ -677,7 +548,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto bg-gray-50/50 p-4 md:p-10 pb-32 md:pb-10">
+      <div className="flex-1 overflow-y-auto bg-gray-50/50 p-4 md:p-10">
         <div className="max-w-4xl mx-auto space-y-6 md:space-y-10">
           <section className="bg-white rounded-[30px] md:rounded-[40px] shadow-sm border border-gray-100 p-6 md:p-10">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -730,21 +601,11 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
           </section>
 
           <section className="space-y-4">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-2 gap-3">
+            <div className="flex justify-between items-center mb-2">
               <h3 className="text-xl font-black text-gray-900 tracking-tight">Daftar Pertanyaan</h3>
-              <div className="flex gap-2 w-full md:w-auto">
-                <button
-                  onClick={() => {
-                    setShowBankImport(true);
-                    setSelectedBankQuestions([]);
-                    setBankSearchTerm('');
-                  }}
-                  className="flex-1 md:flex-none px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold border border-indigo-100 hover:bg-indigo-100 transition flex items-center justify-center gap-2 text-xs"
-                >
-                  <Database className="w-4 h-4" /> Ambil dari Bank Soal
-                </button>
+              <div className="flex gap-2">
                 <select 
-                  className="flex-1 md:flex-none bg-white border border-gray-200 text-gray-700 px-3 py-2 rounded-xl text-xs font-bold outline-none cursor-pointer hover:border-gray-300 transition"
+                  className="bg-white border border-gray-200 text-gray-700 px-3 py-2 rounded-xl text-xs font-bold outline-none"
                   onChange={(e) => {
                     if (e.target.value) {
                       addQuestion(e.target.value as QuestionType);
@@ -753,7 +614,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                   }}
                   defaultValue=""
                 >
-                  <option value="" disabled>+ Tambah Soal Baru</option>
+                  <option value="" disabled>+ Tambah Soal</option>
                   <option value="mcq">Pilihan Ganda</option>
                   <option value="multiple_select">Pilihan Ganda (Banyak Jawaban)</option>
                   <option value="true_false">Benar / Salah</option>
@@ -900,12 +761,12 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                     />
                                     <div className="w-full px-4 py-2.5 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-center hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-gray-400 font-bold text-xs">
                                         <Upload className="w-3 h-3" />
-                                        {q.attachment?.url?.startsWith('uploading') ? 'Mengupload...' : (q.attachment?.url?.startsWith('data:') ? 'Ganti File...' : 'Klik untuk Upload')}
+                                        {q.attachment?.url?.startsWith('data:') ? 'Ganti File...' : 'Klik untuk Upload'}
                                     </div>
                                 </div>
                             )}
 
-                            {q.attachment?.url && q.attachment.url !== 'uploading...' && (
+                            {q.attachment?.url && (
                                 <div className="relative group shrink-0">
                                     <div className="w-10 h-10 rounded-lg bg-gray-200 border border-gray-300 overflow-hidden">
                                         <img src={q.attachment.url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
@@ -994,7 +855,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                   </button>
                                 </div>
 
-                                {/* Rich Text Editor for Option */}
+                                {/* Rich Text Editor for Option - PERTAMA */}
                                 <div>
                                   <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Teks Pilihan</label>
                                   <RichTextEditor 
@@ -1005,31 +866,77 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                   />
                                 </div>
 
-                                {/* Delete Option Button */}
+                                <div className="mt-2">
+                                  <div className="flex justify-between items-center mb-1">
+                                    <label className="text-[10px] font-black text-gray-400 uppercase flex items-center gap-2">
+                                        <ImageIcon className="w-3 h-3" /> Lampiran Gambar (Opsional)
+                                    </label>
+                                    <div className="flex bg-gray-100 rounded-lg p-0.5">
+                                        <button
+                                          onClick={() => toggleOptionUploadMode(`${q.id}_${oIndex}`, 'url')}
+                                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${(!optionUploadMode[`${q.id}_${oIndex}`] || optionUploadMode[`${q.id}_${oIndex}`] === 'url') ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                                        >
+                                          <LinkIcon className="w-3 h-3" /> URL
+                                        </button>
+                                        <button
+                                          onClick={() => toggleOptionUploadMode(`${q.id}_${oIndex}`, 'file')}
+                                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${optionUploadMode[`${q.id}_${oIndex}`] === 'file' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                                        >
+                                          <Upload className="w-3 h-3" /> Upload
+                                        </button>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex gap-2 items-start">
+                                      {(!optionUploadMode[`${q.id}_${oIndex}`] || optionUploadMode[`${q.id}_${oIndex}`] === 'url') ? (
+                                          <input
+                                              type="text"
+                                              value={q.optionAttachments?.[oIndex]?.url || ''}
+                                              onChange={(e) => handleOptionAttachmentChange(qIndex, oIndex, e.target.value)}
+                                              placeholder="https://example.com/image.jpg"
+                                              className="flex-1 px-3 py-2 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-xs font-bold outline-none"
+                                          />
+                                      ) : (
+                                          <div className="flex-1 relative">
+                                              <input
+                                                  type="file"
+                                                  accept="image/*"
+                                                  onChange={(e) => handleOptionFileUpload(qIndex, oIndex, e)}
+                                                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                              />
+                                              <div className="w-full px-3 py-2 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-center hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-gray-400 font-bold text-xs">
+                                                  <Upload className="w-3 h-3" />
+                                                  {q.optionAttachments?.[oIndex]?.url === 'uploading...' ? 'Mengunggah...' : 'Klik untuk Upload'}
+                                              </div>
+                                          </div>
+                                      )}
+
+                                      {q.optionAttachments?.[oIndex]?.url && (
+                                          <div className="relative group shrink-0">
+                                              <div className="w-10 h-10 rounded-lg bg-gray-200 border border-gray-300 overflow-hidden">
+                                                  <img src={q.optionAttachments[oIndex]?.url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
+                                              </div>
+                                              <button
+                                                onClick={() => handleOptionAttachmentChange(qIndex, oIndex, '')}
+                                                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                                title="Hapus Gambar"
+                                              >
+                                                <X className="w-3 h-3" />
+                                              </button>
+                                          </div>
+                                      )}
+                                  </div>
+                                </div>
+
+                                {/* Delete Option Button - KEDUA */}
                                 {(q.options?.length || 0) > 2 && (
                                   <button
                                     onClick={() => {
-                                      setFormData(prev => {
-                                         const newQs = [...prev.questions];
-                                         const currentQ = newQs[qIndex];
-                                         const newOptions = currentQ.options?.filter((_, i) => i !== oIndex) || [];
-                                         const newAttachments = currentQ.optionAttachments?.filter((_, i) => i !== oIndex) || [];
-
-                                         let newCorrectIndex = currentQ.correctAnswerIndex;
-                                         if (newCorrectIndex === oIndex) {
-                                            newCorrectIndex = 0;
-                                         } else if (newCorrectIndex !== undefined && newCorrectIndex > oIndex) {
-                                            newCorrectIndex--;
-                                         }
-
-                                         newQs[qIndex] = {
-                                             ...currentQ,
-                                             options: newOptions,
-                                             optionAttachments: newAttachments,
-                                             correctAnswerIndex: newCorrectIndex
-                                         };
-                                         return { ...prev, questions: newQs };
-                                      });
+                                      const newOptions = q.options?.filter((_, i) => i !== oIndex) || [];
+                                      handleQuestionChange(qIndex, 'options', newOptions);
+                                      if (q.correctAnswerIndex === oIndex) {
+                                        handleQuestionChange(qIndex, 'correctAnswerIndex', 0);
+                                      }
                                     }}
                                     className="w-full py-2 rounded-lg bg-red-50 text-red-600 font-bold hover:bg-red-100 transition-all flex items-center justify-center gap-2"
                                     title="Hapus Pilihan"
@@ -1044,15 +951,8 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                           {(q.options?.length || 0) < 8 && (
                             <button
                               onClick={() => {
-                                setFormData(prev => {
-                                    const newQs = [...prev.questions];
-                                    const currentQ = newQs[qIndex];
-                                    const newOptions = [...(currentQ.options || []), ''];
-                                    const newAttachments = [...(currentQ.optionAttachments || []), undefined];
-
-                                    newQs[qIndex] = { ...currentQ, options: newOptions, optionAttachments: newAttachments };
-                                    return { ...prev, questions: newQs };
-                                });
+                                const newOptions = [...(q.options || []), ''];
+                                handleQuestionChange(qIndex, 'options', newOptions);
                               }}
                               className="w-full py-2 border-2 border-dashed border-indigo-300 rounded-xl text-indigo-600 font-bold hover:bg-indigo-50 transition-colors flex items-center justify-center gap-2 text-sm mt-3"
                             >
@@ -1100,16 +1000,11 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                   </div>
                                   <button
                                     onClick={() => {
-                                      setFormData(prev => {
-                                         const newQs = [...prev.questions];
-                                         const currentQ = newQs[qIndex];
-                                         const currentIndices = currentQ.correctAnswerIndices || [];
-                                         const newIndices = currentIndices.includes(oIndex)
-                                            ? currentIndices.filter(i => i !== oIndex)
-                                            : [...currentIndices, oIndex];
-                                         newQs[qIndex] = { ...currentQ, correctAnswerIndices: newIndices };
-                                         return { ...prev, questions: newQs };
-                                      });
+                                      const currentIndices = q.correctAnswerIndices || [];
+                                      const newIndices = currentIndices.includes(oIndex) 
+                                        ? currentIndices.filter(i => i !== oIndex) 
+                                        : [...currentIndices, oIndex];
+                                      handleQuestionChange(qIndex, 'correctAnswerIndices', newIndices);
                                     }}
                                     className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 text-xs font-bold ${q.correctAnswerIndices?.includes(oIndex) ? 'bg-green-600 text-white shadow-lg shadow-green-200' : 'bg-gray-200 text-gray-400 hover:bg-gray-300'}`}
                                   >
@@ -1117,7 +1012,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                   </button>
                                 </div>
 
-                                {/* Rich Text Editor for Option */}
+                                {/* Rich Text Editor for Option - PERTAMA */}
                                 <div>
                                   <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Teks Pilihan</label>
                                   <RichTextEditor 
@@ -1128,31 +1023,77 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                                   />
                                 </div>
 
-                                {/* Delete Option Button */}
+                                <div className="mt-2">
+                                  <div className="flex justify-between items-center mb-1">
+                                    <label className="text-[10px] font-black text-gray-400 uppercase flex items-center gap-2">
+                                        <ImageIcon className="w-3 h-3" /> Lampiran Gambar (Opsional)
+                                    </label>
+                                    <div className="flex bg-gray-100 rounded-lg p-0.5">
+                                        <button
+                                          onClick={() => toggleOptionUploadMode(`${q.id}_${oIndex}`, 'url')}
+                                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${(!optionUploadMode[`${q.id}_${oIndex}`] || optionUploadMode[`${q.id}_${oIndex}`] === 'url') ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                                        >
+                                          <LinkIcon className="w-3 h-3" /> URL
+                                        </button>
+                                        <button
+                                          onClick={() => toggleOptionUploadMode(`${q.id}_${oIndex}`, 'file')}
+                                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${optionUploadMode[`${q.id}_${oIndex}`] === 'file' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                                        >
+                                          <Upload className="w-3 h-3" /> Upload
+                                        </button>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex gap-2 items-start">
+                                      {(!optionUploadMode[`${q.id}_${oIndex}`] || optionUploadMode[`${q.id}_${oIndex}`] === 'url') ? (
+                                          <input
+                                              type="text"
+                                              value={q.optionAttachments?.[oIndex]?.url || ''}
+                                              onChange={(e) => handleOptionAttachmentChange(qIndex, oIndex, e.target.value)}
+                                              placeholder="https://example.com/image.jpg"
+                                              className="flex-1 px-3 py-2 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-xs font-bold outline-none"
+                                          />
+                                      ) : (
+                                          <div className="flex-1 relative">
+                                              <input
+                                                  type="file"
+                                                  accept="image/*"
+                                                  onChange={(e) => handleOptionFileUpload(qIndex, oIndex, e)}
+                                                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                              />
+                                              <div className="w-full px-3 py-2 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-center hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-gray-400 font-bold text-xs">
+                                                  <Upload className="w-3 h-3" />
+                                                  {q.optionAttachments?.[oIndex]?.url === 'uploading...' ? 'Mengunggah...' : 'Klik untuk Upload'}
+                                              </div>
+                                          </div>
+                                      )}
+
+                                      {q.optionAttachments?.[oIndex]?.url && (
+                                          <div className="relative group shrink-0">
+                                              <div className="w-10 h-10 rounded-lg bg-gray-200 border border-gray-300 overflow-hidden">
+                                                  <img src={q.optionAttachments[oIndex]?.url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
+                                              </div>
+                                              <button
+                                                onClick={() => handleOptionAttachmentChange(qIndex, oIndex, '')}
+                                                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                                title="Hapus Gambar"
+                                              >
+                                                <X className="w-3 h-3" />
+                                              </button>
+                                          </div>
+                                      )}
+                                  </div>
+                                </div>
+
+                                {/* Delete Option Button - KEDUA */}
                                 {(q.options?.length || 0) > 2 && (
                                   <button
                                     onClick={() => {
-                                      setFormData(prev => {
-                                        const newQs = [...prev.questions];
-                                        const currentQ = newQs[qIndex];
-
-                                        const newOptions = currentQ.options?.filter((_, i) => i !== oIndex) || [];
-                                        const newAttachments = currentQ.optionAttachments?.filter((_, i) => i !== oIndex) || [];
-
-                                        // Update indices
-                                        const currentIndices = currentQ.correctAnswerIndices || [];
-                                        const newIndices = currentIndices
-                                            .filter(i => i !== oIndex)
-                                            .map(i => (i > oIndex ? i - 1 : i));
-
-                                        newQs[qIndex] = {
-                                            ...currentQ,
-                                            options: newOptions,
-                                            optionAttachments: newAttachments,
-                                            correctAnswerIndices: newIndices
-                                        };
-                                        return { ...prev, questions: newQs };
-                                      });
+                                      const newOptions = q.options?.filter((_, i) => i !== oIndex) || [];
+                                      handleQuestionChange(qIndex, 'options', newOptions);
+                                      const currentIndices = q.correctAnswerIndices || [];
+                                      const newIndices = currentIndices.filter(i => i !== oIndex);
+                                      handleQuestionChange(qIndex, 'correctAnswerIndices', newIndices);
                                     }}
                                     className="w-full py-2 rounded-lg bg-red-50 text-red-600 font-bold hover:bg-red-100 transition-all flex items-center justify-center gap-2"
                                     title="Hapus Pilihan"
@@ -1167,15 +1108,8 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                           {(q.options?.length || 0) < 8 && (
                             <button
                               onClick={() => {
-                                setFormData(prev => {
-                                    const newQs = [...prev.questions];
-                                    const currentQ = newQs[qIndex];
-                                    const newOptions = [...(currentQ.options || []), ''];
-                                    const newAttachments = [...(currentQ.optionAttachments || []), undefined];
-
-                                    newQs[qIndex] = { ...currentQ, options: newOptions, optionAttachments: newAttachments };
-                                    return { ...prev, questions: newQs };
-                                });
+                                const newOptions = [...(q.options || []), ''];
+                                handleQuestionChange(qIndex, 'options', newOptions);
                               }}
                               className="w-full py-2 border-2 border-dashed border-indigo-300 rounded-xl text-indigo-600 font-bold hover:bg-indigo-50 transition-colors flex items-center justify-center gap-2 text-sm mt-3"
                             >
@@ -1225,29 +1159,6 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         </div>
       </div>
 
-      {/* Mobile Bottom Bar for Actions */}
-      <div className="md:hidden absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 flex gap-3 z-[60] shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-        <button onClick={onCancel} className="flex-1 py-3 text-gray-500 font-bold bg-gray-50 hover:bg-gray-100 rounded-xl transition text-sm border border-gray-200">
-            Batal
-        </button>
-        <button
-            onClick={handleSave}
-            disabled={isSaving}
-            className="flex-[2] py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-black shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 transition-all active:scale-95 text-sm disabled:opacity-70 disabled:cursor-not-allowed"
-          >
-            {isSaving ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Menyimpan...
-              </>
-            ) : (
-              <>
-                <Save className="w-4 h-4" /> Simpan
-              </>
-            )}
-        </button>
-      </div>
-
       {questionToDelete && (
         <div className="fixed inset-0 bg-gray-900/60 flex items-center justify-center z-[70] p-6 animate-in fade-in">
           <div className="bg-white p-8 rounded-[35px] max-w-sm w-full text-center">
@@ -1263,92 +1174,6 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                 })); 
                 setQuestionToDelete(null); 
               }} className="flex-1 py-3 bg-red-600 text-white rounded-xl font-black hover:bg-red-700 transition">Hapus</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Bank Import Modal */}
-      {showBankImport && (
-        <div className="fixed inset-0 bg-gray-900/60 flex items-center justify-center z-[80] p-4 animate-in fade-in backdrop-blur-sm">
-          <div className="bg-white w-full max-w-4xl h-[85vh] rounded-[30px] shadow-2xl flex flex-col overflow-hidden">
-            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-              <div>
-                <h3 className="text-xl font-black text-gray-900">Ambil dari Bank Soal</h3>
-                <p className="text-sm text-gray-500">Pilih soal untuk ditambahkan ke ujian ini.</p>
-              </div>
-              <button onClick={() => setShowBankImport(false)} className="p-2 text-gray-400 hover:bg-white hover:text-gray-900 rounded-xl transition"><X className="w-5 h-5" /></button>
-            </div>
-
-            <div className="p-4 border-b border-gray-100 bg-white">
-              <input
-                type="text"
-                placeholder="Cari soal..."
-                value={bankSearchTerm}
-                onChange={(e) => setBankSearchTerm(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none transition text-sm font-bold"
-              />
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4 bg-gray-50/50 space-y-3">
-              {bankQuestions
-                .filter(q => (q.text || '').toLowerCase().includes(bankSearchTerm.toLowerCase()) || (q.topic || '').toLowerCase().includes(bankSearchTerm.toLowerCase()))
-                .map(q => {
-                  const isSelected = selectedBankQuestions.includes(q.id);
-                  return (
-                    <div
-                      key={q.id}
-                      onClick={() => {
-                        setSelectedBankQuestions(prev =>
-                          prev.includes(q.id) ? prev.filter(id => id !== q.id) : [...prev, q.id]
-                        );
-                      }}
-                      className={`p-5 rounded-2xl border-2 cursor-pointer transition-all hover:shadow-md ${isSelected ? 'border-indigo-500 bg-indigo-50/50' : 'border-gray-100 bg-white hover:border-indigo-200'}`}
-                    >
-                      <div className="flex items-start gap-4">
-                        <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center shrink-0 mt-0.5 transition-colors ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-300 bg-white'}`}>
-                          {isSelected && <Check className="w-4 h-4" />}
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <span className="px-2 py-0.5 rounded-md bg-gray-100 text-gray-600 text-[10px] font-black uppercase">{q.type}</span>
-                            <span className="px-2 py-0.5 rounded-md bg-gray-100 text-gray-600 text-[10px] font-black uppercase">{q.difficulty}</span>
-                            {q.topic && <span className="px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-600 text-[10px] font-black uppercase">{q.topic}</span>}
-                          </div>
-                          <p className="font-bold text-gray-800 text-sm line-clamp-2">{q.text}</p>
-                        </div>
-                      </div>
-                    </div>
-                  );
-              })}
-              {bankQuestions.length === 0 && (
-                <div className="text-center py-10 text-gray-400 font-medium">Bank soal kosong.</div>
-              )}
-            </div>
-
-            <div className="p-6 border-t border-gray-100 bg-white flex justify-between items-center">
-              <span className="text-sm font-bold text-gray-500">{selectedBankQuestions.length} soal dipilih</span>
-              <div className="flex gap-3">
-                <button onClick={() => setShowBankImport(false)} className="px-6 py-3 text-gray-500 font-bold hover:bg-gray-50 rounded-xl transition text-sm">Batal</button>
-                <button
-                  onClick={() => {
-                    const questionsToAdd = bankQuestions
-                      .filter(q => selectedBankQuestions.includes(q.id))
-                      .map(q => ({ ...q, id: generateUUID() })); // Clone with new IDs
-
-                    setFormData(prev => ({
-                      ...prev,
-                      questions: [...prev.questions, ...questionsToAdd]
-                    }));
-                    setShowBankImport(false);
-                    alert(`${questionsToAdd.length} soal berhasil ditambahkan!`);
-                  }}
-                  disabled={selectedBankQuestions.length === 0}
-                  className="px-6 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-black shadow-lg shadow-indigo-100 flex items-center gap-2 transition-all active:scale-95 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Plus className="w-4 h-4" /> Tambahkan ke Ujian
-                </button>
-              </div>
             </div>
           </div>
         </div>
