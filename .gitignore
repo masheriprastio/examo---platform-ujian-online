@@ -34,3 +34,4 @@ check_supabase.js
 fix_admin_constraint.js
 fix_constraint_sql.sql
 verify_fix.js
+EXAM_ROOMS_SCHEMA.sql
