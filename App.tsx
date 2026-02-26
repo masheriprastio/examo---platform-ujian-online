@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Exam, AppView, ExamResult, Question, ExamLog, ExamRoom } from './types';
-import { MOCK_TEACHER, MOCK_STUDENT, MOCK_ADMIN, MOCK_EXAMS, supabase, isSupabaseConfigured } from './lib/supabase';
+import { MOCK_TEACHER, MOCK_STUDENT, MOCK_ADMIN, MOCK_EXAMS, MOCK_EXAM_ROOMS, supabase, isSupabaseConfigured } from './lib/supabase';
 import { generateUUID } from './lib/uuid';
 import {
   LogOut, LayoutDashboard, ClipboardList, Sparkles,
@@ -17,11 +17,11 @@ import ExamRunner from './components/ExamRunner';
 import AIGenerator from './components/AIGenerator';
 import ExamEditor from './components/ExamEditor';
 import QuestionBank from './components/QuestionBank';
+import ExamRoomManager from './components/ExamRoomManager';
 import StudentManager from './components/StudentManager';
 import TeacherManager from './components/TeacherManager';
 import MaterialManager from './components/MaterialManager';
 import StudentMaterialList from './components/StudentMaterialList';
-import ExamRoomManager from './components/ExamRoomManager';
 import { MaterialService, Material } from './services/MaterialService';
 
 import { jsPDF } from 'jspdf';
@@ -263,9 +263,9 @@ export default function App() {
   // State Initialization: Use Mocks only if Supabase is NOT configured
   const [exams, setExams] = useState<Exam[]>(isSupabaseConfigured ? [] : MOCK_EXAMS);
   const [bankQuestions, setBankQuestions] = useState<Question[]>(isSupabaseConfigured ? [] : MOCK_EXAMS.flatMap(e => e.questions));
+  const [examRooms, setExamRooms] = useState<ExamRoom[]>(isSupabaseConfigured ? [] : MOCK_EXAM_ROOMS);
   const [students, setStudents] = useState<User[]>(isSupabaseConfigured ? [] : [MOCK_STUDENT]);
   const [teachers, setTeachers] = useState<User[]>(isSupabaseConfigured ? [] : [MOCK_TEACHER]); // New teacher state
-  const [examRooms, setExamRooms] = useState<ExamRoom[]>([]); // New exam rooms state
   const [results, setResults] = useState<ExamResult[]>([]);
   const [studentMaterials, setStudentMaterials] = useState<Material[]>([]);
 
@@ -399,6 +399,20 @@ export default function App() {
           setResults(mappedResults);
         }
 
+        // 3. Fetch Exam Rooms
+        const { data: roomsData, error: roomsError } = await supabase.from('exam_rooms').select('*');
+        if (roomsData && !roomsError) {
+            setExamRooms(roomsData.map((r: any) => ({
+                id: r.id,
+                name: r.name,
+                description: r.description,
+                capacity: r.capacity,
+                status: r.status,
+                supervisorId: r.supervisor_id,
+                location: r.location
+            })));
+        }
+
         return { exams: mappedExams, results: mappedResults };
       } catch (err) {
         console.error("Failed to fetch data from Supabase:", err);
@@ -486,31 +500,6 @@ export default function App() {
      };
      fetchTeachers();
   }, [currentUser]);
-
-  // Fetch Exam Rooms (only if Teacher/Admin logged in)
-  useEffect(() => {
-     const fetchExamRooms = async () => {
-        if (currentUser?.role === 'teacher' && isSupabaseConfigured && supabase) {
-            const { data, error } = await supabase.from('exam_rooms').select('*').order('created_at', { ascending: false });
-            if (data && !error) {
-                const mappedRooms: ExamRoom[] = data.map((r: any) => ({
-                  id: r.id,
-                  name: r.name,
-                  description: r.description,
-                  capacity: r.capacity,
-                  supervisorId: r.supervisor_id,
-                  supervisorName: teachers.find(t => t.id === r.supervisor_id)?.name || 'Unknown Teacher',
-                  location: r.location,
-                  status: r.status,
-                  createdAt: r.created_at,
-                  updatedAt: r.updated_at
-                }));
-                setExamRooms(mappedRooms);
-            }
-        }
-     };
-     fetchExamRooms();
-  }, [currentUser, teachers]);
 
   // Realtime Violation Monitoring for Teacher
   useEffect(() => {
@@ -1161,142 +1150,50 @@ export default function App() {
       }
   };
 
-  // --- NEW HANDLERS FOR EXAM ROOM MANAGEMENT ---
+  // --- EXAM ROOM HANDLERS ---
 
   const handleAddExamRoom = async (newRoom: ExamRoom) => {
-    // 1. Optimistic Update
+    // Optimistic Update
     setExamRooms(prev => [newRoom, ...prev]);
 
-    // 2. DB Insert
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from('exam_rooms').insert({
-        name: newRoom.name,
-        description: newRoom.description,
-        capacity: newRoom.capacity,
-        supervisor_id: newRoom.supervisorId,
-        location: newRoom.location,
-        status: newRoom.status
-      }).select().single();
+        const { error } = await supabase.from('exam_rooms').insert({
+            id: newRoom.id,
+            name: newRoom.name,
+            description: newRoom.description,
+            capacity: newRoom.capacity,
+            status: newRoom.status,
+            supervisor_id: newRoom.supervisorId,
+            location: newRoom.location
+        });
 
-      if (error) {
-        console.error("Failed to insert exam room:", error);
-        addAlert("Gagal menyimpan ke database: " + error.message, 'error');
-        // Remove optimistic update
-        setExamRooms(prev => prev.filter(r => r.id !== newRoom.id));
-      } else if (data) {
-        // Update local state with REAL ID from DB
-        const updatedRoom: ExamRoom = {
-          ...newRoom,
-          id: data.id,
-          createdAt: data.created_at,
-          updatedAt: data.updated_at
-        };
-        setExamRooms(prev => prev.map(r => r.id === newRoom.id ? updatedRoom : r));
-      }
-    }
-  };
-
-  const handleDeleteExamRoom = async (id: string) => {
-    // 1. Optimistic Update
-    const originalRooms = [...examRooms];
-    setExamRooms(prev => prev.filter(r => r.id !== id));
-
-    // 2. DB Delete
-    if (isSupabaseConfigured && supabase) {
-      // Check if it's a temp ID (not in DB yet)
-      if (id.startsWith('temp-')) {
-          // If it was just added and hasn't synced, we just removed it from state. Good.
-          return;
-      }
-
-      const { error } = await supabase.from('exam_rooms').delete().eq('id', id);
-      if (error) {
-        console.error("Failed to delete exam room:", error);
-        addAlert("Gagal menghapus dari database: " + error.message, 'error');
-        // Rollback
-        setExamRooms(originalRooms);
-      }
-    }
-  };
-
-  const handleEditExamRoom = async (editedRoom: ExamRoom) => {
-    // 1. Optimistic Update
-    setExamRooms(prev => prev.map(r => r.id === editedRoom.id ? editedRoom : r));
-
-    // 2. DB Update
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from('exam_rooms')
-        .update({
-          name: editedRoom.name,
-          description: editedRoom.description,
-          capacity: editedRoom.capacity,
-          supervisor_id: editedRoom.supervisorId,
-          location: editedRoom.location,
-          status: editedRoom.status
-        })
-        .eq('id', editedRoom.id);
-
-      if (error) {
-        console.error("Failed to update exam room:", error);
-        addAlert("Gagal update data ruang ujian: " + error.message, 'error');
-        // Rollback by reverting to original
-        const originalRoom = examRooms.find(r => r.id === editedRoom.id);
-        if (originalRoom) {
-          setExamRooms(prev => prev.map(r => r.id === editedRoom.id ? originalRoom : r));
+        if (error) {
+            console.error("Failed to add room:", error);
+            addAlert("Gagal menyimpan ruang ke database.", 'error');
+            setExamRooms(prev => prev.filter(r => r.id !== newRoom.id)); // Rollback
+        } else {
+            addAlert("Ruang ujian berhasil ditambahkan!", 'success');
         }
-      } else {
-        addAlert('Data ruang ujian berhasil diperbarui!', 'success');
-      }
     } else {
-      // Mock mode: just show success
-      addAlert('Data ruang ujian berhasil diperbarui!', 'success');
+        addAlert("Ruang ujian berhasil ditambahkan (Mock)!", 'success');
     }
   };
 
-  const handleExamRoomUpdate = async (newRooms: ExamRoom[]) => {
-      // This is primarily for Excel Import which replaces/appends the list
-      const existingIds = new Set(examRooms.map(r => r.id));
-      const addedRooms = newRooms.filter(r => !existingIds.has(r.id));
+  const handleDeleteExamRoom = async (roomId: string) => {
+    if (!confirm("Hapus ruang ujian ini?")) return;
 
-      // Optimistic
-      setExamRooms(newRooms);
+    // Optimistic Update
+    const prevRooms = [...examRooms];
+    setExamRooms(prev => prev.filter(r => r.id !== roomId));
 
-      if (isSupabaseConfigured && supabase && addedRooms.length > 0) {
-          const rowsToInsert = addedRooms.map(r => ({
-            name: r.name,
-            description: r.description,
-            capacity: r.capacity,
-            supervisor_id: r.supervisorId,
-            location: r.location,
-            status: r.status
-          }));
-
-          const { error } = await supabase.from('exam_rooms').insert(rowsToInsert);
-          if (error) {
-              console.error("Bulk insert exam rooms failed:", error);
-              addAlert("Gagal import ke database: " + error.message, 'error');
-              // Rollback optimistic
-              setExamRooms(examRooms);
-          } else {
-              // Re-fetch to get IDs
-              const { data } = await supabase.from('exam_rooms').select('*');
-              if (data) {
-                const mappedRooms: ExamRoom[] = data.map((r: any) => ({
-                  id: r.id,
-                  name: r.name,
-                  description: r.description,
-                  capacity: r.capacity,
-                  supervisorId: r.supervisor_id,
-                  supervisorName: teachers.find(t => t.id === r.supervisor_id)?.name || 'Unknown Teacher',
-                  location: r.location,
-                  status: r.status,
-                  createdAt: r.created_at,
-                  updatedAt: r.updated_at
-                }));
-                setExamRooms(mappedRooms);
-              }
-          }
-      }
+    if (isSupabaseConfigured && supabase) {
+        const { error } = await supabase.from('exam_rooms').delete().eq('id', roomId);
+        if (error) {
+            console.error("Failed to delete room:", error);
+            addAlert("Gagal menghapus ruang dari database.", 'error');
+            setExamRooms(prevRooms); // Rollback
+        }
+    }
   };
 
   // Wrapper for Exam Updates (Sync with DB)
@@ -2016,14 +1913,14 @@ export default function App() {
             ) : view === 'TEACHER_BANK' ? (
               <QuestionBank questions={bankQuestions} onUpdate={setBankQuestions} />
             ) : view === 'TEACHER_EXAM_ROOM' ? (
-              <ExamRoomManager
-                examRooms={examRooms}
-                teachers={teachers}
-                onUpdate={handleExamRoomUpdate}
-                onAddRoom={handleAddExamRoom}
-                onDeleteRoom={handleDeleteExamRoom}
-                onEditRoom={handleEditExamRoom}
-              />
+              <div className="max-w-6xl mx-auto animate-in fade-in pb-20">
+                  <ExamRoomManager
+                    rooms={examRooms}
+                    teachers={teachers}
+                    onAddRoom={handleAddExamRoom}
+                    onDeleteRoom={handleDeleteExamRoom}
+                  />
+              </div>
             ) : view === 'TEACHER_TEACHERS' ? (
               <TeacherManager
                   teachers={teachers}
