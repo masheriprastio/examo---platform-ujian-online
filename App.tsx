@@ -293,6 +293,22 @@ export default function App() {
   const [bankQuestions, setBankQuestions] = useState<Question[]>(isSupabaseConfigured ? [] : MOCK_EXAMS.flatMap(e => e.questions));
   const [examRooms, setExamRooms] = useState<ExamRoom[]>(isSupabaseConfigured ? [] : MOCK_EXAM_ROOMS);
   const [students, setStudents] = useState<User[]>(isSupabaseConfigured ? [] : [MOCK_STUDENT]);
+
+  // Debug logging for Mock mode to assist visibility issues (prints available exams + visible-for-students)
+  useEffect(() => {
+    if (!isSupabaseConfigured) {
+      try {
+        console.log('DEBUG: MOCK_EXAMS', MOCK_EXAMS);
+        const visible = (MOCK_EXAMS || []).filter((ex: any) => {
+          const s = ((ex.status || '')).toString().toLowerCase().trim();
+          return ['published', 'active'].includes(s);
+        });
+        console.log('DEBUG: MOCK_EXAMS_VISIBLE_FOR_STUDENTS', visible);
+      } catch (err) {
+        console.warn('DEBUG: MOCK_EXAMS logging failed', err);
+      }
+    }
+  }, []);
   const [teachers, setTeachers] = useState<User[]>(isSupabaseConfigured ? [] : [MOCK_TEACHER]); // New teacher state
   const [results, setResults] = useState<ExamResult[]>([]);
   const [studentMaterials, setStudentMaterials] = useState<Material[]>([]);
@@ -2816,12 +2832,18 @@ export default function App() {
                 </div>
                 <h2 className="text-2xl font-black text-gray-900 mb-8 tracking-tight">Ujian Tersedia</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
-                  {exams.filter(e => ['published','active'].includes(e.status)).length === 0 ? (
+                  {exams.filter(e => {
+                    const s = (e.status || '').toString().toLowerCase();
+                    return s.includes('publish') || s.includes('active');
+                  }).length === 0 ? (
                     <div className="col-span-full text-center py-20 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
                       <p className="text-gray-400 font-medium">Belum ada ujian yang tersedia saat ini.</p>
                       <button onClick={fetchData} className="mt-4 text-indigo-600 font-bold hover:underline">Coba Segarkan</button>
                     </div>
-                  ) : exams.filter(e => ['published','active'].includes(e.status)).map(e => {
+                  ) : exams.filter(e => {
+                    const s = (e.status || '').toString().toLowerCase();
+                    return s.includes('publish') || s.includes('active');
+                  }).map(e => {
                     const progress = results.find(r => r.examId === e.id && r.studentId === currentUser?.id);
                     const isTaken = progress?.status === 'completed';
                     const isInProgress = progress?.status === 'in_progress';
@@ -2876,7 +2898,7 @@ export default function App() {
                             </div>
                         )}
 
-                        <div className="mt-auto pt-6 border-t border-gray-50">
+                        <div className="pt-4 border-t border-gray-50">
                             <button 
                                 onClick={() => !isDisabled && handleStartExamWithToken(e)} 
                                 disabled={isDisabled}
