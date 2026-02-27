@@ -2,8 +2,8 @@
 import React, { useState } from 'react';
 import { User, ExamRoom } from '../types';
 import {
-  Users, MapPin, Monitor, CheckCircle, XCircle,
-  Plus, Search, Trash2, Edit, X, Save
+  Users, MapPin, CheckCircle,
+  Plus, Search, Trash2, X, Key, RefreshCw, Copy, Check
 } from 'lucide-react';
 import { generateUUID } from '../lib/uuid';
 
@@ -12,12 +12,25 @@ interface ExamRoomManagerProps {
   teachers: User[];
   onAddRoom: (room: ExamRoom) => Promise<void>;
   onDeleteRoom: (id: string) => Promise<void>;
+  onUpdateRoom: (room: ExamRoom) => Promise<void>;
 }
 
-export default function ExamRoomManager({ rooms, teachers, onAddRoom, onDeleteRoom }: ExamRoomManagerProps) {
+// Generate a random 6-character alphanumeric token (A-Z, 0-9)
+const generateSupervisorToken = (): string => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Exclude confusing chars (I, O, 0, 1)
+  let token = '';
+  for (let i = 0; i < 6; i++) {
+    token += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return token;
+};
+
+export default function ExamRoomManager({ rooms, teachers, onAddRoom, onDeleteRoom, onUpdateRoom }: ExamRoomManagerProps) {
   const [showModal, setShowModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Form State
   const [formData, setFormData] = useState<Partial<ExamRoom>>({
@@ -56,7 +69,10 @@ export default function ExamRoomManager({ rooms, teachers, onAddRoom, onDeleteRo
         capacity: Number(formData.capacity),
         status: formData.status as 'available' | 'occupied',
         supervisorId: formData.supervisorId!,
-        location: formData.location
+        location: formData.location,
+        supervisorToken: generateSupervisorToken(), // Auto-generate token
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       };
 
       await onAddRoom(newRoom);
@@ -70,6 +86,40 @@ export default function ExamRoomManager({ rooms, teachers, onAddRoom, onDeleteRo
     }
   };
 
+  const handleRegenerateToken = async (room: ExamRoom) => {
+    setRegeneratingId(room.id);
+    try {
+      const updatedRoom: ExamRoom = {
+        ...room,
+        supervisorToken: generateSupervisorToken(),
+        updatedAt: new Date().toISOString(),
+      };
+      await onUpdateRoom(updatedRoom);
+    } catch (error) {
+      console.error('Failed to regenerate token:', error);
+      alert('Gagal memperbarui token.');
+    } finally {
+      setRegeneratingId(null);
+    }
+  };
+
+  const handleCopyToken = (roomId: string, token: string) => {
+    navigator.clipboard.writeText(token).then(() => {
+      setCopiedId(roomId);
+      setTimeout(() => setCopiedId(null), 2000);
+    }).catch(() => {
+      // Fallback for browsers that don't support clipboard API
+      const el = document.createElement('textarea');
+      el.value = token;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+      setCopiedId(roomId);
+      setTimeout(() => setCopiedId(null), 2000);
+    });
+  };
+
   const filteredRooms = rooms.filter(r =>
     r.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     r.location?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -80,7 +130,7 @@ export default function ExamRoomManager({ rooms, teachers, onAddRoom, onDeleteRo
       <div className="flex flex-col md:flex-row justify-between items-end gap-4">
         <div>
           <h1 className="text-3xl font-black text-gray-900 tracking-tight">Ruang Ujian</h1>
-          <p className="text-gray-400">Manajemen ruang ujian fisik dan pengawas.</p>
+          <p className="text-gray-400">Manajemen ruang ujian fisik, pengawas, dan token akses.</p>
         </div>
         <button
           onClick={() => { resetForm(); setShowModal(true); }}
@@ -104,13 +154,17 @@ export default function ExamRoomManager({ rooms, teachers, onAddRoom, onDeleteRo
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredRooms.length === 0 ? (
-           <div className="col-span-full text-center py-20 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
-             <p className="text-gray-400 font-medium">Belum ada ruang ujian.</p>
-           </div>
+          <div className="col-span-full text-center py-20 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
+            <p className="text-gray-400 font-medium">Belum ada ruang ujian.</p>
+          </div>
         ) : filteredRooms.map(room => {
           const supervisor = teachers.find(t => t.id === room.supervisorId);
+          const isCopied = copiedId === room.id;
+          const isRegenerating = regeneratingId === room.id;
+
           return (
             <div key={room.id} className="bg-white p-6 rounded-[30px] border border-gray-100 shadow-sm hover:shadow-lg transition-all group relative overflow-hidden">
+              {/* Status badge */}
               <div className={`absolute top-0 right-0 px-4 py-2 rounded-bl-[20px] font-black text-[10px] uppercase tracking-widest ${room.status === 'available' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
                 {room.status === 'available' ? 'Tersedia' : 'Terisi'}
               </div>
@@ -124,7 +178,8 @@ export default function ExamRoomManager({ rooms, teachers, onAddRoom, onDeleteRo
                 )}
               </div>
 
-              <div className="space-y-3 mb-6">
+              <div className="space-y-3 mb-4">
+                {/* Capacity */}
                 <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
                   <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center text-indigo-600 shadow-sm">
                     <Users className="w-4 h-4" />
@@ -134,6 +189,8 @@ export default function ExamRoomManager({ rooms, teachers, onAddRoom, onDeleteRo
                     <p className="font-bold text-gray-900">{room.capacity} Peserta</p>
                   </div>
                 </div>
+
+                {/* Supervisor */}
                 <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
                   <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center text-indigo-600 shadow-sm">
                     <CheckCircle className="w-4 h-4" />
@@ -142,6 +199,47 @@ export default function ExamRoomManager({ rooms, teachers, onAddRoom, onDeleteRo
                     <p className="text-[10px] font-black text-gray-400 uppercase">Pengawas</p>
                     <p className="font-bold text-gray-900 truncate">{supervisor?.name || 'Belum ditentukan'}</p>
                   </div>
+                </div>
+
+                {/* Supervisor Token */}
+                <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Key className="w-3.5 h-3.5 text-indigo-500" />
+                    <p className="text-[10px] font-black text-indigo-500 uppercase">Token Pengawas</p>
+                  </div>
+                  {room.supervisorToken ? (
+                    <div className="flex items-center gap-2">
+                      <span className="font-black text-xl tracking-[0.25em] text-indigo-700 flex-1 select-all">
+                        {room.supervisorToken}
+                      </span>
+                      <button
+                        onClick={() => handleCopyToken(room.id, room.supervisorToken!)}
+                        title="Salin token"
+                        className={`p-1.5 rounded-lg transition-all ${isCopied ? 'bg-green-100 text-green-600' : 'bg-white text-indigo-400 hover:text-indigo-700 hover:bg-indigo-100 shadow-sm'}`}
+                      >
+                        {isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                      <button
+                        onClick={() => handleRegenerateToken(room)}
+                        disabled={isRegenerating}
+                        title="Buat token baru"
+                        className="p-1.5 rounded-lg bg-white text-amber-400 hover:text-amber-600 hover:bg-amber-50 shadow-sm transition-all disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-4 h-4 ${isRegenerating ? 'animate-spin' : ''}`} />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleRegenerateToken(room)}
+                      disabled={isRegenerating}
+                      className="text-xs font-bold text-indigo-500 hover:text-indigo-700 flex items-center gap-1 transition-all"
+                    >
+                      <Plus className="w-3 h-3" /> Buat Token
+                    </button>
+                  )}
+                  {isCopied && (
+                    <p className="text-[10px] text-green-600 font-bold mt-1 animate-in fade-in">Token disalin!</p>
+                  )}
                 </div>
               </div>
 
@@ -173,7 +271,7 @@ export default function ExamRoomManager({ rooms, teachers, onAddRoom, onDeleteRo
                 <input
                   type="text"
                   value={formData.name}
-                  onChange={e => setFormData({...formData, name: e.target.value})}
+                  onChange={e => setFormData({ ...formData, name: e.target.value })}
                   placeholder="Contoh: Lab Komputer 1, Ruang Multimedia"
                   className="w-full px-5 py-3.5 rounded-2xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-bold transition-all placeholder-gray-400"
                   required
@@ -184,7 +282,7 @@ export default function ExamRoomManager({ rooms, teachers, onAddRoom, onDeleteRo
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Deskripsi (Opsional)</label>
                 <textarea
                   value={formData.description}
-                  onChange={e => setFormData({...formData, description: e.target.value})}
+                  onChange={e => setFormData({ ...formData, description: e.target.value })}
                   placeholder="Deskripsi fasilitas atau keterangan ruang..."
                   className="w-full px-5 py-3.5 rounded-2xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-bold transition-all placeholder-gray-400 h-24 resize-none"
                 />
@@ -196,7 +294,7 @@ export default function ExamRoomManager({ rooms, teachers, onAddRoom, onDeleteRo
                   <input
                     type="number"
                     value={formData.capacity}
-                    onChange={e => setFormData({...formData, capacity: parseInt(e.target.value)})}
+                    onChange={e => setFormData({ ...formData, capacity: parseInt(e.target.value) })}
                     className="w-full px-5 py-3.5 rounded-2xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-bold transition-all text-center"
                     min="1"
                   />
@@ -205,7 +303,7 @@ export default function ExamRoomManager({ rooms, teachers, onAddRoom, onDeleteRo
                   <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Status</label>
                   <select
                     value={formData.status}
-                    onChange={e => setFormData({...formData, status: e.target.value as any})}
+                    onChange={e => setFormData({ ...formData, status: e.target.value as any })}
                     className="w-full px-5 py-3.5 rounded-2xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-bold transition-all cursor-pointer appearance-none"
                   >
                     <option value="available">Tersedia</option>
@@ -219,7 +317,7 @@ export default function ExamRoomManager({ rooms, teachers, onAddRoom, onDeleteRo
                 <div className="relative">
                   <select
                     value={formData.supervisorId}
-                    onChange={e => setFormData({...formData, supervisorId: e.target.value})}
+                    onChange={e => setFormData({ ...formData, supervisorId: e.target.value })}
                     className="w-full px-5 py-3.5 rounded-2xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-bold transition-all cursor-pointer appearance-none"
                     required
                   >
@@ -229,7 +327,7 @@ export default function ExamRoomManager({ rooms, teachers, onAddRoom, onDeleteRo
                     ))}
                   </select>
                   <div className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </div>
                 </div>
               </div>
@@ -239,10 +337,18 @@ export default function ExamRoomManager({ rooms, teachers, onAddRoom, onDeleteRo
                 <input
                   type="text"
                   value={formData.location}
-                  onChange={e => setFormData({...formData, location: e.target.value})}
+                  onChange={e => setFormData({ ...formData, location: e.target.value })}
                   placeholder="Contoh: Gedung A Lantai 2, Ruang 201"
                   className="w-full px-5 py-3.5 rounded-2xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-bold transition-all placeholder-gray-400"
                 />
+              </div>
+
+              {/* Token info note */}
+              <div className="flex items-start gap-3 p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
+                <Key className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+                <p className="text-xs font-bold text-indigo-600">
+                  Token pengawas 6-karakter akan dibuat otomatis saat ruang disimpan. Token ini dapat disalin dan diberikan kepada pengawas untuk verifikasi.
+                </p>
               </div>
 
               <button

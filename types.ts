@@ -55,6 +55,7 @@ export interface ExamRoom {
   capacity: number;
   supervisorId: string;
   supervisorName?: string; // Nama guru yang mengawas
+  supervisorToken?: string; // Token unik for pengawas verification
   location?: string;
   status: 'available' | 'occupied' | 'maintenance';
   createdAt: string;

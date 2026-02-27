@@ -47,3 +47,4 @@ execute_fix_sql.js
 fix_exam_rooms_direct.js
 fix_exam_rooms_table.sql
 simple_fix_exam_rooms.sql
+ADD_SUPERVISOR_TOKEN.sql

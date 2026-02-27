@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Template_Import_Soal_Examo.xml
+  XML import template for exam questions compatible with the existing CSV fields.
+  Fields:
+    - type: mcq | multiple_select | true_false | short_answer | essay
+    - text: question text (CDATA)
+    - options: zero or more <option> entries
+    - correctAnswerIndex: single index for MCQ/true_false (0-based)
+    - correctAnswerIndices: semicolon-separated indices for multiple_select (0-based)
+    - points: numeric
+    - explanation: optional (CDATA)
+    - topic: category/topic
+    - difficulty: easy|medium|hard
+    - randomizeOptions: true|false
+    - shortAnswer: expected short answer (for short_answer)
+    - essayAnswer: guidance/example (for essay)
+-->
+<questions>
+  <question>
+    <type>mcq</type>
+    <text><![CDATA[Siapa penemu telepon?]]></text>
+    <options>
+      <option>Alexander Graham Bell</option>
+      <option>Thomas Edison</option>
+      <option>Nikola Tesla</option>
+      <option>Guglielmo Marconi</option>
+    </options>
+    <correctAnswerIndex>0</correctAnswerIndex>
+    <points>5</points>
+    <explanation><![CDATA[Penemu telepon: Alexander Graham Bell]]></explanation>
+    <topic>Sejarah</topic>
+    <difficulty>easy</difficulty>
+    <randomizeOptions>false</randomizeOptions>
+  </question>
+
+  <question>
+    <type>multiple_select</type>
+    <text><![CDATA[Pilih bilangan prima]]></text>
+    <options>
+      <option>2</option>
+      <option>3</option>
+      <option>4</option>
+      <option>5</option>
+    </options>
+    <!-- indices are 0-based; use semicolon-separated for multiple indices -->
+    <correctAnswerIndices>0;1;3</correctAnswerIndices>
+    <points>5</points>
+    <explanation><![CDATA[Bilangan prima: 2;3;5]]></explanation>
+    <topic>Matematika</topic>
+    <difficulty>medium</difficulty>
+    <randomizeOptions>false</randomizeOptions>
+  </question>
+
+  <question>
+    <type>true_false</type>
+    <text><![CDATA[Bumi itu datar?]]></text>
+    <options/>
+    <correctAnswerIndex>false</correctAnswerIndex>
+    <points>2</points>
+    <explanation><![CDATA[Fakta: Bumi berbentuk bulat]]></explanation>
+    <topic>Geografi</topic>
+    <difficulty>easy</difficulty>
+    <randomizeOptions>false</randomizeOptions>
+  </question>
+
+  <question>
+    <type>short_answer</type>
+    <text><![CDATA[Ibu kota Indonesia?]]></text>
+    <options/>
+    <points>3</points>
+    <explanation><![CDATA[Ibu kota Indonesia: Jakarta]]></explanation>
+    <topic>Geografi</topic>
+    <difficulty>easy</difficulty>
+    <randomizeOptions>false</randomizeOptions>
+    <shortAnswer>Jakarta</shortAnswer>
+  </question>
+
+  <question>
+    <type>essay</type>
+    <text><![CDATA[Jelaskan proses fotosintesis]]></text>
+    <options/>
+    <points/>
+    <explanation/>
+    <topic>Biologi</topic>
+    <difficulty>hard</difficulty>
+    <randomizeOptions>false</randomizeOptions>
+    <essayAnswer><![CDATA[Tuliskan poin-poin penting proses fotosintesis (reaksi, hasil, peran klorofil).]]></essayAnswer>
+  </question>
+</questions>
