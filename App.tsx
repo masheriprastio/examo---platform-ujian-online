@@ -27,6 +27,7 @@ import { MaterialService, Material } from './services/MaterialService';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
+import mammoth from 'mammoth';
 
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString('id-ID', {
   day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
@@ -253,6 +254,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const shouldFetchRef = useRef(true); // Prevent re-fetching stale data after save
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const docxFileInputRef = useRef<HTMLInputElement>(null);
 
   const { addAlert } = useNotification();
 
@@ -1800,6 +1802,217 @@ export default function App() {
     setShowCreateMenu(false);
   };
 
+  const handleImportDocx = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const res = await mammoth.extractRawText({ arrayBuffer });
+      const text = (res && res.value) ? res.value : '';
+
+      // Split into blocks by two or more line breaks (assumes each question separated by blank line)
+      const blocks = text.split(/\n{2,}/).map(b => b.trim()).filter(Boolean);
+
+      const newQuestions: Question[] = [];
+      let validCount = 0;
+
+      blocks.forEach(block => {
+        const lines = block.split(/\n/).map(l => l.trim()).filter(Boolean);
+        if (lines.length === 0) return;
+
+        // First non-empty line -> question text
+        const qText = lines[0];
+
+        // Defaults
+        let qType: 'mcq' | 'multiple_select' | 'true_false' | 'short_answer' | 'essay' = 'mcq';
+        const options: string[] = [];
+        let answerRaw = '';
+        let points = 10;
+
+        // Parse remaining lines for type, options, answer, points
+        for (let i = 1; i < lines.length; i++) {
+          const ln = lines[i];
+
+          // Detect type lines like "Tipe: PG" or "Type: PG"
+          const typeMatch = ln.match(/^(tipe|type)\s*[:\-]\s*(.+)$/i);
+          if (typeMatch) {
+            const raw = typeMatch[2].toString().toLowerCase();
+            if (raw.includes('banyak')) qType = 'multiple_select';
+            else if (raw.includes('benar') || raw.includes('salah') || raw.includes('true') || raw.includes('false')) qType = 'true_false';
+            else if (raw.includes('isian') || raw.includes('short')) qType = 'short_answer';
+            else if (raw.includes('esai') || raw.includes('essay')) qType = 'essay';
+            else qType = 'mcq';
+            continue;
+          }
+
+          // Detect points line: "Poin: 10"
+          const pointsMatch = ln.match(/^(poin|points)\s*[:\-]\s*(\d+)/i);
+          if (pointsMatch) {
+            points = parseInt(pointsMatch[2], 10) || points;
+            continue;
+          }
+
+          // Detect answer line: "Jawaban: A" or "Answer: A"
+          const ansMatch = ln.match(/^(jawaban|answer)\s*[:\-]\s*(.+)$/i);
+          if (ansMatch) {
+            answerRaw = ansMatch[2].trim();
+            continue;
+          }
+
+          // Detect option lines "A. ..." or "A) ..." or "- A ..." etc.
+          const optMatch = ln.match(/^[A-E][\.\)]\s*(.+)$/i);
+          if (optMatch) {
+            options.push(optMatch[1].trim());
+            continue;
+          }
+
+          // Also accept lines like "A - option"
+          const optMatch2 = ln.match(/^([A-E])\s*[-\s]\s*(.+)$/i);
+          if (optMatch2) {
+            options.push(optMatch2[2].trim());
+            continue;
+          }
+        }
+
+        // Map parsed data into Question object
+        let correctAnswerIndex: number | undefined = undefined;
+        let correctAnswerIndices: number[] | undefined = undefined;
+        let trueFalseAnswer: boolean | undefined = undefined;
+        let shortAnswer: string | undefined = undefined;
+        let essayAnswer: string | undefined = undefined;
+
+        if (qType === 'mcq') {
+          if (answerRaw && /^[A-E]$/i.test(answerRaw)) {
+            correctAnswerIndex = answerRaw.toUpperCase().charCodeAt(0) - 65;
+          } else if (answerRaw && !isNaN(parseInt(answerRaw))) {
+            correctAnswerIndex = parseInt(answerRaw) - 1;
+          } else {
+            correctAnswerIndex = 0;
+          }
+        } else if (qType === 'multiple_select') {
+          if (answerRaw) {
+            correctAnswerIndices = answerRaw.split(/[,;\s]+/).map(s => {
+              s = s.trim().toUpperCase();
+              if (/^[A-E]$/.test(s)) return s.charCodeAt(0) - 65;
+              if (!isNaN(parseInt(s))) return parseInt(s) - 1;
+              return -1;
+            }).filter(i => i >= 0);
+          } else {
+            correctAnswerIndices = [];
+          }
+        } else if (qType === 'true_false') {
+          trueFalseAnswer = /^(true|benar|t)$/i.test(answerRaw);
+        } else if (qType === 'short_answer') {
+          shortAnswer = answerRaw;
+        } else if (qType === 'essay') {
+          essayAnswer = answerRaw;
+        }
+
+        const newQ: Question = {
+          id: generateUUID(),
+          text: qText,
+          type: qType,
+          options: (qType === 'mcq' || qType === 'multiple_select') ? options : undefined,
+          correctAnswerIndex,
+          correctAnswerIndices,
+          trueFalseAnswer,
+          shortAnswer,
+          essayAnswer,
+          points,
+          explanation: undefined
+        };
+
+        newQuestions.push(newQ);
+        validCount++;
+      });
+
+      if (validCount > 0) {
+        const baseName = file.name.replace(/\.[^/.]+$/, "").replace(/\s*\(\d+\)$/, "").trim();
+        const defaultTitle = `${baseName} (Imported)`;
+        const newExam: Exam = {
+          id: generateUUID(),
+          title: defaultTitle,
+          description: 'Diimport dari Word (.docx)',
+          durationMinutes: 60,
+          category: 'Umum',
+          status: 'published',
+          createdAt: new Date().toISOString(),
+          questions: newQuestions
+        };
+
+        // Reuse existing dedupe logic
+        const normalizeTitle = (t: string) => (t || '')
+          .toString()
+          .replace(/\s*\(Imported\).*$/i, '')
+          .replace(/\s*\(\d+\).*$/i, '')
+          .trim()
+          .toLowerCase();
+
+        const existing = exams.find(e => {
+          return normalizeTitle(e.title) === normalizeTitle(baseName) || normalizeTitle(e.title) === normalizeTitle(defaultTitle);
+        });
+
+        if (existing) {
+          setEditingExam(existing);
+          setView('EXAM_EDITOR');
+          addAlert(`Ujian dengan judul serupa ditemukan. Membuka ujian yang ada untuk menghindari duplikasi.`, 'info');
+        } else {
+          if (isSupabaseConfigured && supabase) {
+            (async () => {
+              const dbExam = {
+                id: newExam.id,
+                title: newExam.title,
+                description: newExam.description,
+                duration_minutes: newExam.durationMinutes,
+                category: newExam.category,
+                status: newExam.status,
+                questions: newExam.questions,
+                start_date: newExam.startDate,
+                end_date: newExam.endDate,
+                created_by: currentUser?.id,
+                created_at: newExam.createdAt
+              };
+              try {
+                const res = await supabase.from('exams').insert(dbExam).select();
+                if (res.error) {
+                  console.error("Failed to save imported exam:", res.error);
+                  setEditingExam(newExam);
+                  setView('EXAM_EDITOR');
+                  addAlert(`Ujian diimport tetapi gagal disimpan ke database: ${res.error.message}`, 'error');
+                } else {
+                  const saved = res.data && res.data[0] ? { ...newExam, id: String((res.data as any)[0].id) } : newExam;
+                  setExams(prev => [saved, ...prev]);
+                  setBankQuestions(prev => [...(saved.questions || []), ...prev]);
+                  setEditingExam(saved);
+                  setView('EXAM_EDITOR');
+                  addAlert(`Berhasil mengimport ${validCount} soal dan menyimpan ujian.`, 'success');
+                }
+              } catch (err: any) {
+                console.error("Insert failed:", err);
+                setEditingExam(newExam);
+                setView('EXAM_EDITOR');
+                addAlert('Ujian diimport tetapi terjadi kesalahan saat menyimpan.', 'error');
+              }
+            })();
+          } else {
+            setEditingExam(newExam);
+            setView('EXAM_EDITOR');
+            addAlert(`Berhasil mengimport ${validCount} soal!`, 'success');
+          }
+        }
+      } else {
+        addAlert('Tidak ada soal yang valid ditemukan dalam file Word.', 'error');
+      }
+    } catch (err: any) {
+      console.error("Word Import Error:", err);
+      addAlert('Gagal membaca file Word: ' + (err?.message || String(err)), 'error');
+    } finally {
+      e.target.value = '';
+      setShowCreateMenu(false);
+    }
+  };
+
   const exportGradesToPDF = () => {
     const doc = new jsPDF();
     doc.text('Laporan Hasil Ujian - Examo', 14, 20);
@@ -2502,6 +2715,13 @@ export default function App() {
                                     Buat Manual
                                 </button>
                                 <button
+                                    onClick={() => docxFileInputRef.current?.click()}
+                                    className="w-full text-left px-5 py-4 hover:bg-green-50 flex items-center gap-3 font-bold text-green-700 transition-colors border-b border-gray-50"
+                                >
+                                    <FileText className="w-4 h-4 text-green-600" />
+                                    Import dari Word (.docx)
+                                </button>
+                                <button
                                     onClick={() => fileInputRef.current?.click()}
                                     className="w-full text-left px-5 py-4 hover:bg-green-50 flex items-center gap-3 font-bold text-green-700 transition-colors border-b border-gray-50"
                                 >
@@ -2531,6 +2751,13 @@ export default function App() {
                         ref={fileInputRef}
                         onChange={handleImportExam}
                         accept=".xlsx, .xls"
+                        className="hidden"
+                    />
+                    <input
+                        type="file"
+                        ref={docxFileInputRef}
+                        onChange={handleImportDocx}
+                        accept=".docx"
                         className="hidden"
                     />
                 </div>

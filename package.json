@@ -17,6 +17,7 @@
     "jspdf-autotable": "3.5.25",
     "katex": "^0.16.33",
     "lucide-react": "^0.574.0",
+    "mammoth": "^1.11.0",
     "quill": "^2.0.3",
     "quill-better-table": "^1.2.10",
     "react": "^19.2.4",
