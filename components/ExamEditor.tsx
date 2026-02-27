@@ -385,6 +385,85 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     }
   };
 
+  // Simple CSV parser for import (expects header row).
+  // Header fields supported:
+  // type,text,options,correctAnswerIndex,correctAnswerIndices,points,explanation,topic,difficulty,randomizeOptions,shortAnswer,essayAnswer
+  // - options: separate choices with "||" (double pipe) to allow commas in text
+  // - correctAnswerIndices: separate multiple indices with ";" (semicolon) for multiple_select
+  const handleImportCsv = (csvText: string, filename: string) => {
+    try {
+      const lines = csvText.split(/\r?\n/).filter(l => l.trim() !== '');
+      if (lines.length < 2) {
+        alert('File kosong atau hanya terdapat header.');
+        return;
+      }
+      const header = lines[0].split(',').map(h => h.trim());
+      const rows = lines.slice(1);
+      const imported: Question[] = [];
+      const now = new Date().toISOString();
+
+      for (const line of rows) {
+        // naive CSV split: split only on commas, but allow quoted values -- keep simple for now
+        // better to use a CSV library if needed. Here we assume no complex quoting.
+        const cols = line.split(',').map(c => c.trim());
+        const obj: Record<string,string> = {};
+        for (let i = 0; i < header.length; i++) {
+          obj[header[i]] = cols[i] ?? '';
+        }
+
+        const type = (obj['type'] || 'mcq') as QuestionType;
+        const text = obj['text'] || 'Soal dari import';
+        const points = parseFloat(obj['points'] || '1') || 1;
+        const optionsRaw = obj['options'] || '';
+        const options = optionsRaw ? optionsRaw.split('||').map(s => s.trim()) : undefined;
+        const correctIndex = obj['correctAnswerIndex'] ? parseInt(obj['correctAnswerIndex']) : undefined;
+        const correctIndices = obj['correctAnswerIndices'] ? obj['correctAnswerIndices'].split(';').map(x => parseInt(x)).filter(n => !isNaN(n)) : undefined;
+        const explanation = obj['explanation'] || '';
+        const topic = obj['topic'] || '';
+        const difficulty = (obj['difficulty'] as any) || 'medium';
+        const randomizeOptions = String(obj['randomizeOptions'] || '').toLowerCase() === 'true';
+        const shortAnswer = obj['shortAnswer'] || '';
+        const essayAnswer = obj['essayAnswer'] || '';
+
+        const q: Question = {
+          id: generateUUID(),
+          type,
+          text,
+          points,
+          explanation,
+          topic,
+          difficulty: difficulty,
+          createdAt: now,
+          updatedAt: now,
+          ...(type === 'mcq' ? { options: options || ['Pilihan A','Pilihan B'], correctAnswerIndex: typeof correctIndex === 'number' && !isNaN(correctIndex) ? correctIndex : 0, randomizeOptions, optionAttachments: options ? Array(options.length).fill(undefined) : undefined } : {}),
+          ...(type === 'multiple_select' ? { options: options || ['Pilihan A','Pilihan B'], correctAnswerIndices: correctIndices || [], randomizeOptions, optionAttachments: options ? Array(options.length).fill(undefined) : undefined } : {}),
+          ...(type === 'true_false' ? { trueFalseAnswer: (String(obj['correctAnswerIndex'] || '').toLowerCase() === 'true') } : {}),
+          ...(type === 'short_answer' ? { shortAnswer } : {}),
+          ...(type === 'essay' ? { essayAnswer } : {})
+        };
+
+        imported.push(q);
+      }
+
+      if (imported.length === 0) {
+        alert('Tidak ada soal valid yang diimport.');
+        return;
+      }
+
+      // Append to formData.questions (preserve existing exam status; do not change publish state automatically)
+      setFormData(prev => ({
+        ...prev,
+        questions: [...prev.questions, ...imported],
+        updatedAt: new Date().toISOString()
+      }));
+
+      alert(`Berhasil mengimport ${imported.length} soal dari ${filename}. Soal ditambahkan ke editor—simpan perubahan untuk menerapkannya.`);
+    } catch (err) {
+      console.error('Import CSV error:', err);
+      alert('Gagal mengimport file. Pastikan format sesuai template.');
+    }
+  };
+
   const addQuestion = (type: QuestionType = 'mcq') => {
     const now = new Date().toISOString();
     const newQuestion: Question = {
@@ -603,7 +682,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
           <section className="space-y-4">
             <div className="flex justify-between items-center mb-2">
               <h3 className="text-xl font-black text-gray-900 tracking-tight">Daftar Pertanyaan</h3>
-              <div className="flex gap-2">
+              <div className="flex gap-2 items-center">
                 <select 
                   className="bg-white border border-gray-200 text-gray-700 px-3 py-2 rounded-xl text-xs font-bold outline-none"
                   onChange={(e) => {
@@ -621,6 +700,33 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                   <option value="short_answer">Isian Singkat</option>
                   <option value="essay">Esai</option>
                 </select>
+
+                {/* Import CSV/XLSX (CSV parser simple) */}
+                <div className="flex items-center gap-2">
+                  <input id="exam-import-file" type="file" accept=".csv" className="hidden" onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    try {
+                      const text = await file.text();
+                      // trigger parse handler
+                      // @ts-ignore
+                      handleImportCsv(text, file.name);
+                    } catch (err) {
+                      alert('Gagal membaca file: ' + (err instanceof Error ? err.message : 'Unknown'));
+                    } finally {
+                      // reset input
+                      (e.target as HTMLInputElement).value = '';
+                    }
+                  }} />
+
+                  <button onClick={() => { const inp = document.getElementById('exam-import-file') as HTMLInputElement; inp?.click(); }} className="px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-bold text-indigo-600 hover:bg-indigo-50 transition">
+                    Import dari CSV
+                  </button>
+
+                  <a href="/templates/exam_import_template.csv" download className="px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-700 hover:bg-gray-50 transition">
+                    Unduh Template
+                  </a>
+                </div>
               </div>
             </div>
 
