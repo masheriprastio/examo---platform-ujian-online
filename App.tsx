@@ -32,6 +32,32 @@ const formatDate = (iso: string) => new Date(iso).toLocaleDateString('id-ID', {
   day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
 });
 
+// Helper: normalize text for grading (strip diacritics, punctuation, collapse spaces, lowercase)
+function normalizeText(s?: any) {
+  if (!s) return '';
+  try {
+    let str = String(s);
+    str = str.normalize('NFKD');
+    // Remove diacritic marks
+    str = str.replace(/\p{M}/gu, '');
+    // Replace punctuation with space, keep letters/numbers/space
+    str = str.replace(/[^\p{L}\p{N}\s]/gu, ' ');
+    // Collapse spaces, trim and lowercase
+    return str.replace(/\s+/g, ' ').trim().toLowerCase();
+  } catch (e) {
+    return String(s).trim().toLowerCase();
+  }
+}
+
+// Helper: token overlap ratio (simple fuzzy match)
+function tokenOverlapRatio(a: string, b: string) {
+  const aa = (a || '').split(/\s+/).filter(Boolean);
+  const bb = (b || '').split(/\s+/).filter(Boolean);
+  if (aa.length === 0 || bb.length === 0) return 0;
+  const common = aa.filter(tok => bb.includes(tok)).length;
+  return common / Math.max(aa.length, bb.length);
+}
+
 const LoginView: React.FC<{
   onLogin: (email: string, password?: string) => Promise<string | null>;
 }> = ({ onLogin }) => {
@@ -1863,7 +1889,12 @@ export default function App() {
           status = answer === q.trueFalseAnswer ? 'Benar' : 'Salah';
         } else if (q.type === 'short_answer') {
           answerText = answer || '-';
-          status = q.shortAnswer && typeof answer === 'string' && answer.trim().toLowerCase() === q.shortAnswer.trim().toLowerCase() ? 'Benar' : 'Salah';
+          const studentTxt = normalizeText(typeof answer === 'string' ? answer : String(answer || ''));
+          const keyTxt = normalizeText(q.shortAnswer as string);
+          const exactMatch = keyTxt.length > 0 && studentTxt === keyTxt;
+          const contains = keyTxt.length > 0 && (studentTxt.includes(keyTxt) || keyTxt.includes(studentTxt));
+          const overlap = keyTxt.length > 0 && tokenOverlapRatio(studentTxt, keyTxt) >= 0.6;
+          status = (exactMatch || contains || overlap) ? 'Benar' : 'Salah';
         } else if (q.type === 'essay') {
           answerText = answer || '-';
           status = 'Esai';
@@ -2702,12 +2733,23 @@ export default function App() {
                               isCorrect = answer === q.trueFalseAnswer;
                               answerText = answer === true ? 'BENAR' : answer === false ? 'SALAH' : '(Tidak Dijawab)';
                             } else if (q.type === 'short_answer') {
-                              isCorrect = q.shortAnswer && typeof answer === 'string' && answer.trim().toLowerCase() === q.shortAnswer.trim().toLowerCase();
+                              const studentTxt = normalizeText(typeof answer === 'string' ? answer : String(answer || ''));
+                              const keyTxt = normalizeText(q.shortAnswer as string);
+                              isCorrect = keyTxt.length > 0 && (
+                                studentTxt === keyTxt ||
+                                studentTxt.includes(keyTxt) ||
+                                keyTxt.includes(studentTxt) ||
+                                tokenOverlapRatio(studentTxt, keyTxt) >= 0.6
+                              );
                               answerText = answer || '(Tidak Dijawab)';
                             } else if (q.type === 'essay') {
-                              const studentAnswer = (answer || '').trim().toLowerCase();
-                              const teacherKey = (q.essayAnswer || '').trim().toLowerCase();
-                              isCorrect = teacherKey && (studentAnswer.includes(teacherKey) || teacherKey.includes(studentAnswer));
+                              const studentAnswer = normalizeText(answer as string);
+                              const teacherKey = normalizeText(q.essayAnswer as string);
+                              isCorrect = teacherKey.length > 0 && (
+                                studentAnswer.includes(teacherKey) ||
+                                teacherKey.includes(studentAnswer) ||
+                                tokenOverlapRatio(studentAnswer, teacherKey) >= 0.6
+                              );
                               answerText = answer || '(Tidak Dijawab)';
                             }
 
