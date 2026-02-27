@@ -1696,10 +1696,52 @@ export default function App() {
               setEditingExam(existing);
               setView('EXAM_EDITOR');
               addAlert(`Ujian dengan judul serupa ditemukan. Membuka ujian yang ada untuk menghindari duplikasi.`, 'info');
-            } else {
-              setEditingExam(newExam);
-              setView('EXAM_EDITOR');
-              addAlert(`Berhasil mengimport ${validCount} soal!`, 'success');
+              } else {
+              // If Supabase is configured, persist imported exam immediately so students see it too.
+              if (isSupabaseConfigured && supabase) {
+                (async () => {
+                  const dbExam = {
+                    id: newExam.id,
+                    title: newExam.title,
+                    description: newExam.description,
+                    duration_minutes: newExam.durationMinutes,
+                    category: newExam.category,
+                    status: newExam.status,
+                    questions: newExam.questions,
+                    start_date: newExam.startDate,
+                    end_date: newExam.endDate,
+                    created_by: currentUser?.id,
+                    created_at: newExam.createdAt
+                  };
+                  try {
+                    // Use select() to get inserted row back where supported
+                    const res = await supabase.from('exams').insert(dbExam).select();
+                    if (res.error) {
+                      console.error("Failed to save imported exam:", res.error);
+                      setEditingExam(newExam);
+                      setView('EXAM_EDITOR');
+                      addAlert(`Ujian diimport tetapi gagal disimpan ke database: ${res.error.message}`, 'error');
+                    } else {
+                      const saved = res.data && res.data[0] ? { ...newExam, id: String((res.data as any)[0].id) } : newExam;
+                      setExams(prev => [saved, ...prev]);
+                      setBankQuestions(prev => [...(saved.questions || []), ...prev]);
+                      setEditingExam(saved);
+                      setView('EXAM_EDITOR');
+                      addAlert(`Berhasil mengimport ${validCount} soal dan menyimpan ujian.`, 'success');
+                    }
+                  } catch (err: any) {
+                    console.error("Insert failed:", err);
+                    setEditingExam(newExam);
+                    setView('EXAM_EDITOR');
+                    addAlert('Ujian diimport tetapi terjadi kesalahan saat menyimpan.', 'error');
+                  }
+                })();
+              } else {
+                // Mock mode or no Supabase: keep behavior (local editor state)
+                setEditingExam(newExam);
+                setView('EXAM_EDITOR');
+                addAlert(`Berhasil mengimport ${validCount} soal!`, 'success');
+              }
             }
         } else {
             addAlert('Tidak ada soal yang valid ditemukan dalam file.', 'error');
