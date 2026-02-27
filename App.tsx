@@ -9,7 +9,7 @@ import {
   Mail, Lock, Eye, EyeOff, ArrowRight, AlertTriangle, Database,
   Menu, X as CloseIcon, FileDown, Download, UserPlus, FileSpreadsheet,
   XCircle, HelpCircle, RotateCcw, PenTool, Save, Plus, ChevronDown, Trash2, ShieldCheck,
-  ArrowUpDown, ArrowUp, ArrowDown, Key, AlertCircle, RefreshCw, WifiOff
+  ArrowUpDown, ArrowUp, ArrowDown, Key, AlertCircle, RefreshCw, WifiOff, BarChart2
 } from 'lucide-react';
 import { useNotification } from './context/NotificationContext';
 
@@ -22,6 +22,7 @@ import StudentManager from './components/StudentManager';
 import TeacherManager from './components/TeacherManager';
 import MaterialManager from './components/MaterialManager';
 import StudentMaterialList from './components/StudentMaterialList';
+import MonitoringDashboard from './components/MonitoringDashboard';
 import { MaterialService, Material } from './services/MaterialService';
 
 import { jsPDF } from 'jspdf';
@@ -197,6 +198,7 @@ const Sidebar: React.FC<{
     }] : []),
     { id: 'AI_GENERATOR', label: 'Generator AI', icon: Sparkles },
     { id: 'MATERIAL_MANAGER', label: 'Manajemen Materi', icon: FileText },
+    ...(isAdmin ? [{ id: 'MONITORING', label: 'Monitoring', icon: BarChart2 }] : []),
   ] : [
     { id: 'STUDENT_DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'STUDENT_MATERIALS', label: 'Materi Belajar', icon: Book },
@@ -265,6 +267,9 @@ export default function App() {
   const shouldFetchRef = useRef(true); // Prevent re-fetching stale data after save
   const fileInputRef = useRef<HTMLInputElement>(null);
   const docxFileInputRef = useRef<HTMLInputElement>(null);
+  // Timestamp of when the Realtime subscription was established.
+  // Any violation/event with a log timestamp BEFORE this is historical and should NOT trigger alert.
+  const realtimeSubscribedAtRef = useRef<string | null>(null);
 
   const { addAlert } = useNotification();
 
@@ -643,13 +648,25 @@ export default function App() {
       Notification.requestPermission();
     }
 
+    // Record the moment this subscription becomes active.
+    // We use this as a time-gate: any event whose latest log timestamp
+    // is BEFORE this moment is considered historical data (already existed
+    // when the teacher logged in) and should NOT trigger an alert.
+    realtimeSubscribedAtRef.current = new Date().toISOString();
+
+    // Helper: returns true only if the log event happened AFTER subscription start
+    const isNewEvent = (logTimestamp?: string): boolean => {
+      if (!logTimestamp || !realtimeSubscribedAtRef.current) return true; // safe fallback
+      return logTimestamp >= realtimeSubscribedAtRef.current;
+    };
+
     // --- Channel 1: Exam Results (Violations & Submissions) ---
     const resultsChannel = supabase
       .channel('schema-db-changes-results')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'exam_results' },
-        (payload: any) => { // Cast payload to any to resolve TS errors temporarily
+        (payload: any) => {
           console.log('Realtime Exam Result update received:', payload);
 
           if (payload.event === 'INSERT') {
@@ -673,7 +690,10 @@ export default function App() {
               if (prev.find(r => r.id === mapped.id)) return prev;
               return [mapped, ...prev];
             });
-            notify(`Siswa ${mapped.studentName} mulai mengerjakan ujian.`, 'info', `start:${mapped.id}`);
+            // Only alert if the exam was started AFTER the teacher logged in
+            if (isNewEvent(newRes.started_at)) {
+              notify(`Siswa ${mapped.studentName} mulai mengerjakan ujian.`, 'info', `start:${mapped.id}`);
+            }
           }
           else if (payload.event === 'UPDATE') {
             const newRecord = payload.new as any;
@@ -699,20 +719,23 @@ export default function App() {
               const newLogs = newRecord.logs as ExamLog[];
               const latestLog = newLogs[newLogs.length - 1];
 
-              if (latestLog && latestLog.event === 'violation_disqualified') {
-                notify(`PELANGGARAN BERAT: Siswa ${newRecord.student_name} didiskualifikasi (3x keluar tab)!`, 'error', `violation:${newRecord.id}`);
-                if (Notification.permission === 'granted') {
-                  new Notification('Pelanggaran Berat!', { body: `Siswa ${newRecord.student_name} didiskualifikasi!`, icon: '/vite.svg' });
-                }
-              } else if (latestLog && latestLog.event === 'tab_blur') {
-                notify(`Peringatan: Siswa ${newRecord.student_name} keluar dari tab ujian!`, 'error', `tabblur:${newRecord.id}`);
-                if (Notification.permission === 'granted') {
-                  new Notification('Pelanggaran Ujian', { body: `Siswa ${newRecord.student_name} terdeteksi keluar tab!`, icon: '/vite.svg' });
-                }
-              } else if (latestLog && latestLog.event === 'submit') {
-                notify(`Siswa ${newRecord.student_name} telah mengirimkan ujian.`, 'success', `submit:${newRecord.id}`);
-                if (Notification.permission === 'granted') {
-                  new Notification('Ujian Selesai', { body: `Siswa ${newRecord.student_name} telah mengirimkan ujian.`, icon: '/vite.svg' });
+              // Only fire notifications for events that actually happened AFTER login
+              if (latestLog && isNewEvent(latestLog.timestamp)) {
+                if (latestLog.event === 'violation_disqualified') {
+                  notify(`PELANGGARAN BERAT: Siswa ${newRecord.student_name} didiskualifikasi (3x keluar tab)!`, 'error', `violation:${newRecord.id}`);
+                  if (Notification.permission === 'granted') {
+                    new Notification('Pelanggaran Berat!', { body: `Siswa ${newRecord.student_name} didiskualifikasi!`, icon: '/vite.svg' });
+                  }
+                } else if (latestLog.event === 'tab_blur') {
+                  notify(`Peringatan: Siswa ${newRecord.student_name} keluar dari tab ujian!`, 'error', `tabblur:${newRecord.id}`);
+                  if (Notification.permission === 'granted') {
+                    new Notification('Pelanggaran Ujian', { body: `Siswa ${newRecord.student_name} terdeteksi keluar tab!`, icon: '/vite.svg' });
+                  }
+                } else if (latestLog.event === 'submit') {
+                  notify(`Siswa ${newRecord.student_name} telah mengirimkan ujian.`, 'success', `submit:${newRecord.id}`);
+                  if (Notification.permission === 'granted') {
+                    new Notification('Ujian Selesai', { body: `Siswa ${newRecord.student_name} telah mengirimkan ujian.`, icon: '/vite.svg' });
+                  }
                 }
               }
             }
@@ -2719,6 +2742,8 @@ export default function App() {
               />
             ) : view === 'MATERIAL_MANAGER' ? (
               <MaterialManager />
+            ) : view === 'MONITORING' ? (
+              <MonitoringDashboard />
             ) : view === 'AI_GENERATOR' ? (
               <AIGenerator
                 onExamCreated={handleExamCreate}
@@ -2853,9 +2878,9 @@ export default function App() {
                             <span>{e.category}</span>
                             <span>{e.questions.length} Soal</span>
                             <span className={`px-2 py-0.5 rounded text-xs font-bold ${e.status === 'published' ? 'bg-green-100 text-green-600' :
-                                e.status === 'draft' ? 'bg-gray-100 text-gray-600' :
-                                  e.status === 'active' ? 'bg-blue-100 text-blue-600' :
-                                    'bg-yellow-100 text-yellow-600'
+                              e.status === 'draft' ? 'bg-gray-100 text-gray-600' :
+                                e.status === 'active' ? 'bg-blue-100 text-blue-600' :
+                                  'bg-yellow-100 text-yellow-600'
                               }`}>
                               {e.status}
                             </span>
