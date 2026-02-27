@@ -50,13 +50,23 @@ function normalizeText(s?: any) {
   }
 }
 
-// Helper: token overlap ratio (simple fuzzy match)
+ // Helper: token overlap ratio (simple fuzzy match)
 function tokenOverlapRatio(a: string, b: string) {
   const aa = (a || '').split(/\s+/).filter(Boolean);
   const bb = (b || '').split(/\s+/).filter(Boolean);
   if (aa.length === 0 || bb.length === 0) return 0;
   const common = aa.filter(tok => bb.includes(tok)).length;
   return common / Math.max(aa.length, bb.length);
+}
+
+// Helper: escape HTML for docx template generation
+function escapeHtml(s: string) {
+  return String(s)
+    .replace(/&/g, '&')
+    .replace(/</g, '<')
+    .replace(/>/g, '>')
+    .replace(/"/g, '"')
+    .replace(/'/g, '&#039;');
 }
 
 const LoginView: React.FC<{
@@ -1617,6 +1627,32 @@ export default function App() {
     XLSX.writeFile(wb, "Template_Import_Soal_Examo.xlsx");
   };
 
+  const handleDownloadDocxTemplate = () => {
+    const sample = [
+      'Ibukota Indonesia adalah...?','Tipe: PG','A. Jakarta','B. Bandung','C. Surabaya','D. Medan','E. Makassar','Jawaban: A','Poin: 10',
+      '',
+      'Air adalah benda padat.','Tipe: Benar Salah','Jawaban: False','Poin: 10',
+      '',
+      'Sebutkan 3 sifat air.','Tipe: Esai','Jawaban: Cair, bening, mengalir','Poin: 20'
+    ].join('\n');
+
+    // Use HTML-based Word-compatible document (widely supported). File extension .docx for user convenience.
+    const html = `
+      <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+        <head><meta charset="utf-8"><title>Template Import Soal</title></head>
+        <body><pre style="font-family: Calibri, Arial, sans-serif; font-size: 12pt; line-height: 1.4;">${escapeHtml(sample)}</pre></body>
+      </html>
+    `;
+
+    const blob = new Blob([html], { type: 'application/msword' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'Template_Import_Soal_Examo.docx';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleImportExam = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -2729,11 +2765,18 @@ export default function App() {
                                     Import dari Excel
                                 </button>
                                 <button
+                                    onClick={() => { handleDownloadDocxTemplate(); setShowCreateMenu(false); }}
+                                    className="w-full text-left px-5 py-4 hover:bg-gray-50 flex items-center gap-3 font-bold text-gray-500 transition-colors text-xs border-b border-gray-50"
+                                >
+                                    <FileText className="w-4 h-4 text-gray-400" />
+                                    Download Template (.docx)
+                                </button>
+                                <button
                                     onClick={() => { handleDownloadTemplate(); setShowCreateMenu(false); }}
                                     className="w-full text-left px-5 py-4 hover:bg-gray-50 flex items-center gap-3 font-bold text-gray-500 transition-colors text-xs border-b border-gray-50"
                                 >
                                     <Download className="w-4 h-4 text-gray-400" />
-                                    Download Template
+                                    Download Template (Excel)
                                 </button>
                                 <button
                                     onClick={() => { setView('AI_GENERATOR'); setShowCreateMenu(false); }}
