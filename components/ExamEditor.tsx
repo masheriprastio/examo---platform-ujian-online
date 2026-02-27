@@ -4,6 +4,7 @@ import { generateUUID } from '../lib/uuid';
 import { Exam, Question, QuestionType } from '../types';
 import RichTextEditor from './RichTextEditor';
 import { supabase } from '../lib/supabase';
+import * as XLSX from 'xlsx';
 import { 
   Save, Plus, Trash2, Check, Clock, Type, Star, X, 
   ChevronDown, ChevronUp, Database, GripVertical, Shuffle, Tag, AlertCircle, Eye, Image as ImageIcon, Upload, Link as LinkIcon,
@@ -390,6 +391,50 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   // type,text,options,correctAnswerIndex,correctAnswerIndices,points,explanation,topic,difficulty,randomizeOptions,shortAnswer,essayAnswer
   // - options: separate choices with "||" (double pipe) to allow commas in text
   // - correctAnswerIndices: separate multiple indices with ";" (semicolon) for multiple_select
+  const handleImportFile = async (file: File) => {
+    if (!file) return;
+    const name = file.name.toLowerCase();
+    if (name.endsWith('.csv')) {
+      const text = await file.text();
+      // @ts-ignore
+      handleImportCsv(text, file.name);
+      return;
+    }
+
+    // Parse Excel (.xls/.xlsx) using SheetJS
+    try {
+      const ab = await file.arrayBuffer();
+      const workbook = XLSX.read(ab, { type: 'array' });
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+      if (!rows || rows.length < 2) {
+        alert('File Excel kosong atau tidak memiliki baris data.');
+        return;
+      }
+
+      // Convert rows to CSV-like text (quote cells with commas/quotes/newlines)
+      const csvLines = rows.map(row => {
+        return row.map(cell => {
+          let s = cell === undefined || cell === null ? '' : String(cell);
+          if (s.includes('"')) s = s.replace(/"/g, '""');
+          if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+            return `"${s}"`;
+          }
+          return s;
+        }).join(',');
+      });
+
+      const csvText = csvLines.join('\n');
+      // @ts-ignore
+      handleImportCsv(csvText, file.name);
+    } catch (err) {
+      console.error('Import Excel error:', err);
+      alert('Gagal mengimpor file Excel. Pastikan file valid.');
+    }
+  };
+
   const handleImportCsv = (csvText: string, filename: string) => {
     try {
       const lines = csvText.split(/\r?\n/).filter(l => l.trim() !== '');
@@ -794,14 +839,12 @@ const downloadExcelTemplate = () => {
 
                 {/* Import CSV/XLSX (CSV parser simple) */}
                 <div className="flex items-center gap-2">
-                  <input id="exam-import-file" type="file" accept=".csv" className="hidden" onChange={async (e) => {
+                  <input id="exam-import-file" type="file" accept=".csv,.xls,.xlsx" className="hidden" onChange={async (e) => {
                     const file = e.target.files?.[0];
                     if (!file) return;
                     try {
-                      const text = await file.text();
-                      // trigger parse handler
                       // @ts-ignore
-                      handleImportCsv(text, file.name);
+                      await handleImportFile(file);
                     } catch (err) {
                       alert('Gagal membaca file: ' + (err instanceof Error ? err.message : 'Unknown'));
                     } finally {

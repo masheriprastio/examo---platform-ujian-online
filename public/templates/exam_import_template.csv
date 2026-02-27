@@ -1,6 +1,6 @@
 type,text,options,correctAnswerIndex,correctAnswerIndices,points,explanation,topic,difficulty,randomizeOptions,shortAnswer,essayAnswer
-mcq,"Contoh: Siapa penemu telepon?","Alexander Graham Bell||Thomas Edison||Nikola Tesla||Guglielmo Marconi",0,,5,"Penemu telepon adalah Alexander Graham Bell","Sejarah","easy",false,,
-multiple_select,"Contoh: Pilih bilangan prima","2||3||4||5",,0;1;3,5,"Bilangan prima: 2,3,5","Matematika","medium",false,,
-true_false,"Contoh: Bumi itu datar?",,false,,2,"Fakta: Bumi berbentuk bulat","Geografi","easy",false,,
-short_answer,"Contoh: Ibukota Indonesia? (jawab singkat)",,,,"Ibukota Indonesia adalah Jakarta","Geografi","easy",false,Jakarta,
-essay,"Contoh: Jelaskan siklus air secara singkat",,,,10,"Siklus air melibatkan evaporasi, kondensasi, dan presipitasi","IPA","medium",false,,"Sebutkan evaporasi, kondensasi, presipitasi"
+mcq,"Siapa penemu telepon?","Alexander Graham Bell||Thomas Edison||Nikola Tesla||Guglielmo Marconi",0,,5,"Penemu telepon: Alexander Graham Bell",Sejarah,easy,false,,
+multiple_select,"Pilih bilangan prima","2||3||4||5",,0;1;3,5,"Bilangan prima: 2;3;5",Matematika,medium,false,,
+true_false,"Bumi itu datar?",,false,,2,"Fakta: Bumi berbentuk bulat",Geografi,easy,false,,
+short_answer,"Ibu kota Indonesia?",, , ,3,"Ibu kota Indonesia: Jakarta",Geografi,easy,false,Jakarta,
+essay,"Jelaskan proses fotosintesis",,,,,,Biologi,hard,false,,"Tuliskan poin-poin penting proses fotosintesis (reaksi, hasil, peran klorofil)."
