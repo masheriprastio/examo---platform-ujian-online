@@ -8,6 +8,7 @@ import {
   BadgeCheck, Key, BookOpen
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { useNotification } from '../context/NotificationContext';
 
 interface TeacherManagerProps {
   teachers: User[];
@@ -25,6 +26,7 @@ const TeacherManager: React.FC<TeacherManagerProps> = ({ teachers, onUpdate, onA
   const [formData, setFormData] = useState({ name: '', email: '', subject: '', nip: '', password: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { addAlert } = useNotification();
 
   const filteredTeachers = teachers.filter(t =>
     t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -58,26 +60,65 @@ const TeacherManager: React.FC<TeacherManagerProps> = ({ teachers, onUpdate, onA
         const worksheet = workbook.Sheets[sheetName];
         const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[];
 
-        const importedTeachers: User[] = jsonData
-          .filter(row => row.Nama && (row.Email || row.NIP))
-          .map((row, idx) => ({
+        // Validate rows and collect errors per-row
+        const toInsert: User[] = [];
+        const validationErrors: string[] = [];
+        jsonData.forEach((row, idx) => {
+          const name = row.Nama;
+          const rawEmail = row.Email;
+          const nip = row.NIP ? String(row.NIP) : undefined;
+          if (!name) {
+            validationErrors.push(`Baris ${idx + 2}: Nama wajib diisi.`);
+            return;
+          }
+          const email = rawEmail ? String(rawEmail).trim() : (nip ? `${nip}@sekolah.id` : '');
+          // Simple email validation if provided
+          const validateEmail = (em: string) => {
+            if (!em) return false;
+            // basic regex
+            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em);
+          };
+
+          if (rawEmail && !validateEmail(email)) {
+            validationErrors.push(`Email tidak valid untuk ${name}: ${email}`);
+            return;
+          }
+
+          toInsert.push({
             id: `temp-${Date.now()}-${idx}`,
-            name: row.Nama,
-            email: row.Email || `teacher-${Date.now()}-${idx}@placeholder.com`,
+            name,
+            email: email || `teacher-${Date.now()}-${idx}@placeholder.com`,
             subject: row.Mapel || '-',
-            nis: row.NIP ? String(row.NIP) : undefined, // Using NIS field for NIP
+            nis: nip,
             role: 'teacher',
             password: row.Password ? String(row.Password) : 'password'
-          }));
+          });
+        });
 
-        if (importedTeachers.length > 0) {
-            onUpdate(importedTeachers);
+        // Show validation errors first
+        if (validationErrors.length > 0) {
+          validationErrors.forEach(msg => addAlert(msg, 'error'));
+        }
+
+        if (toInsert.length > 0) {
+            try {
+              // Await caller to handle DB insert and surface errors
+              await onUpdate(toInsert);
+              addAlert(`Berhasil mengimpor ${toInsert.length} guru.`, 'success');
+            } catch (err: any) {
+              console.error('Import teachers failed:', err);
+              // Try to extract which row failed from error if available, otherwise generic message
+              const detail = err?.message || 'Terjadi kesalahan saat menyimpan ke database.';
+              addAlert(`Gagal mengimpor guru: ${detail}`, 'error');
+            }
         } else {
-          alert('Format Excel salah atau tidak ada data yang valid (Nama wajib diisi).');
+          if (validationErrors.length === 0) {
+            addAlert('Format Excel salah atau tidak ada data yang valid (Nama wajib diisi).', 'error');
+          }
         }
       } catch (err) {
-        alert('Gagal memproses file Excel.');
         console.error(err);
+        addAlert('Gagal memproses file Excel.', 'error');
       } finally {
         setIsImporting(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
@@ -144,9 +185,9 @@ const TeacherManager: React.FC<TeacherManagerProps> = ({ teachers, onUpdate, onA
         setFormData({ name: '', email: '', subject: '', nip: '', password: '' });
         setModalMode(null);
         setEditingId(null);
-    } catch (error) {
+    } catch (error: any) {
         console.error("Failed to save teacher:", error);
-        alert("Gagal menyimpan data guru.");
+        addAlert(`Gagal menyimpan data guru ${formData.name}: ${error?.message || 'Unknown error'}`, 'error');
     } finally {
         setIsSubmitting(false);
     }
