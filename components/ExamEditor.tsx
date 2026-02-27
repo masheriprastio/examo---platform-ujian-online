@@ -464,6 +464,97 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     }
   };
 
+const downloadExcelTemplate = () => {
+  // Create a simple Excel-compatible HTML file (will open in Excel) with header + sample row and instructions.
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+</head>
+<body>
+  <h3>Template Import Soal - Examo</h3>
+  <p>Petunjuk singkat:</p>
+  <ul>
+    <li>Kolom <strong>options</strong> pisahkan pilihan dengan <code>||</code> (double pipe).</li>
+    <li>Untuk <strong>multiple_select</strong>, isi <strong>correctAnswerIndices</strong> dengan indeks dipisah <code>;</code> (mis. <code>0;2</code>).</li>
+    <li>Tipe yang didukung: <code>mcq</code>, <code>multiple_select</code>, <code>true_false</code>, <code>short_answer</code>, <code>essay</code>.</li>
+    <li>Gunakan <strong>points</strong> untuk bobot (angka). Untuk benar/salah, gunakan <code>true</code> atau <code>false</code> pada <strong>correctAnswerIndex</strong>.</li>
+  </ul>
+
+  <table border="1">
+    <tr>
+      <th>type</th>
+      <th>text</th>
+      <th>options (gunakan || untuk pisah)</th>
+      <th>correctAnswerIndex</th>
+      <th>correctAnswerIndices (gunakan ; untuk multiple)</th>
+      <th>points</th>
+      <th>explanation</th>
+      <th>topic</th>
+      <th>difficulty</th>
+      <th>randomizeOptions</th>
+      <th>shortAnswer</th>
+      <th>essayAnswer</th>
+    </tr>
+    <tr>
+      <td>mcq</td>
+      <td>Contoh: Siapa penemu telepon?</td>
+      <td>Alexander Graham Bell||Thomas Edison||Nikola Tesla||Guglielmo Marconi</td>
+      <td>0</td>
+      <td></td>
+      <td>5</td>
+      <td>Penemu telepon: Alexander Graham Bell</td>
+      <td>Sejarah</td>
+      <td>easy</td>
+      <td>false</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>multiple_select</td>
+      <td>Contoh: Pilih bilangan prima</td>
+      <td>2||3||4||5</td>
+      <td></td>
+      <td>0;1;3</td>
+      <td>5</td>
+      <td>Bilangan prima: 2,3,5</td>
+      <td>Matematika</td>
+      <td>medium</td>
+      <td>false</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>true_false</td>
+      <td>Contoh: Bumi itu datar?</td>
+      <td></td>
+      <td>false</td>
+      <td></td>
+      <td>2</td>
+      <td>Fakta: Bumi berbentuk bulat</td>
+      <td>Geografi</td>
+      <td>easy</td>
+      <td>false</td>
+      <td></td>
+      <td></td>
+    </tr>
+  </table>
+
+  <p>Catatan: Simpan file ini sebagai <strong>.xls</strong> agar mudah dibuka di Excel. Sistem akan membaca isi tabel setelah Anda simpan sebagai file dan mengimpornya.</p>
+</body>
+</html>`;
+
+  const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'exam_import_template.xls';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
   const addQuestion = (type: QuestionType = 'mcq') => {
     const now = new Date().toISOString();
     const newQuestion: Question = {
@@ -724,8 +815,12 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                   </button>
 
                   <a href="/templates/exam_import_template.csv" download className="px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-700 hover:bg-gray-50 transition">
-                    Unduh Template
+                    Unduh Template (CSV)
                   </a>
+
+                  <button onClick={() => downloadExcelTemplate()} className="px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-700 hover:bg-gray-50 transition">
+                    Unduh Template Excel (.xls)
+                  </button>
                 </div>
               </div>
             </div>
