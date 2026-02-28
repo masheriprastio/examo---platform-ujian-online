@@ -23,6 +23,7 @@ import TeacherManager from './components/TeacherManager';
 import MaterialManager from './components/MaterialManager';
 import StudentMaterialList from './components/StudentMaterialList';
 import MonitoringDashboard from './components/MonitoringDashboard';
+import EssayManualScoreInput from './components/EssayManualScoreInput';
 import { MaterialService, Material } from './services/MaterialService';
 
 import { jsPDF } from 'jspdf';
@@ -2211,9 +2212,16 @@ export default function App() {
 
       const violationCount = result.logs.filter(l => l.event === 'tab_blur').length;
 
+      const hasEssay = exam.questions.some(q => q.type === 'essay');
+
       if (result.status === 'disqualified') {
         doc.setTextColor(220, 38, 38);
         doc.text(`(DIDISKUALIFIKASI)`, 140, yPos);
+        doc.setTextColor(0, 0, 0);
+      } else if (hasEssay) {
+        // Jika ada soal esai, skor menunggu penilaian manual — jangan tampilkan KKM
+        doc.setTextColor(120, 80, 20);
+        doc.text(`(Menunggu Penilaian Esai)`, 140, yPos);
         doc.setTextColor(0, 0, 0);
       } else if (result.score < 75) {
         doc.setTextColor(220, 38, 38);
@@ -2292,6 +2300,28 @@ export default function App() {
           4: { cellWidth: 22 }
         }
       });
+
+      // ── Embed gambar kanvas coretan siswa untuk soal Esai ──
+      const essayQs = exam.questions.filter(q => q.type === 'essay');
+      essayQs.forEach((q, ei) => {
+        const canvasDataUrl = result.answers[`${q.id}_canvas`] as string | undefined;
+        if (canvasDataUrl && canvasDataUrl.startsWith('data:image')) {
+          doc.addPage();
+          doc.setFontSize(12);
+          doc.setTextColor(0, 0, 0);
+          doc.text(`Lembar Coretan Esai #${ei + 1}: ${stripHtml(q.text).substring(0, 60)}`, 14, 20);
+          doc.setFontSize(9);
+          doc.setTextColor(100, 100, 100);
+          doc.text(`Siswa: ${result.studentName}`, 14, 28);
+          // Embed canvas image
+          try {
+            doc.addImage(canvasDataUrl, 'PNG', 10, 35, 190, 120);
+          } catch (_) {
+            doc.text('(Gambar tidak dapat dimuat)', 14, 40);
+          }
+        }
+      });
+
     });
 
     if (autoSave) {
@@ -3127,7 +3157,8 @@ export default function App() {
 
                             if (q.type === 'mcq') {
                               isCorrect = answer === q.correctAnswerIndex;
-                              answerText = q.options && answer !== undefined && answer !== '' ? `${String.fromCharCode(65 + Number(answer))}. ${q.options[Number(answer)]}` : '(Tidak Dijawab)';
+                              const optText = q.options && answer !== undefined && answer !== '' ? q.options[Number(answer)] : '';
+                              answerText = optText ? `${String.fromCharCode(65 + Number(answer))}. ${optText}` : '(Tidak Dijawab)';
                             } else if (q.type === 'multiple_select') {
                               const ans = (answer as number[]) || [];
                               const correctIndices = q.correctAnswerIndices || [];
@@ -3145,36 +3176,34 @@ export default function App() {
                                 keyTxt.includes(studentTxt) ||
                                 tokenOverlapRatio(studentTxt, keyTxt) >= 0.6
                               );
-                              answerText = answer || '(Tidak Dijawab)';
+                              answerText = typeof answer === 'string' ? answer : '(Tidak Dijawab)';
                             } else if (q.type === 'essay') {
-                              const studentAnswer = normalizeText(answer as string);
-                              const teacherKey = normalizeText(q.essayAnswer as string);
-                              isCorrect = teacherKey.length > 0 && (
-                                studentAnswer.includes(teacherKey) ||
-                                teacherKey.includes(studentAnswer) ||
-                                tokenOverlapRatio(studentAnswer, teacherKey) >= 0.6
-                              );
-                              answerText = answer || '(Tidak Dijawab)';
+                              answerText = typeof answer === 'string' && answer.trim() ? answer : '(Tidak Dijawab)';
                             }
 
-                            let statusLabel = isCorrect ? 'Benar' : 'Salah';
-                            let statusClass = isCorrect ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
-                            let borderClass = isCorrect ? 'border-l-green-500' : 'border-l-red-500';
+                            // Label status
+                            let statusLabel = '';
+                            let statusClass = '';
+                            let borderClass = '';
 
                             if (q.type === 'essay') {
-                              if (isCorrect) {
-                                statusLabel = 'Tepat (+Full)';
-                                statusClass = 'bg-green-100 text-green-700';
-                                borderClass = 'border-l-green-500';
-                              } else if (answer) {
-                                statusLabel = 'Kurang Tepat (+1)';
+                              // Cek apakah sudah ada nilai manual di answers (key: `${q.id}_manual_score`)
+                              const manualScore = selectedResult.answers[`${q.id}_manual_score`];
+                              if (manualScore !== undefined && manualScore !== null) {
+                                statusLabel = `Nilai: ${manualScore}/${q.points}`;
+                                statusClass = 'bg-indigo-100 text-indigo-700';
+                                borderClass = 'border-l-indigo-500';
+                              } else if (answerText !== '(Tidak Dijawab)') {
+                                statusLabel = 'Perlu Dinilai';
                                 statusClass = 'bg-yellow-100 text-yellow-700';
-                                borderClass = 'border-l-yellow-500';
+                                borderClass = 'border-l-yellow-400';
                               } else {
                                 statusLabel = 'Kosong (0)';
-                                statusClass = 'bg-red-100 text-red-700';
-                                borderClass = 'border-l-red-500';
+                                statusClass = 'bg-gray-100 text-gray-500';
+                                borderClass = 'border-l-gray-300';
                               }
+                            } else {
+                              isCorrect ? (statusLabel = 'Benar', statusClass = 'bg-green-100 text-green-700', borderClass = 'border-l-green-500') : (statusLabel = 'Salah', statusClass = 'bg-red-100 text-red-700', borderClass = 'border-l-red-500');
                             }
 
                             return (
@@ -3183,11 +3212,70 @@ export default function App() {
                                   <span className="font-black text-gray-400 text-xs uppercase tracking-widest">Soal {idx + 1} • {q.points} Poin</span>
                                   <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${statusClass}`}>{statusLabel}</span>
                                 </div>
-                                <p className="font-bold text-gray-900 mb-3">{q.text}</p>
+                                {/* Teks soal — strip HTML agar tidak tampil raw tag */}
+                                <div className="font-bold text-gray-900 mb-3" dangerouslySetInnerHTML={{ __html: q.text }} />
                                 <div className="bg-gray-50 p-3 rounded-xl text-sm font-medium text-gray-700">
                                   <span className="font-bold text-gray-400 mr-2">Jawaban:</span> {answerText}
                                 </div>
-                                {q.explanation && !isCorrect && (
+                                {/* ── Input Nilai Manual untuk Esai ── */}
+                                {q.type === 'essay' && (
+                                  <EssayManualScoreInput
+                                    questionId={q.id}
+                                    maxPoints={q.points}
+                                    currentScore={selectedResult.answers[`${q.id}_manual_score`] as number | undefined}
+                                    resultId={selectedResult.id}
+                                    onScoreSaved={(qId, pts) => {
+                                      setResults(prev => prev.map(r => {
+                                        if (r.id !== selectedResult.id) return r;
+                                        const newAnswers = { ...r.answers, [`${qId}_manual_score`]: pts };
+                                        // Hitung ulang total skor
+                                        const exam = exams.find(e => e.id === r.examId);
+                                        if (!exam) return { ...r, answers: newAnswers };
+                                        let total = 0;
+                                        exam.questions.forEach(eq => {
+                                          if (eq.type === 'essay') {
+                                            const ms = eq.id === qId ? pts : (newAnswers[`${eq.id}_manual_score`] as number ?? 0);
+                                            total += ms;
+                                          } else {
+                                            // Hitung dari jawaban existing
+                                            const ea = newAnswers[eq.id];
+                                            if (eq.type === 'mcq' && ea === eq.correctAnswerIndex) total += eq.points;
+                                            else if (eq.type === 'true_false' && ea === eq.trueFalseAnswer) total += eq.points;
+                                            else if (eq.type === 'short_answer') {
+                                              const st = normalizeText(typeof ea === 'string' ? ea : String(ea || ''));
+                                              const kt = normalizeText(eq.shortAnswer || '');
+                                              if (kt && (st === kt || st.includes(kt) || kt.includes(st) || tokenOverlapRatio(st, kt) >= 0.6)) total += eq.points;
+                                            } else if (eq.type === 'multiple_select') {
+                                              const ans = (ea as number[]) || [];
+                                              const ci = eq.correctAnswerIndices || [];
+                                              if (ans.length === ci.length && ans.every(v => ci.includes(v))) total += eq.points;
+                                            }
+                                          }
+                                        });
+                                        const updated = { ...r, answers: newAnswers, score: total };
+                                        setSelectedResult(updated);
+                                        // Sync score ke Supabase
+                                        if (isSupabaseConfigured && supabase) {
+                                          supabase.from('exam_results').update({ score: total }).eq('id', r.id).then(({ error }) => {
+                                            if (error) console.error('Failed to update score:', error);
+                                          });
+                                        }
+                                        return updated;
+                                      }));
+                                    }}
+                                  />
+                                )}
+                                {/* Preview gambar kanvas jika siswa menggunakan papan coretan */}
+                                {q.type === 'essay' && (() => {
+                                  const canvasUrl = selectedResult.answers[`${q.id}_canvas`] as string | undefined;
+                                  return canvasUrl && canvasUrl.startsWith('data:image') ? (
+                                    <div className="mt-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
+                                      <p className="text-xs font-black text-gray-500 uppercase tracking-widest mb-2">🖊️ Lembar Coretan Papan (Canvas)</p>
+                                      <img src={canvasUrl} alt="Canvas jawaban siswa" className="w-full rounded-xl border border-gray-200 shadow-sm" />
+                                    </div>
+                                  ) : null;
+                                })()}
+                                {q.explanation && q.type !== 'essay' && !isCorrect && (
                                   <div className="mt-3 text-xs text-gray-500 bg-blue-50 p-3 rounded-xl border border-blue-100">
                                     <span className="font-bold text-blue-600 block mb-1">Pembahasan:</span>
                                     {q.explanation}

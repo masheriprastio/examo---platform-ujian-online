@@ -771,18 +771,24 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                       <div className="flex items-center gap-2 mb-2">
                         <PenLine className="w-4 h-4 text-indigo-500" />
                         <span className="text-xs font-black text-indigo-600 uppercase tracking-widest">Lembar Coretan</span>
-                        <span className="text-xs text-gray-400 font-medium">— Tidak dinilai, hanya untuk perhitungan</span>
+                        <span className="text-xs text-gray-400 font-medium">— Gambar/hitung, akan dikirim ke guru</span>
                       </div>
-                      <ScratchCanvas />
+                      <ScratchCanvas
+                        onChange={(dataUrl) => {
+                          if (dataUrl) {
+                            setAnswers(prev => ({ ...prev, [`${currentQuestion.id}_canvas`]: dataUrl }));
+                          }
+                        }}
+                      />
                     </div>
                   )}
-                  {/* Textarea jawaban esai */}
+                  {/* Textarea jawaban esai (teks) */}
                   <textarea
                     value={answers[currentQuestion.id] || ''}
                     onChange={(e) => setAnswers(prev => ({ ...prev, [currentQuestion.id]: e.target.value }))}
                     onBlur={(e) => addLog('autosave', `Updated answer for Q${currentQuestionIndex + 1}: "${e.target.value}"`)}
-                    className="w-full min-h-[300px] p-8 rounded-[40px] border-2 border-gray-50 bg-white focus:border-indigo-500 outline-none font-medium text-gray-800 text-base shadow-inner resize-vertical"
-                    placeholder="Tulis jawaban lengkap Anda di sini..."
+                    className="w-full min-h-[200px] p-8 rounded-[40px] border-2 border-gray-50 bg-white focus:border-indigo-500 outline-none font-medium text-gray-800 text-base shadow-inner resize-vertical"
+                    placeholder="Tulis jawaban teks Anda di sini (opsional, jika tidak menggunakan papan coretan)..."
                   />
                 </div>
               )}
