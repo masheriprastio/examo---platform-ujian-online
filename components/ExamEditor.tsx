@@ -5,8 +5,8 @@ import { Exam, Question, QuestionType } from '../types';
 import RichTextEditor from './RichTextEditor';
 import { supabase } from '../lib/supabase';
 import * as XLSX from 'xlsx';
-import { 
-  Save, Plus, Trash2, Check, Clock, Type, Star, X, 
+import {
+  Save, Plus, Trash2, Check, Clock, Type, Star, X,
   ChevronDown, ChevronUp, Database, GripVertical, Shuffle, Tag, AlertCircle, Eye, Image as ImageIcon, Upload, Link as LinkIcon,
   AlignLeft, AlignCenter, AlignRight
 } from 'lucide-react';
@@ -49,11 +49,11 @@ const formatQuestionTimestamp = (dateString?: string): string => {
     if (diffMins < 60) return `${diffMins} menit lalu`;
     if (diffHours < 24) return `${diffHours} jam lalu`;
     if (diffDays < 7) return `${diffDays} hari lalu`;
-    
-    return date.toLocaleDateString('id-ID', { 
-      year: 'numeric', 
-      month: 'short', 
-      day: 'numeric', 
+
+    return date.toLocaleDateString('id-ID', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
       hour: '2-digit',
       minute: '2-digit'
     });
@@ -111,7 +111,7 @@ const uploadImageToSupabase = async (file: File, examId: string): Promise<string
   try {
     const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
     const fileName = `exams/${examId}/${Date.now()}_${sanitizedName}`;
-    
+
     const { data: uploadData, error: uploadError } = await supabase
       .storage
       .from('materials')
@@ -159,13 +159,13 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   // Auto-backup state to localStorage every 2 seconds
   useEffect(() => {
     if (backupTimeoutRef.current) clearTimeout(backupTimeoutRef.current);
-    
+
     backupTimeoutRef.current = setTimeout(() => {
       try {
         // Backup exam data with attachments (now they're URLs, not base64)
         const backup = JSON.stringify(formData);
         const backup_size = new Blob([backup]).size;
-        
+
         // Only save if under 4MB (leave room for other data)
         if (backup_size < 4 * 1024 * 1024) {
           localStorage.setItem(`exam_draft_${formData.id}`, backup);
@@ -181,7 +181,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
           };
           const compressedBackup = JSON.stringify(compressedData);
           const compressedSize = new Blob([compressedBackup]).size;
-          
+
           if (compressedSize < 4 * 1024 * 1024) {
             localStorage.setItem(`exam_draft_${formData.id}`, compressedBackup);
           } else {
@@ -212,7 +212,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
             }
           });
         }
-        
+
         localStorage.setItem(`exam_draft_${exam.id}`, backup);
       } catch (e) {
         if (e instanceof DOMException && e.code === 22) {
@@ -252,15 +252,15 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [formData]);
-  
+
   const handleExamChange = (field: keyof Exam, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
   const handleQuestionChange = (qIndex: number, field: keyof Question, value: any) => {
     const newQuestions = [...formData.questions];
-    newQuestions[qIndex] = { 
-      ...newQuestions[qIndex], 
+    newQuestions[qIndex] = {
+      ...newQuestions[qIndex],
       [field]: value,
       updatedAt: new Date().toISOString() // Update timestamp setiap ada perubahan
     };
@@ -273,7 +273,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     if (!qId) return;
 
     const validation = validatePointsInput(value);
-    
+
     if (!validation.isValid) {
       setPointsErrors(prev => ({
         ...prev,
@@ -292,13 +292,13 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   const handleAttachmentChange = (qIndex: number, url: string) => {
     const newQuestions = [...formData.questions];
     if (url) {
-        newQuestions[qIndex] = {
-            ...newQuestions[qIndex],
-            attachment: { type: 'image', url: url, caption: '' }
-        };
+      newQuestions[qIndex] = {
+        ...newQuestions[qIndex],
+        attachment: { type: 'image', url: url, caption: '' }
+      };
     } else {
-        const { attachment, ...rest } = newQuestions[qIndex];
-        newQuestions[qIndex] = rest;
+      const { attachment, ...rest } = newQuestions[qIndex];
+      newQuestions[qIndex] = rest;
     }
     setFormData(prev => ({ ...prev, questions: newQuestions }));
   };
@@ -332,11 +332,11 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   };
 
   const toggleUploadMode = (qId: string, mode: 'url' | 'file') => {
-      setUploadMode(prev => ({ ...prev, [qId]: mode }));
+    setUploadMode(prev => ({ ...prev, [qId]: mode }));
   };
 
   const toggleOptionUploadMode = (key: string, mode: 'url' | 'file') => {
-      setOptionUploadMode(prev => ({ ...prev, [key]: mode }));
+    setOptionUploadMode(prev => ({ ...prev, [key]: mode }));
   };
 
   const handleOptionChange = (qIndex: number, oIndex: number, value: string) => {
@@ -451,7 +451,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         // naive CSV split: split only on commas, but allow quoted values -- keep simple for now
         // better to use a CSV library if needed. Here we assume no complex quoting.
         const cols = line.split(',').map(c => c.trim());
-        const obj: Record<string,string> = {};
+        const obj: Record<string, string> = {};
         for (let i = 0; i < header.length; i++) {
           obj[header[i]] = cols[i] ?? '';
         }
@@ -480,8 +480,8 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
           difficulty: difficulty,
           createdAt: now,
           updatedAt: now,
-          ...(type === 'mcq' ? { options: options || ['Pilihan A','Pilihan B'], correctAnswerIndex: typeof correctIndex === 'number' && !isNaN(correctIndex) ? correctIndex : 0, randomizeOptions, optionAttachments: options ? Array(options.length).fill(undefined) : undefined } : {}),
-          ...(type === 'multiple_select' ? { options: options || ['Pilihan A','Pilihan B'], correctAnswerIndices: correctIndices || [], randomizeOptions, optionAttachments: options ? Array(options.length).fill(undefined) : undefined } : {}),
+          ...(type === 'mcq' ? { options: options || ['Pilihan A', 'Pilihan B'], correctAnswerIndex: typeof correctIndex === 'number' && !isNaN(correctIndex) ? correctIndex : 0, randomizeOptions, optionAttachments: options ? Array(options.length).fill(undefined) : undefined } : {}),
+          ...(type === 'multiple_select' ? { options: options || ['Pilihan A', 'Pilihan B'], correctAnswerIndices: correctIndices || [], randomizeOptions, optionAttachments: options ? Array(options.length).fill(undefined) : undefined } : {}),
           ...(type === 'true_false' ? { trueFalseAnswer: (String(obj['correctAnswerIndex'] || '').toLowerCase() === 'true') } : {}),
           ...(type === 'short_answer' ? { shortAnswer } : {}),
           ...(type === 'essay' ? { essayAnswer } : {})
@@ -509,9 +509,9 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     }
   };
 
-const downloadExcelTemplate = () => {
-  // Create a simple Excel-compatible HTML file (will open in Excel) with header + sample row and instructions.
-  const html = `<!DOCTYPE html>
+  const downloadExcelTemplate = () => {
+    // Create a simple Excel-compatible HTML file (will open in Excel) with header + sample row and instructions.
+    const html = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8" />
@@ -589,16 +589,16 @@ const downloadExcelTemplate = () => {
 </body>
 </html>`;
 
-  const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'exam_import_template.xls';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-};
+    const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'exam_import_template.xls';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   const addQuestion = (type: QuestionType = 'mcq') => {
     const now = new Date().toISOString();
@@ -624,7 +624,7 @@ const downloadExcelTemplate = () => {
   const moveQuestion = (idx: number, dir: 'up' | 'down') => {
     const target = dir === 'up' ? idx - 1 : idx + 1;
     if (target < 0 || target >= formData.questions.length) return;
-    
+
     const newQs = [...formData.questions];
     [newQs[idx], newQs[target]] = [newQs[target], newQs[idx]];
     setFormData(prev => ({ ...prev, questions: newQs }));
@@ -639,22 +639,22 @@ const downloadExcelTemplate = () => {
   const onDragOver = (e: React.DragEvent, index: number) => {
     e.preventDefault();
     if (draggedIndex === null || draggedIndex === index) return;
-    
+
     // Validate indices
-    if (draggedIndex < 0 || draggedIndex >= formData.questions.length || 
-        index < 0 || index >= formData.questions.length) {
+    if (draggedIndex < 0 || draggedIndex >= formData.questions.length ||
+      index < 0 || index >= formData.questions.length) {
       setDraggedIndex(null);
       return;
     }
-    
+
     const newQs = [...formData.questions];
     const draggedItem = newQs[draggedIndex];
-    
+
     // Safely splice and insert
     if (draggedItem) {
       newQs.splice(draggedIndex, 1);
       newQs.splice(index, 0, draggedItem);
-      
+
       setDraggedIndex(index);
       setFormData(prev => ({ ...prev, questions: newQs }));
     }
@@ -722,15 +722,15 @@ const downloadExcelTemplate = () => {
             </button>
           )}
           {onPreview && (
-            <button 
-              onClick={() => onPreview(formData)} 
+            <button
+              onClick={() => onPreview(formData)}
               className="px-4 py-2 bg-white border-2 border-indigo-100 text-indigo-600 rounded-xl hover:bg-indigo-50 font-bold flex items-center gap-2 transition-all text-sm"
             >
               <Eye className="w-4 h-4" /> Preview
             </button>
           )}
           <button onClick={onCancel} className="px-4 py-2 text-gray-500 font-bold hover:bg-gray-50 rounded-xl transition text-sm">Batal</button>
-          <button 
+          <button
             onClick={async () => {
               setIsSaving(true);
               try {
@@ -745,7 +745,7 @@ const downloadExcelTemplate = () => {
               } finally {
                 setIsSaving(false);
               }
-            }} 
+            }}
             disabled={isSaving}
             className="px-6 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-black shadow-lg shadow-indigo-100 flex items-center gap-2 transition-all active:scale-95 text-sm disabled:opacity-70 disabled:cursor-not-allowed"
           >
@@ -772,17 +772,57 @@ const downloadExcelTemplate = () => {
                 <input type="text" value={formData.title} onChange={(e) => handleExamChange('title', e.target.value)} className="w-full px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold" />
               </div>
               <div>
-                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Kategori</label>
-                <input type="text" value={formData.category} onChange={(e) => handleExamChange('category', e.target.value)} className="w-full px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white outline-none transition font-bold" />
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">
+                  Kategori / Mata Pelajaran
+                </label>
+                <select
+                  value={formData.category}
+                  onChange={(e) => handleExamChange('category', e.target.value)}
+                  className="w-full px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold text-gray-800"
+                >
+                  <option value="">-- Pilih Kategori --</option>
+                  <optgroup label="🔢 Sains & Matematika (Papan Coretan ✏️ Aktif Otomatis)">
+                    <option value="Matematika">Matematika</option>
+                    <option value="Fisika">Fisika</option>
+                    <option value="Kimia">Kimia</option>
+                    <option value="Biologi">Biologi</option>
+                    <option value="IPA">IPA (Ilmu Pengetahuan Alam)</option>
+                  </optgroup>
+                  <optgroup label="📚 Sosial & Bahasa">
+                    <option value="Bahasa Indonesia">Bahasa Indonesia</option>
+                    <option value="Bahasa Inggris">Bahasa Inggris</option>
+                    <option value="Bahasa Daerah">Bahasa Daerah</option>
+                    <option value="IPS">IPS (Ilmu Pengetahuan Sosial)</option>
+                    <option value="Sejarah">Sejarah</option>
+                    <option value="Geografi">Geografi</option>
+                    <option value="Ekonomi">Ekonomi</option>
+                    <option value="Sosiologi">Sosiologi</option>
+                  </optgroup>
+                  <optgroup label="🎨 Seni, Olahraga & Lainnya">
+                    <option value="Seni Budaya">Seni Budaya</option>
+                    <option value="Pendidikan Jasmani">Pendidikan Jasmani</option>
+                    <option value="Pendidikan Agama">Pendidikan Agama</option>
+                    <option value="PKN">PKN (Kewarganegaraan)</option>
+                    <option value="Informatika">Informatika / TIK</option>
+                    <option value="Lainnya">Lainnya</option>
+                  </optgroup>
+                </select>
+                {/* Penanda papan coretan otomatis */}
+                {['Matematika', 'Fisika', 'Kimia', 'IPA'].includes(formData.category) && (
+                  <p className="mt-1.5 text-[11px] text-indigo-600 font-bold flex items-center gap-1">
+                    ✏️ Papan coretan matematika akan <strong>aktif otomatis</strong> saat siswa mengerjakan ujian ini.
+                  </p>
+                )}
               </div>
+
               <div>
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Durasi (Menit)</label>
                 <input type="number" value={formData.durationMinutes} onChange={(e) => handleExamChange('durationMinutes', parseInt(e.target.value))} className="w-full px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white outline-none transition font-bold" />
               </div>
               <div>
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Mulai Ujian</label>
-                <input 
-                  type="datetime-local" 
+                <input
+                  type="datetime-local"
                   value={formData.startDate ? formatDateTimeLocal(formData.startDate) : ''}
                   onChange={(e) => handleExamChange('startDate', e.target.value ? new Date(e.target.value).toISOString() : undefined)}
                   className="w-full px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white outline-none transition font-bold text-sm"
@@ -790,8 +830,8 @@ const downloadExcelTemplate = () => {
               </div>
               <div>
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Selesai Ujian</label>
-                <input 
-                  type="datetime-local" 
+                <input
+                  type="datetime-local"
                   value={formData.endDate ? formatDateTimeLocal(formData.endDate) : ''}
                   onChange={(e) => handleExamChange('endDate', e.target.value ? new Date(e.target.value).toISOString() : undefined)}
                   className="w-full px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white outline-none transition font-bold text-sm"
@@ -819,7 +859,7 @@ const downloadExcelTemplate = () => {
             <div className="flex justify-between items-center mb-2">
               <h3 className="text-xl font-black text-gray-900 tracking-tight">Daftar Pertanyaan</h3>
               <div className="flex gap-2 items-center">
-                <select 
+                <select
                   className="bg-white border border-gray-200 text-gray-700 px-3 py-2 rounded-xl text-xs font-bold outline-none"
                   onChange={(e) => {
                     if (e.target.value) {
@@ -870,24 +910,24 @@ const downloadExcelTemplate = () => {
 
             <div className="space-y-3">
               {formData.questions.map((q, qIndex) => (
-                <div 
-                  key={q.id} 
-                  draggable 
+                <div
+                  key={q.id}
+                  draggable
                   onDragStart={(e) => onDragStart(e, qIndex)}
                   onDragOver={(e) => onDragOver(e, qIndex)}
                   onDragEnd={() => setDraggedIndex(null)}
                   className={`bg-white rounded-[24px] shadow-sm border border-gray-100 overflow-hidden transition-all ${draggedIndex === qIndex ? 'opacity-40 border-indigo-400 border-dashed' : ''}`}
                 >
-                  <div 
+                  <div
                     onClick={() => setActiveQuestionId(activeQuestionId === q.id ? null : q.id)}
                     className="px-5 py-4 flex items-center justify-between cursor-pointer hover:bg-gray-50/50"
                   >
                     <div className="flex items-center gap-4 flex-1 overflow-hidden">
                       <div className="flex flex-col md:hidden shrink-0">
-                        <button onClick={(e) => { e.stopPropagation(); moveQuestion(qIndex, 'up'); }} className="p-1 text-gray-300"><ChevronUp className="w-4 h-4"/></button>
-                        <button onClick={(e) => { e.stopPropagation(); moveQuestion(qIndex, 'down'); }} className="p-1 text-gray-300"><ChevronDown className="w-4 h-4"/></button>
+                        <button onClick={(e) => { e.stopPropagation(); moveQuestion(qIndex, 'up'); }} className="p-1 text-gray-300"><ChevronUp className="w-4 h-4" /></button>
+                        <button onClick={(e) => { e.stopPropagation(); moveQuestion(qIndex, 'down'); }} className="p-1 text-gray-300"><ChevronDown className="w-4 h-4" /></button>
                       </div>
-                      <div className="hidden md:block p-1 text-gray-300 cursor-grab active:cursor-grabbing"><GripVertical className="w-5 h-5"/></div>
+                      <div className="hidden md:block p-1 text-gray-300 cursor-grab active:cursor-grabbing"><GripVertical className="w-5 h-5" /></div>
                       <span className="w-8 h-8 rounded-lg bg-gray-900 text-white flex items-center justify-center font-black text-xs shrink-0">{qIndex + 1}</span>
                       <div className="flex-1 overflow-hidden min-w-0">
                         <span className="text-gray-700 font-bold truncate text-sm block">{q.text}</span>
@@ -897,20 +937,20 @@ const downloadExcelTemplate = () => {
                     </div>
                     <div className="flex items-center gap-1">
                       {onSaveToBank && (
-                        <button 
-                          onClick={(e) => { 
-                            e.stopPropagation(); 
-                            onSaveToBank(q); 
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSaveToBank(q);
                             alert('Soal disimpan ke Bank Soal!');
-                          }} 
+                          }}
                           className="p-2 text-indigo-300 hover:text-indigo-600"
                           title="Simpan ke Bank Soal"
                         >
                           <Database className="w-4 h-4" />
                         </button>
                       )}
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); setQuestionToDelete(q.id); }} 
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setQuestionToDelete(q.id); }}
                         className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition"
                         title="Hapus Soal"
                       >
@@ -968,68 +1008,68 @@ const downloadExcelTemplate = () => {
                       <div>
                         <div className="flex justify-between items-center mb-2">
                           <label className="text-[10px] font-black text-gray-400 uppercase flex items-center gap-2">
-                              <ImageIcon className="w-3 h-3" /> Lampiran Gambar
+                            <ImageIcon className="w-3 h-3" /> Lampiran Gambar
                           </label>
                           <div className="flex bg-gray-100 rounded-lg p-0.5">
-                              <button
-                                onClick={() => toggleUploadMode(q.id, 'url')}
-                                className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${(!uploadMode[q.id] || uploadMode[q.id] === 'url') ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
-                              >
-                                <LinkIcon className="w-3 h-3" /> URL
-                              </button>
-                              <button
-                                onClick={() => toggleUploadMode(q.id, 'file')}
-                                className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${uploadMode[q.id] === 'file' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
-                              >
-                                <Upload className="w-3 h-3" /> Upload
-                              </button>
+                            <button
+                              onClick={() => toggleUploadMode(q.id, 'url')}
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${(!uploadMode[q.id] || uploadMode[q.id] === 'url') ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                            >
+                              <LinkIcon className="w-3 h-3" /> URL
+                            </button>
+                            <button
+                              onClick={() => toggleUploadMode(q.id, 'file')}
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${uploadMode[q.id] === 'file' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                            >
+                              <Upload className="w-3 h-3" /> Upload
+                            </button>
                           </div>
                         </div>
 
                         <div className="flex gap-2 items-start">
-                            {(!uploadMode[q.id] || uploadMode[q.id] === 'url') ? (
-                                <input
-                                    type="text"
-                                    value={q.attachment?.url || ''}
-                                    onChange={(e) => handleAttachmentChange(qIndex, e.target.value)}
-                                    placeholder="https://example.com/image.jpg"
-                                    className="flex-1 px-4 py-2.5 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-sm font-bold outline-none"
-                                />
-                            ) : (
-                                <div className="flex-1 relative">
-                                    <input
-                                        type="file"
-                                        accept="image/*"
-                                        onChange={(e) => handleFileUpload(qIndex, e)}
-                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                                    />
-                                    <div className="w-full px-4 py-2.5 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-center hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-gray-400 font-bold text-xs">
-                                        <Upload className="w-3 h-3" />
-                                        {q.attachment?.url?.startsWith('data:') ? 'Ganti File...' : 'Klik untuk Upload'}
-                                    </div>
-                                </div>
-                            )}
+                          {(!uploadMode[q.id] || uploadMode[q.id] === 'url') ? (
+                            <input
+                              type="text"
+                              value={q.attachment?.url || ''}
+                              onChange={(e) => handleAttachmentChange(qIndex, e.target.value)}
+                              placeholder="https://example.com/image.jpg"
+                              className="flex-1 px-4 py-2.5 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-sm font-bold outline-none"
+                            />
+                          ) : (
+                            <div className="flex-1 relative">
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) => handleFileUpload(qIndex, e)}
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                              />
+                              <div className="w-full px-4 py-2.5 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-center hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-gray-400 font-bold text-xs">
+                                <Upload className="w-3 h-3" />
+                                {q.attachment?.url?.startsWith('data:') ? 'Ganti File...' : 'Klik untuk Upload'}
+                              </div>
+                            </div>
+                          )}
 
-                            {q.attachment?.url && (
-                                <div className="relative group shrink-0">
-                                    <div className="w-10 h-10 rounded-lg bg-gray-200 border border-gray-300 overflow-hidden">
-                                        <img src={q.attachment.url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
-                                    </div>
-                                    <button
-                                      onClick={() => handleAttachmentChange(qIndex, '')}
-                                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                                      title="Hapus Gambar"
-                                    >
-                                      <X className="w-3 h-3" />
-                                    </button>
-                                </div>
-                            )}
+                          {q.attachment?.url && (
+                            <div className="relative group shrink-0">
+                              <div className="w-10 h-10 rounded-lg bg-gray-200 border border-gray-300 overflow-hidden">
+                                <img src={q.attachment.url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
+                              </div>
+                              <button
+                                onClick={() => handleAttachmentChange(qIndex, '')}
+                                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                title="Hapus Gambar"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
                         </div>
                         <p className="text-[10px] text-gray-400 mt-1">
                           {(!uploadMode[q.id] || uploadMode[q.id] === 'url') ? 'Masukkan URL gambar langsung.' : 'Maksimal ukuran file 15MB.'}
                         </p>
                       </div>
-                      
+
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
                           <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Topik (Blueprint)</label>
@@ -1048,14 +1088,13 @@ const downloadExcelTemplate = () => {
                         </div>
                         <div>
                           <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Bobot Nilai</label>
-                          <input 
-                            type="text" 
-                            step="0.5" 
-                            value={q.points} 
+                          <input
+                            type="text"
+                            step="0.5"
+                            value={q.points}
                             onChange={(e) => handlePointsChange(qIndex, e.target.value)}
-                            className={`w-full px-4 py-2.5 rounded-xl border-2 bg-white focus:ring-2 focus:ring-indigo-500 text-sm font-bold outline-none transition-all ${
-                              pointsErrors[q.id] ? 'border-red-500 bg-red-50' : 'border-gray-100'
-                            }`}
+                            className={`w-full px-4 py-2.5 rounded-xl border-2 bg-white focus:ring-2 focus:ring-indigo-500 text-sm font-bold outline-none transition-all ${pointsErrors[q.id] ? 'border-red-500 bg-red-50' : 'border-gray-100'
+                              }`}
                             placeholder="Misal: 6, 6.5, atau 10"
                           />
                           {pointsErrors[q.id] && (
@@ -1076,7 +1115,7 @@ const downloadExcelTemplate = () => {
                               Acak Pilihan
                             </label>
                           </div>
-                          
+
                           <div className="grid grid-cols-1 gap-6">
                             {q.options?.map((opt, oIndex) => (
                               <div key={oIndex} className="bg-gray-50 p-4 rounded-2xl border-2 border-gray-100 space-y-4">
@@ -1102,8 +1141,8 @@ const downloadExcelTemplate = () => {
                                 {/* Rich Text Editor for Option - PERTAMA */}
                                 <div>
                                   <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Teks Pilihan</label>
-                                  <RichTextEditor 
-                                    value={opt} 
+                                  <RichTextEditor
+                                    value={opt}
                                     onChange={(value) => handleOptionChange(qIndex, oIndex, value)}
                                     placeholder={`Masukkan teks untuk pilihan ${String.fromCharCode(65 + oIndex)}...`}
                                     height="120px"
@@ -1113,62 +1152,62 @@ const downloadExcelTemplate = () => {
                                 <div className="mt-2">
                                   <div className="flex justify-between items-center mb-1">
                                     <label className="text-[10px] font-black text-gray-400 uppercase flex items-center gap-2">
-                                        <ImageIcon className="w-3 h-3" /> Lampiran Gambar (Opsional)
+                                      <ImageIcon className="w-3 h-3" /> Lampiran Gambar (Opsional)
                                     </label>
                                     <div className="flex bg-gray-100 rounded-lg p-0.5">
-                                        <button
-                                          onClick={() => toggleOptionUploadMode(`${q.id}_${oIndex}`, 'url')}
-                                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${(!optionUploadMode[`${q.id}_${oIndex}`] || optionUploadMode[`${q.id}_${oIndex}`] === 'url') ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
-                                        >
-                                          <LinkIcon className="w-3 h-3" /> URL
-                                        </button>
-                                        <button
-                                          onClick={() => toggleOptionUploadMode(`${q.id}_${oIndex}`, 'file')}
-                                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${optionUploadMode[`${q.id}_${oIndex}`] === 'file' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
-                                        >
-                                          <Upload className="w-3 h-3" /> Upload
-                                        </button>
+                                      <button
+                                        onClick={() => toggleOptionUploadMode(`${q.id}_${oIndex}`, 'url')}
+                                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${(!optionUploadMode[`${q.id}_${oIndex}`] || optionUploadMode[`${q.id}_${oIndex}`] === 'url') ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                                      >
+                                        <LinkIcon className="w-3 h-3" /> URL
+                                      </button>
+                                      <button
+                                        onClick={() => toggleOptionUploadMode(`${q.id}_${oIndex}`, 'file')}
+                                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${optionUploadMode[`${q.id}_${oIndex}`] === 'file' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                                      >
+                                        <Upload className="w-3 h-3" /> Upload
+                                      </button>
                                     </div>
                                   </div>
 
                                   <div className="flex gap-2 items-start">
-                                      {(!optionUploadMode[`${q.id}_${oIndex}`] || optionUploadMode[`${q.id}_${oIndex}`] === 'url') ? (
-                                          <input
-                                              type="text"
-                                              value={q.optionAttachments?.[oIndex]?.url || ''}
-                                              onChange={(e) => handleOptionAttachmentChange(qIndex, oIndex, e.target.value)}
-                                              placeholder="https://example.com/image.jpg"
-                                              className="flex-1 px-3 py-2 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-xs font-bold outline-none"
-                                          />
-                                      ) : (
-                                          <div className="flex-1 relative">
-                                              <input
-                                                  type="file"
-                                                  accept="image/*"
-                                                  onChange={(e) => handleOptionFileUpload(qIndex, oIndex, e)}
-                                                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                                              />
-                                              <div className="w-full px-3 py-2 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-center hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-gray-400 font-bold text-xs">
-                                                  <Upload className="w-3 h-3" />
-                                                  {q.optionAttachments?.[oIndex]?.url === 'uploading...' ? 'Mengunggah...' : 'Klik untuk Upload'}
-                                              </div>
-                                          </div>
-                                      )}
+                                    {(!optionUploadMode[`${q.id}_${oIndex}`] || optionUploadMode[`${q.id}_${oIndex}`] === 'url') ? (
+                                      <input
+                                        type="text"
+                                        value={q.optionAttachments?.[oIndex]?.url || ''}
+                                        onChange={(e) => handleOptionAttachmentChange(qIndex, oIndex, e.target.value)}
+                                        placeholder="https://example.com/image.jpg"
+                                        className="flex-1 px-3 py-2 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-xs font-bold outline-none"
+                                      />
+                                    ) : (
+                                      <div className="flex-1 relative">
+                                        <input
+                                          type="file"
+                                          accept="image/*"
+                                          onChange={(e) => handleOptionFileUpload(qIndex, oIndex, e)}
+                                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                        />
+                                        <div className="w-full px-3 py-2 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-center hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-gray-400 font-bold text-xs">
+                                          <Upload className="w-3 h-3" />
+                                          {q.optionAttachments?.[oIndex]?.url === 'uploading...' ? 'Mengunggah...' : 'Klik untuk Upload'}
+                                        </div>
+                                      </div>
+                                    )}
 
-                                      {q.optionAttachments?.[oIndex]?.url && (
-                                          <div className="relative group shrink-0">
-                                              <div className="w-10 h-10 rounded-lg bg-gray-200 border border-gray-300 overflow-hidden">
-                                                  <img src={q.optionAttachments[oIndex]?.url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
-                                              </div>
-                                              <button
-                                                onClick={() => handleOptionAttachmentChange(qIndex, oIndex, '')}
-                                                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                                                title="Hapus Gambar"
-                                              >
-                                                <X className="w-3 h-3" />
-                                              </button>
-                                          </div>
-                                      )}
+                                    {q.optionAttachments?.[oIndex]?.url && (
+                                      <div className="relative group shrink-0">
+                                        <div className="w-10 h-10 rounded-lg bg-gray-200 border border-gray-300 overflow-hidden">
+                                          <img src={q.optionAttachments[oIndex]?.url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
+                                        </div>
+                                        <button
+                                          onClick={() => handleOptionAttachmentChange(qIndex, oIndex, '')}
+                                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                          title="Hapus Gambar"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
 
@@ -1245,8 +1284,8 @@ const downloadExcelTemplate = () => {
                                   <button
                                     onClick={() => {
                                       const currentIndices = q.correctAnswerIndices || [];
-                                      const newIndices = currentIndices.includes(oIndex) 
-                                        ? currentIndices.filter(i => i !== oIndex) 
+                                      const newIndices = currentIndices.includes(oIndex)
+                                        ? currentIndices.filter(i => i !== oIndex)
                                         : [...currentIndices, oIndex];
                                       handleQuestionChange(qIndex, 'correctAnswerIndices', newIndices);
                                     }}
@@ -1259,8 +1298,8 @@ const downloadExcelTemplate = () => {
                                 {/* Rich Text Editor for Option - PERTAMA */}
                                 <div>
                                   <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Teks Pilihan</label>
-                                  <RichTextEditor 
-                                    value={opt} 
+                                  <RichTextEditor
+                                    value={opt}
                                     onChange={(value) => handleOptionChange(qIndex, oIndex, value)}
                                     placeholder={`Masukkan teks untuk pilihan ${String.fromCharCode(65 + oIndex)}...`}
                                     height="120px"
@@ -1270,62 +1309,62 @@ const downloadExcelTemplate = () => {
                                 <div className="mt-2">
                                   <div className="flex justify-between items-center mb-1">
                                     <label className="text-[10px] font-black text-gray-400 uppercase flex items-center gap-2">
-                                        <ImageIcon className="w-3 h-3" /> Lampiran Gambar (Opsional)
+                                      <ImageIcon className="w-3 h-3" /> Lampiran Gambar (Opsional)
                                     </label>
                                     <div className="flex bg-gray-100 rounded-lg p-0.5">
-                                        <button
-                                          onClick={() => toggleOptionUploadMode(`${q.id}_${oIndex}`, 'url')}
-                                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${(!optionUploadMode[`${q.id}_${oIndex}`] || optionUploadMode[`${q.id}_${oIndex}`] === 'url') ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
-                                        >
-                                          <LinkIcon className="w-3 h-3" /> URL
-                                        </button>
-                                        <button
-                                          onClick={() => toggleOptionUploadMode(`${q.id}_${oIndex}`, 'file')}
-                                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${optionUploadMode[`${q.id}_${oIndex}`] === 'file' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
-                                        >
-                                          <Upload className="w-3 h-3" /> Upload
-                                        </button>
+                                      <button
+                                        onClick={() => toggleOptionUploadMode(`${q.id}_${oIndex}`, 'url')}
+                                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${(!optionUploadMode[`${q.id}_${oIndex}`] || optionUploadMode[`${q.id}_${oIndex}`] === 'url') ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                                      >
+                                        <LinkIcon className="w-3 h-3" /> URL
+                                      </button>
+                                      <button
+                                        onClick={() => toggleOptionUploadMode(`${q.id}_${oIndex}`, 'file')}
+                                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${optionUploadMode[`${q.id}_${oIndex}`] === 'file' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+                                      >
+                                        <Upload className="w-3 h-3" /> Upload
+                                      </button>
                                     </div>
                                   </div>
 
                                   <div className="flex gap-2 items-start">
-                                      {(!optionUploadMode[`${q.id}_${oIndex}`] || optionUploadMode[`${q.id}_${oIndex}`] === 'url') ? (
-                                          <input
-                                              type="text"
-                                              value={q.optionAttachments?.[oIndex]?.url || ''}
-                                              onChange={(e) => handleOptionAttachmentChange(qIndex, oIndex, e.target.value)}
-                                              placeholder="https://example.com/image.jpg"
-                                              className="flex-1 px-3 py-2 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-xs font-bold outline-none"
-                                          />
-                                      ) : (
-                                          <div className="flex-1 relative">
-                                              <input
-                                                  type="file"
-                                                  accept="image/*"
-                                                  onChange={(e) => handleOptionFileUpload(qIndex, oIndex, e)}
-                                                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                                              />
-                                              <div className="w-full px-3 py-2 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-center hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-gray-400 font-bold text-xs">
-                                                  <Upload className="w-3 h-3" />
-                                                  {q.optionAttachments?.[oIndex]?.url === 'uploading...' ? 'Mengunggah...' : 'Klik untuk Upload'}
-                                              </div>
-                                          </div>
-                                      )}
+                                    {(!optionUploadMode[`${q.id}_${oIndex}`] || optionUploadMode[`${q.id}_${oIndex}`] === 'url') ? (
+                                      <input
+                                        type="text"
+                                        value={q.optionAttachments?.[oIndex]?.url || ''}
+                                        onChange={(e) => handleOptionAttachmentChange(qIndex, oIndex, e.target.value)}
+                                        placeholder="https://example.com/image.jpg"
+                                        className="flex-1 px-3 py-2 rounded-xl border border-gray-100 bg-white focus:ring-2 focus:ring-indigo-500 text-xs font-bold outline-none"
+                                      />
+                                    ) : (
+                                      <div className="flex-1 relative">
+                                        <input
+                                          type="file"
+                                          accept="image/*"
+                                          onChange={(e) => handleOptionFileUpload(qIndex, oIndex, e)}
+                                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                        />
+                                        <div className="w-full px-3 py-2 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-center hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-gray-400 font-bold text-xs">
+                                          <Upload className="w-3 h-3" />
+                                          {q.optionAttachments?.[oIndex]?.url === 'uploading...' ? 'Mengunggah...' : 'Klik untuk Upload'}
+                                        </div>
+                                      </div>
+                                    )}
 
-                                      {q.optionAttachments?.[oIndex]?.url && (
-                                          <div className="relative group shrink-0">
-                                              <div className="w-10 h-10 rounded-lg bg-gray-200 border border-gray-300 overflow-hidden">
-                                                  <img src={q.optionAttachments[oIndex]?.url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
-                                              </div>
-                                              <button
-                                                onClick={() => handleOptionAttachmentChange(qIndex, oIndex, '')}
-                                                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                                                title="Hapus Gambar"
-                                              >
-                                                <X className="w-3 h-3" />
-                                              </button>
-                                          </div>
-                                      )}
+                                    {q.optionAttachments?.[oIndex]?.url && (
+                                      <div className="relative group shrink-0">
+                                        <div className="w-10 h-10 rounded-lg bg-gray-200 border border-gray-300 overflow-hidden">
+                                          <img src={q.optionAttachments[oIndex]?.url} alt="Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = 'https://placehold.co/100x100?text=Error')} />
+                                        </div>
+                                        <button
+                                          onClick={() => handleOptionAttachmentChange(qIndex, oIndex, '')}
+                                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                          title="Hapus Gambar"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
 
@@ -1410,13 +1449,13 @@ const downloadExcelTemplate = () => {
             <p className="text-sm text-gray-500 mb-6">Soal yang dihapus tidak dapat dikembalikan.</p>
             <div className="flex gap-3">
               <button onClick={() => setQuestionToDelete(null)} className="flex-1 py-3 bg-gray-50 text-gray-500 rounded-xl font-bold hover:bg-gray-100 transition">Batal</button>
-              <button onClick={() => { 
-                setFormData(prev => ({ 
-                  ...prev, 
+              <button onClick={() => {
+                setFormData(prev => ({
+                  ...prev,
                   questions: prev.questions.filter(q => q.id !== questionToDelete),
                   updatedAt: new Date().toISOString() // Update timestamp saat soal dihapus
-                })); 
-                setQuestionToDelete(null); 
+                }));
+                setQuestionToDelete(null);
               }} className="flex-1 py-3 bg-red-600 text-white rounded-xl font-black hover:bg-red-700 transition">Hapus</button>
             </div>
           </div>

@@ -57,7 +57,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
   const [warningMessage, setWarningMessage] = useState('');
 
   // ── Scratch Canvas (lembar coretan matematika) ──────────────────────────
-  const MATH_KEYWORDS = ['matematika', 'math', 'fisika', 'kimia', 'berhitung', 'hitung', 'science'];
+  const MATH_KEYWORDS = ['matematika', 'math', 'fisika', 'kimia', 'ipa', 'biologi', 'berhitung', 'hitung', 'science'];
   const isMathExam = MATH_KEYWORDS.some(kw =>
     exam.category?.toLowerCase().includes(kw) ||
     exam.title?.toLowerCase().includes(kw)
