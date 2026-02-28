@@ -674,94 +674,93 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
 
   return (
     <div className="fixed inset-0 bg-white z-[60] flex flex-col font-sans text-left overflow-hidden">
-      <header className="px-6 md:px-8 py-4 md:py-5 border-b border-gray-100 flex justify-between items-center bg-white shadow-sm shrink-0">
-        <div className="flex items-center gap-4 flex-1">
-          <div className="bg-indigo-50 p-2 rounded-xl border border-indigo-100 hidden md:block">
-            <Database className="w-5 h-5 text-indigo-600" />
+      {/* ── Header: 2 baris di mobile, 1 baris di desktop ── */}
+      <header className="border-b border-gray-100 bg-white shadow-sm shrink-0">
+        {/* Baris atas: Judul + Status */}
+        <div className="px-4 md:px-8 pt-3 pb-2 md:py-4 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="bg-indigo-50 p-1.5 rounded-xl border border-indigo-100 hidden md:block shrink-0">
+              <Database className="w-5 h-5 text-indigo-600" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-base md:text-xl font-black text-gray-900 leading-none truncate">Editor Ujian</h2>
+              {lastQuestion && (
+                <p className="text-xs text-gray-400 mt-0.5 truncate hidden sm:block">
+                  Soal terakhir: {formatQuestionTimestamp(lastQuestion.createdAt)}
+                </p>
+              )}
+            </div>
           </div>
-          <div className="flex-1">
-            <h2 className="text-lg md:text-xl font-black text-gray-900 leading-none">Editor Ujian</h2>
-            {lastQuestion && (
-              <p className="text-xs text-gray-500 mt-1 line-clamp-1">
-                Soal terakhir dibuat: {formatQuestionTimestamp(lastQuestion.createdAt)}
-              </p>
-            )}
-          </div>
-          {/* Status Badge & Toggle */}
-          <div className="flex items-center gap-3 ml-4 pr-2 border-r border-gray-100">
-            {formData.status === 'draft' ? (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <Clock className="w-4 h-4 text-yellow-600" />
-                <span className="text-xs font-bold text-yellow-700">DRAFT</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg">
-                <Check className="w-4 h-4 text-green-600" />
-                <span className="text-xs font-bold text-green-700">PUBLISHED</span>
-              </div>
-            )}
-          </div>
+          {/* Status badge */}
+          {formData.status === 'draft' ? (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-yellow-50 border border-yellow-200 rounded-lg shrink-0">
+              <Clock className="w-3.5 h-3.5 text-yellow-600" />
+              <span className="text-xs font-bold text-yellow-700">DRAFT</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-green-50 border border-green-200 rounded-lg shrink-0">
+              <Check className="w-3.5 h-3.5 text-green-600" />
+              <span className="text-xs font-bold text-green-700">PUBLISHED</span>
+            </div>
+          )}
         </div>
-        <div className="flex gap-2 ml-4">
+
+        {/* Baris bawah: Tombol aksi — selalu terlihat di mobile */}
+        <div className="px-4 md:px-8 pb-3 md:pb-4 flex items-center gap-2 overflow-x-auto">
           {/* Toggle Draft/Published */}
           {formData.status === 'draft' ? (
             <button
               onClick={() => handleExamChange('status', 'published')}
-              className="px-4 py-2 bg-green-50 border-2 border-green-200 text-green-600 rounded-xl hover:bg-green-100 font-bold flex items-center gap-2 transition-all text-sm"
-              title="Publikasikan ujian agar siswa bisa melihat"
+              className="flex items-center gap-1.5 px-3 py-2 bg-green-50 border border-green-200 text-green-700 rounded-xl font-bold text-xs shrink-0 whitespace-nowrap"
             >
-              <Check className="w-4 h-4" /> Publikasikan
+              <Check className="w-3.5 h-3.5" /> Publikasikan
             </button>
           ) : (
             <button
               onClick={() => handleExamChange('status', 'draft')}
-              className="px-4 py-2 bg-yellow-50 border-2 border-yellow-200 text-yellow-600 rounded-xl hover:bg-yellow-100 font-bold flex items-center gap-2 transition-all text-sm"
-              title="Ubah ke draft agar siswa tidak bisa melihat"
+              className="flex items-center gap-1.5 px-3 py-2 bg-yellow-50 border border-yellow-200 text-yellow-700 rounded-xl font-bold text-xs shrink-0 whitespace-nowrap"
             >
-              <Clock className="w-4 h-4" /> Ke Draft
+              <Clock className="w-3.5 h-3.5" /> Ke Draft
             </button>
           )}
           {onPreview && (
             <button
               onClick={() => onPreview(formData)}
-              className="px-4 py-2 bg-white border-2 border-indigo-100 text-indigo-600 rounded-xl hover:bg-indigo-50 font-bold flex items-center gap-2 transition-all text-sm"
+              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-indigo-100 text-indigo-600 rounded-xl font-bold text-xs shrink-0 whitespace-nowrap"
             >
-              <Eye className="w-4 h-4" /> Preview
+              <Eye className="w-3.5 h-3.5" /> Preview
             </button>
           )}
-          <button onClick={onCancel} className="px-4 py-2 text-gray-500 font-bold hover:bg-gray-50 rounded-xl transition text-sm">Batal</button>
+          <button
+            onClick={onCancel}
+            className="px-3 py-2 text-gray-500 font-bold hover:bg-gray-50 rounded-xl transition text-xs shrink-0 whitespace-nowrap"
+          >
+            Batal
+          </button>
+          {/* ── SIMPAN — selalu terlihat, diberi warna mencolok ── */}
           <button
             onClick={async () => {
               setIsSaving(true);
               try {
                 await Promise.resolve(onSave(formData));
                 lastSavedRef.current = JSON.stringify(formData);
-                // Clear backup after successful save
-                try {
-                  localStorage.removeItem(`exam_draft_${exam.id}`);
-                } catch (e) {
-                  console.warn('Failed to clear backup:', e);
-                }
+                try { localStorage.removeItem(`exam_draft_${exam.id}`); } catch (_) { }
               } finally {
                 setIsSaving(false);
               }
             }}
             disabled={isSaving}
-            className="px-6 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-black shadow-lg shadow-indigo-100 flex items-center gap-2 transition-all active:scale-95 text-sm disabled:opacity-70 disabled:cursor-not-allowed"
+            className="ml-auto flex items-center gap-1.5 px-5 py-2 bg-indigo-600 text-white rounded-xl font-black text-sm shadow-md shadow-indigo-200 active:scale-95 transition-all disabled:opacity-70 shrink-0 whitespace-nowrap"
           >
             {isSaving ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Menyimpan...
-              </>
+              <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />Menyimpan...</>
             ) : (
-              <>
-                <Save className="w-4 h-4" /> Simpan
-              </>
+              <><Save className="w-3.5 h-3.5" />Simpan</>
             )}
           </button>
         </div>
       </header>
+
 
       <div className="flex-1 overflow-y-auto bg-gray-50/50 p-4 md:p-10">
         <div className="max-w-4xl mx-auto space-y-6 md:space-y-10">
@@ -1001,7 +1000,12 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                             <AlignRight className="w-4 h-4" />
                           </button>
                         </div>
-                        <textarea value={q.text} onChange={(e) => handleQuestionChange(qIndex, 'text', e.target.value)} className="w-full px-4 py-3 rounded-xl border border-gray-100 focus:ring-2 focus:ring-indigo-500 h-20 font-bold outline-none" />
+                        <RichTextEditor
+                          value={q.text}
+                          onChange={(value) => handleQuestionChange(qIndex, 'text', value)}
+                          placeholder="Tulis teks pertanyaan di sini..."
+                          height="120px"
+                        />
                       </div>
 
                       {/* Image Attachment Input */}
@@ -1422,7 +1426,12 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                       {q.type === 'essay' && (
                         <div>
                           <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Panduan Jawaban / Rubrik (Esai)</label>
-                          <textarea value={q.essayAnswer || ''} onChange={(e) => handleQuestionChange(qIndex, 'essayAnswer', e.target.value)} placeholder="Masukkan poin-poin penting yang harus ada dalam jawaban siswa..." className="w-full px-4 py-3 rounded-xl border border-gray-100 focus:ring-2 focus:ring-indigo-500 h-24 font-bold outline-none text-sm" />
+                          <RichTextEditor
+                            value={q.essayAnswer || ''}
+                            onChange={(value) => handleQuestionChange(qIndex, 'essayAnswer', value)}
+                            placeholder="Masukkan poin-poin penting yang harus ada dalam jawaban siswa..."
+                            height="140px"
+                          />
                         </div>
                       )}
 

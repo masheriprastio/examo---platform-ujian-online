@@ -609,20 +609,15 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                 <span className="inline-block bg-gray-900 text-white px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em]">
                   PERTANYAAN {currentQuestionIndex + 1}
                 </span>
-                {/* Toggle papan coretan – auto-visible untuk exam math */}
-                <button
-                  onClick={() => setShowScratch(s => !s)}
-                  className={`flex items-center gap-2 px-4 py-1.5 rounded-xl border-2 text-xs font-black transition-all ${showScratch
-                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-100'
-                    : 'bg-white border-indigo-200 text-indigo-600 hover:bg-indigo-50'
-                    }`}
-                >
-                  <PenLine className="w-3.5 h-3.5" />
-                  {showScratch ? 'Sembunyikan Coretan' : 'Papan Coretan ✏️'}
-                </button>
+                {/* Hanya tampil badge untuk soal Esai */}
+                {currentQuestion.type === 'essay' && (
+                  <span className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-indigo-50 border border-indigo-100 text-[10px] font-black text-indigo-600 uppercase tracking-widest">
+                    <PenLine className="w-3 h-3" /> Esai
+                  </span>
+                )}
               </div>
 
-              {/* Added Image Display Here */}
+              {/* Lampiran gambar */}
               {currentQuestion.attachment && currentQuestion.attachment.type === 'image' && (
                 <div className="mb-6 rounded-2xl overflow-hidden border border-gray-200 shadow-sm">
                   <img
@@ -639,12 +634,12 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                 </div>
               )}
 
+              {/* Teks pertanyaan — support rich text dari editor */}
               <h1
                 className="text-2xl md:text-3xl font-bold text-gray-900 leading-tight"
                 style={{ textAlign: (currentQuestion.textAlign || 'left') as any }}
-              >
-                {currentQuestion.text}
-              </h1>
+                dangerouslySetInnerHTML={{ __html: currentQuestion.text }}
+              />
             </div>
 
             <div className="space-y-4">
@@ -769,31 +764,29 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
               )}
 
               {currentQuestion.type === 'essay' && (
-                <textarea
-                  value={answers[currentQuestion.id] || ''}
-                  onChange={(e) => setAnswers(prev => ({ ...prev, [currentQuestion.id]: e.target.value }))}
-                  onBlur={(e) => addLog('autosave', `Updated answer for Q${currentQuestionIndex + 1}: "${e.target.value}"`)}
-                  className="w-full min-h-[500px] p-8 rounded-[40px] border-2 border-gray-50 bg-white focus:border-indigo-500 outline-none font-medium text-gray-800 text-base shadow-inner resize-vertical"
-                  placeholder="Tulis jawaban lengkap Anda di sini..."
-                />
+                <div className="space-y-4">
+                  {/* ── Papan Coretan — hanya untuk soal Esai & ujian sains/math ── */}
+                  {showScratch && (
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <PenLine className="w-4 h-4 text-indigo-500" />
+                        <span className="text-xs font-black text-indigo-600 uppercase tracking-widest">Lembar Coretan</span>
+                        <span className="text-xs text-gray-400 font-medium">— Tidak dinilai, hanya untuk perhitungan</span>
+                      </div>
+                      <ScratchCanvas />
+                    </div>
+                  )}
+                  {/* Textarea jawaban esai */}
+                  <textarea
+                    value={answers[currentQuestion.id] || ''}
+                    onChange={(e) => setAnswers(prev => ({ ...prev, [currentQuestion.id]: e.target.value }))}
+                    onBlur={(e) => addLog('autosave', `Updated answer for Q${currentQuestionIndex + 1}: "${e.target.value}"`)}
+                    className="w-full min-h-[300px] p-8 rounded-[40px] border-2 border-gray-50 bg-white focus:border-indigo-500 outline-none font-medium text-gray-800 text-base shadow-inner resize-vertical"
+                    placeholder="Tulis jawaban lengkap Anda di sini..."
+                  />
+                </div>
               )}
             </div>
-
-            {/* ── Papan Coretan Matematika ── */}
-            {showScratch && (
-              <div className="mt-8">
-                <div className="flex items-center gap-2 mb-3">
-                  <PenLine className="w-4 h-4 text-indigo-500" />
-                  <span className="text-xs font-black text-indigo-600 uppercase tracking-widest">
-                    Lembar Coretan
-                  </span>
-                  <span className="text-xs text-gray-400 font-medium">
-                    — Tidak dinilai, hanya untuk perhitungan
-                  </span>
-                </div>
-                <ScratchCanvas />
-              </div>
-            )}
           </div>
         </main>
 
