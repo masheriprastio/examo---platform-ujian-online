@@ -3120,175 +3120,108 @@ export default function App() {
 
                 {selectedResult && (
                   <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6 animate-in fade-in" onClick={() => setSelectedResult(null)}>
-                    <div className="bg-white w-full max-w-4xl rounded-[30px] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
-                      <div className="p-6 md:p-8 border-b border-gray-100 flex justify-between items-center bg-gray-50 shrink-0">
+                    <div className="bg-white w-full max-w-3xl rounded-[30px] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+                      <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50 shrink-0">
                         <div>
-                          <h3 className="text-2xl font-black text-gray-900 tracking-tight">Detail Hasil Ujian</h3>
-                          <p className="text-gray-500 font-bold mt-1 text-sm">{selectedResult.studentName} • {exams.find(e => e.id === selectedResult.examId)?.title}</p>
+                          <h3 className="text-xl font-black text-gray-900">Detail Hasil Ujian Saya</h3>
+                          <p className="text-gray-500 font-medium text-sm mt-1">{exams.find(e => e.id === selectedResult.examId)?.title}</p>
                         </div>
                         <button onClick={() => setSelectedResult(null)} className="p-2 bg-white rounded-full text-gray-400 hover:text-gray-900 shadow-sm transition-all hover:rotate-90"><CloseIcon /></button>
                       </div>
-
-                      <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-gray-50/30">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                          <div className={`p-6 rounded-2xl border-2 ${selectedResult.score >= 75 ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'} text-center`}>
-                            <p className="text-xs font-black uppercase tracking-widest mb-1 opacity-70">Skor Akhir</p>
-                            <h3 className="text-5xl font-black tracking-tighter">{selectedResult.score}</h3>
-                            <p className="text-sm font-bold mt-2">{selectedResult.score >= 75 ? 'LULUS' : 'TIDAK LULUS'}</p>
+                      <div className="flex-1 overflow-y-auto p-6 bg-gray-50/30 space-y-4">
+                        {/* Score summary */}
+                        <div className="grid grid-cols-3 gap-4">
+                          <div className={`p-5 rounded-2xl border-2 text-center col-span-1 ${selectedResult.score >= 75 ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                            <p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-70">Skor</p>
+                            <h3 className="text-4xl font-black">{selectedResult.score}</h3>
+                            <p className="text-xs font-bold mt-1">{selectedResult.score >= 75 ? 'LULUS' : 'TIDAK LULUS'}</p>
                           </div>
-                          <div className="p-6 rounded-2xl bg-white border border-gray-100 shadow-sm flex flex-col justify-center gap-2">
+                          <div className="col-span-2 p-5 rounded-2xl bg-white border border-gray-100 shadow-sm flex flex-col justify-center gap-2">
                             <div className="flex justify-between"><span className="text-gray-500 font-bold text-sm">Benar</span><span className="font-black text-green-600">{selectedResult.correctCount}</span></div>
                             <div className="flex justify-between"><span className="text-gray-500 font-bold text-sm">Salah</span><span className="font-black text-red-500">{selectedResult.incorrectCount}</span></div>
                             <div className="flex justify-between"><span className="text-gray-500 font-bold text-sm">Kosong</span><span className="font-black text-gray-400">{selectedResult.unansweredCount}</span></div>
                           </div>
-                          <div className="p-6 rounded-2xl bg-white border border-gray-100 shadow-sm flex flex-col justify-center">
-                            <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Waktu Pengerjaan</p>
-                            <p className="font-bold text-gray-900">{formatDate(selectedResult.startedAt)}</p>
-                            <p className="text-xs text-gray-400 mt-1">Dikirim: {formatDate(selectedResult.submittedAt!)}</p>
-                          </div>
                         </div>
+                        {/* Answer detail */}
+                        <h4 className="font-black text-gray-900 text-base">Jawaban Anda</h4>
+                        {exams.find(e => e.id === selectedResult.examId)?.questions.map((q, idx) => {
+                          const answer = selectedResult.answers[q.id];
+                          let isCorrect = false;
+                          let answerText = '(Tidak Dijawab)';
 
-                        <h4 className="font-black text-gray-900 text-lg mb-4">Jawaban Anda</h4>
-                        <div className="space-y-4">
-                          {exams.find(e => e.id === selectedResult.examId)?.questions.map((q, idx) => {
-                            const answer = selectedResult.answers[q.id];
-                            let isCorrect = false;
-                            let answerText = '-';
+                          if (q.type === 'mcq') {
+                            isCorrect = answer === q.correctAnswerIndex;
+                            const opt = q.options && answer !== undefined && answer !== '' ? q.options[Number(answer)] : '';
+                            answerText = opt ? `${String.fromCharCode(65 + Number(answer))}. ${opt}` : '(Tidak Dijawab)';
+                          } else if (q.type === 'multiple_select') {
+                            const ans = (answer as number[]) || [];
+                            const ci = q.correctAnswerIndices || [];
+                            isCorrect = ans.length === ci.length && ans.every(v => ci.includes(v));
+                            answerText = q.options && ans.length > 0 ? ans.map(i => `${String.fromCharCode(65 + i)}. ${q.options![i]}`).join(', ') : '(Tidak Dijawab)';
+                          } else if (q.type === 'true_false') {
+                            isCorrect = answer === q.trueFalseAnswer;
+                            answerText = answer === true ? 'BENAR' : answer === false ? 'SALAH' : '(Tidak Dijawab)';
+                          } else if (q.type === 'short_answer') {
+                            const st = normalizeText(typeof answer === 'string' ? answer : '');
+                            const kt = normalizeText(q.shortAnswer || '');
+                            isCorrect = kt.length > 0 && (st === kt || st.includes(kt) || kt.includes(st) || tokenOverlapRatio(st, kt) >= 0.6);
+                            answerText = typeof answer === 'string' ? answer : '(Tidak Dijawab)';
+                          } else if (q.type === 'essay') {
+                            answerText = typeof answer === 'string' && answer.trim() ? answer : '(Tidak Dijawab)';
+                          }
 
-                            if (q.type === 'mcq') {
-                              isCorrect = answer === q.correctAnswerIndex;
-                              const optText = q.options && answer !== undefined && answer !== '' ? q.options[Number(answer)] : '';
-                              answerText = optText ? `${String.fromCharCode(65 + Number(answer))}. ${optText}` : '(Tidak Dijawab)';
-                            } else if (q.type === 'multiple_select') {
-                              const ans = (answer as number[]) || [];
-                              const correctIndices = q.correctAnswerIndices || [];
-                              isCorrect = ans.length === correctIndices.length && ans.every(val => correctIndices.includes(val));
-                              answerText = q.options && ans.length > 0 ? ans.map(i => `${String.fromCharCode(65 + i)}. ${q.options![i]}`).join(', ') : '(Tidak Dijawab)';
-                            } else if (q.type === 'true_false') {
-                              isCorrect = answer === q.trueFalseAnswer;
-                              answerText = answer === true ? 'BENAR' : answer === false ? 'SALAH' : '(Tidak Dijawab)';
-                            } else if (q.type === 'short_answer') {
-                              const studentTxt = normalizeText(typeof answer === 'string' ? answer : String(answer || ''));
-                              const keyTxt = normalizeText(q.shortAnswer as string);
-                              isCorrect = keyTxt.length > 0 && (
-                                studentTxt === keyTxt ||
-                                studentTxt.includes(keyTxt) ||
-                                keyTxt.includes(studentTxt) ||
-                                tokenOverlapRatio(studentTxt, keyTxt) >= 0.6
-                              );
-                              answerText = typeof answer === 'string' ? answer : '(Tidak Dijawab)';
-                            } else if (q.type === 'essay') {
-                              answerText = typeof answer === 'string' && answer.trim() ? answer : '(Tidak Dijawab)';
-                            }
+                          // Status for essay: show manual score or "waiting"
+                          const manualScore = selectedResult.answers[`${q.id}_manual_score`] as number | undefined;
+                          const isEssay = q.type === 'essay';
+                          const statusLabel = isEssay
+                            ? (manualScore !== undefined ? `Nilai Guru: ${manualScore}/${q.points}` : 'Menunggu Penilaian Guru')
+                            : (isCorrect ? 'Benar' : 'Salah');
+                          const statusClass = isEssay
+                            ? (manualScore !== undefined ? 'bg-indigo-100 text-indigo-700' : 'bg-yellow-100 text-yellow-700')
+                            : (isCorrect ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700');
+                          const borderClass = isEssay
+                            ? (manualScore !== undefined ? 'border-l-indigo-500' : 'border-l-yellow-400')
+                            : (isCorrect ? 'border-l-green-500' : 'border-l-red-500');
 
-                            // Label status
-                            let statusLabel = '';
-                            let statusClass = '';
-                            let borderClass = '';
+                          // Canvas for student's own view (show their drawing)
+                          const canvasUrl = selectedResult.answers[`${q.id}_canvas`] as string | undefined;
 
-                            if (q.type === 'essay') {
-                              // Cek apakah sudah ada nilai manual di answers (key: `${q.id}_manual_score`)
-                              const manualScore = selectedResult.answers[`${q.id}_manual_score`];
-                              if (manualScore !== undefined && manualScore !== null) {
-                                statusLabel = `Nilai: ${manualScore}/${q.points}`;
-                                statusClass = 'bg-indigo-100 text-indigo-700';
-                                borderClass = 'border-l-indigo-500';
-                              } else if (answerText !== '(Tidak Dijawab)') {
-                                statusLabel = 'Perlu Dinilai';
-                                statusClass = 'bg-yellow-100 text-yellow-700';
-                                borderClass = 'border-l-yellow-400';
-                              } else {
-                                statusLabel = 'Kosong (0)';
-                                statusClass = 'bg-gray-100 text-gray-500';
-                                borderClass = 'border-l-gray-300';
-                              }
-                            } else {
-                              isCorrect ? (statusLabel = 'Benar', statusClass = 'bg-green-100 text-green-700', borderClass = 'border-l-green-500') : (statusLabel = 'Salah', statusClass = 'bg-red-100 text-red-700', borderClass = 'border-l-red-500');
-                            }
-
-                            return (
-                              <div key={q.id} className={`p-5 rounded-2xl border-l-4 bg-white shadow-sm ${borderClass}`}>
-                                <div className="flex justify-between items-start mb-2">
-                                  <span className="font-black text-gray-400 text-xs uppercase tracking-widest">Soal {idx + 1} • {q.points} Poin</span>
-                                  <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${statusClass}`}>{statusLabel}</span>
-                                </div>
-                                {/* Teks soal — strip HTML agar tidak tampil raw tag */}
-                                <div className="font-bold text-gray-900 mb-3" dangerouslySetInnerHTML={{ __html: q.text }} />
-                                <div className="bg-gray-50 p-3 rounded-xl text-sm font-medium text-gray-700">
-                                  <span className="font-bold text-gray-400 mr-2">Jawaban:</span> {answerText}
-                                </div>
-                                {/* ── Input Nilai Manual untuk Esai ── */}
-                                {q.type === 'essay' && (
-                                  <EssayManualScoreInput
-                                    questionId={q.id}
-                                    maxPoints={q.points}
-                                    currentScore={selectedResult.answers[`${q.id}_manual_score`] as number | undefined}
-                                    resultId={selectedResult.id}
-                                    onScoreSaved={(qId, pts) => {
-                                      setResults(prev => prev.map(r => {
-                                        if (r.id !== selectedResult.id) return r;
-                                        const newAnswers = { ...r.answers, [`${qId}_manual_score`]: pts };
-                                        // Hitung ulang total skor
-                                        const exam = exams.find(e => e.id === r.examId);
-                                        if (!exam) return { ...r, answers: newAnswers };
-                                        let total = 0;
-                                        exam.questions.forEach(eq => {
-                                          if (eq.type === 'essay') {
-                                            const ms = eq.id === qId ? pts : (newAnswers[`${eq.id}_manual_score`] as number ?? 0);
-                                            total += ms;
-                                          } else {
-                                            // Hitung dari jawaban existing
-                                            const ea = newAnswers[eq.id];
-                                            if (eq.type === 'mcq' && ea === eq.correctAnswerIndex) total += eq.points;
-                                            else if (eq.type === 'true_false' && ea === eq.trueFalseAnswer) total += eq.points;
-                                            else if (eq.type === 'short_answer') {
-                                              const st = normalizeText(typeof ea === 'string' ? ea : String(ea || ''));
-                                              const kt = normalizeText(eq.shortAnswer || '');
-                                              if (kt && (st === kt || st.includes(kt) || kt.includes(st) || tokenOverlapRatio(st, kt) >= 0.6)) total += eq.points;
-                                            } else if (eq.type === 'multiple_select') {
-                                              const ans = (ea as number[]) || [];
-                                              const ci = eq.correctAnswerIndices || [];
-                                              if (ans.length === ci.length && ans.every(v => ci.includes(v))) total += eq.points;
-                                            }
-                                          }
-                                        });
-                                        const updated = { ...r, answers: newAnswers, score: total };
-                                        setSelectedResult(updated);
-                                        // Sync score ke Supabase
-                                        if (isSupabaseConfigured && supabase) {
-                                          supabase.from('exam_results').update({ score: total }).eq('id', r.id).then(({ error }) => {
-                                            if (error) console.error('Failed to update score:', error);
-                                          });
-                                        }
-                                        return updated;
-                                      }));
-                                    }}
-                                  />
-                                )}
-                                {/* Preview gambar kanvas jika siswa menggunakan papan coretan */}
-                                {q.type === 'essay' && (() => {
-                                  const canvasUrl = selectedResult.answers[`${q.id}_canvas`] as string | undefined;
-                                  return canvasUrl && canvasUrl.startsWith('data:image') ? (
-                                    <div className="mt-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
-                                      <p className="text-xs font-black text-gray-500 uppercase tracking-widest mb-2">🖊️ Lembar Coretan Papan (Canvas)</p>
-                                      <img src={canvasUrl} alt="Canvas jawaban siswa" className="w-full rounded-xl border border-gray-200 shadow-sm" />
-                                    </div>
-                                  ) : null;
-                                })()}
-                                {q.explanation && q.type !== 'essay' && !isCorrect && (
-                                  <div className="mt-3 text-xs text-gray-500 bg-blue-50 p-3 rounded-xl border border-blue-100">
-                                    <span className="font-bold text-blue-600 block mb-1">Pembahasan:</span>
-                                    {q.explanation}
-                                  </div>
-                                )}
+                          return (
+                            <div key={q.id} className={`p-4 rounded-2xl border-l-4 bg-white shadow-sm ${borderClass}`}>
+                              <div className="flex justify-between items-start mb-2">
+                                <span className="font-black text-gray-400 text-xs uppercase tracking-widest">Soal {idx + 1} • {q.points} Poin</span>
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-black ${statusClass}`}>{statusLabel}</span>
                               </div>
-                            );
-                          })}
-                        </div>
+                              <div className="font-bold text-gray-900 mb-3 text-sm" dangerouslySetInnerHTML={{ __html: q.text }} />
+                              <div className="bg-gray-50 p-3 rounded-xl text-sm font-medium text-gray-700">
+                                <span className="font-bold text-gray-400 mr-2">Jawaban:</span> {answerText}
+                              </div>
+                              {/* Tampilkan gambar kanvas siswa sendiri */}
+                              {isEssay && canvasUrl && canvasUrl.startsWith('data:image') && (
+                                <div className="mt-3 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+                                  <p className="text-xs font-black text-indigo-500 uppercase tracking-widest mb-2">🖊️ Coretan Papan Anda</p>
+                                  <img src={canvasUrl} alt="Coretan kanvas" className="w-full rounded-xl border border-indigo-200 shadow-sm" />
+                                </div>
+                              )}
+                              {/* Jika esai dan belum ada nilai guru, tampilkan pesan */}
+                              {isEssay && manualScore === undefined && (
+                                <p className="mt-2 text-xs text-yellow-600 font-bold bg-yellow-50 p-2 rounded-lg">
+                                  ⏳ Guru sedang memeriksa jawaban esai Anda. Nilai akan muncul setelah penilaian selesai.
+                                </p>
+                              )}
+                              {q.explanation && !isEssay && !isCorrect && (
+                                <div className="mt-3 text-xs text-gray-500 bg-blue-50 p-3 rounded-xl border border-blue-100">
+                                  <span className="font-bold text-blue-600 block mb-1">Pembahasan:</span>{q.explanation}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
                 )}
+
               </div>
             ) : (
               <div className="max-w-6xl mx-auto animate-in fade-in">
@@ -3391,9 +3324,9 @@ export default function App() {
               </div>
             )
           )}
-        </main>
-      </div>
-    </div>
+        </main >
+      </div >
+    </div >
   );
 }
 
