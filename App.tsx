@@ -1415,43 +1415,77 @@ export default function App() {
 
   // Wrapper for BULK Student Updates (e.g., Import)
   const handleStudentUpdate = async (newStudents: User[]) => {
-    // This is primarily for Excel Import which replaces/appends the list
-    // Determine added items (simple diff based on ID format or just append logic from StudentManager)
-
-    // If StudentManager passes the WHOLE new list, and we want to sync:
-    // It's safer to just handle the NEW items if possible, but let's assume
-    // `newStudents` contains [newly_imported..., old_existing...]
-
     // Filter out students that are already in state (by ID)
     const existingIds = new Set(students.map(s => s.id));
     const addedStudents = newStudents.filter(s => !existingIds.has(s.id));
 
-    // Optimistic
-    setStudents(newStudents);
+    if (addedStudents.length === 0) {
+      addAlert('Tidak ada siswa baru untuk diimport.', 'info');
+      return;
+    }
 
-    if (isSupabaseConfigured && supabase && addedStudents.length > 0) {
-      const rowsToInsert = addedStudents.map(s => ({
-        name: s.name,
-        email: s.email,
-        password: s.password,
-        role: 'student',
-        grade: s.grade,
-        school: 'SMA Negeri 1 Digital', // Default
-        nis: s.nis
-      }));
+    // Optimistic: merge new with existing
+    setStudents(prev => {
+      const prevIds = new Set(prev.map(s => s.id));
+      return [...prev, ...addedStudents.filter(s => !prevIds.has(s.id))];
+    });
 
+    if (isSupabaseConfigured && supabase) {
+      // --- Step 1: Cek email yang sudah ada di DB agar tidak duplicate ---
+      const emailsToCheck = addedStudents.map(s => s.email);
+      const { data: existingEmailRows } = await supabase
+        .from('users')
+        .select('email')
+        .in('email', emailsToCheck);
+
+      const existingEmails = new Set((existingEmailRows || []).map((r: any) => r.email.toLowerCase()));
+
+      // --- Step 2: Pisahkan yang bisa diinsert vs yang harus diskip ---
+      const rowsToInsert = addedStudents
+        .filter(s => !existingEmails.has(s.email.toLowerCase()))
+        .map(s => ({
+          name: s.name,
+          email: s.email,
+          password: s.password || 'password',
+          role: 'student',
+          grade: s.grade,
+          school: 'SMA Negeri 1 Digital',
+          nis: s.nis
+        }));
+
+      const skippedCount = addedStudents.length - rowsToInsert.length;
+
+      if (rowsToInsert.length === 0) {
+        addAlert(
+          `Semua ${skippedCount} email sudah ada di database. Import dilewati.`,
+          'info'
+        );
+        // Rollback optimistic since nothing was inserted
+        const { data } = await supabase.from('users').select('*').eq('role', 'student');
+        if (data) setStudents(data as User[]);
+        return;
+      }
+
+      // --- Step 3: Insert hanya yang belum ada ---
       const { error } = await supabase.from('users').insert(rowsToInsert);
       if (error) {
         console.error("Bulk insert failed:", error);
         addAlert("Gagal import ke database: " + error.message, 'error');
         // Rollback optimistic
-        setStudents(students);
+        const { data } = await supabase.from('users').select('*').eq('role', 'student');
+        if (data) setStudents(data as User[]);
       } else {
-        // Re-fetch to get IDs? Or just let next load handle it.
-        // For better UX, we should ideally re-fetch.
+        const successMsg = skippedCount > 0
+          ? `Berhasil import ${rowsToInsert.length} siswa. ${skippedCount} dilewati (email sudah terdaftar).`
+          : `Berhasil import ${rowsToInsert.length} siswa!`;
+        addAlert(successMsg, 'success');
+        // Re-fetch untuk update ID dari DB
         const { data } = await supabase.from('users').select('*').eq('role', 'student');
         if (data) setStudents(data as User[]);
       }
+    } else {
+      // Mock mode
+      addAlert(`Berhasil import ${addedStudents.length} siswa (Mock Mode)!`, 'success');
     }
   };
 
@@ -1681,6 +1715,7 @@ export default function App() {
 
     XLSX.utils.book_append_sheet(wb, ws, "Template Soal");
     XLSX.writeFile(wb, "Template_Import_Soal_Examo.xlsx");
+    addAlert('✅ Template soal berhasil didownload!', 'success');
   };
 
   const handleDownloadDocxTemplate = () => {
@@ -1707,6 +1742,7 @@ export default function App() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    addAlert('✅ Template soal (.docx) berhasil didownload!', 'success');
   };
 
   const handleImportExam = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2113,6 +2149,7 @@ export default function App() {
     ]);
     autoTable(doc, { startY: 30, head: [['No', 'Nama', 'Ujian', 'Benar', 'Nilai', 'Waktu']], body: tableData });
     doc.save('Laporan_Nilai.pdf');
+    addAlert('✅ Laporan Nilai berhasil diexport ke PDF!', 'success');
   };
 
   const exportGradesToCSV = () => {
@@ -2135,6 +2172,7 @@ export default function App() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    addAlert('✅ Data nilai berhasil diexport ke CSV!', 'success');
   };
 
   const exportAnswersToPDF = (resultsToExport: ExamResult[], filename: string) => {
@@ -2249,6 +2287,7 @@ export default function App() {
     });
 
     doc.save(filename);
+    addAlert(`✅ Rekap jawaban berhasil diexport ke PDF!`, 'success');
   };
 
   const exportFullAnswersToPDF = () => {

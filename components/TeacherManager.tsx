@@ -44,6 +44,7 @@ const TeacherManager: React.FC<TeacherManagerProps> = ({ teachers, onUpdate, onA
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Daftar Guru");
     XLSX.writeFile(wb, "Template_Import_Guru_Examo.xlsx");
+    addAlert('✅ Template guru berhasil didownload!', 'success');
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -101,16 +102,16 @@ const TeacherManager: React.FC<TeacherManagerProps> = ({ teachers, onUpdate, onA
         }
 
         if (toInsert.length > 0) {
-            try {
-              // Await caller to handle DB insert and surface errors
-              await onUpdate(toInsert);
-              addAlert(`Berhasil mengimpor ${toInsert.length} guru.`, 'success');
-            } catch (err: any) {
-              console.error('Import teachers failed:', err);
-              // Try to extract which row failed from error if available, otherwise generic message
-              const detail = err?.message || 'Terjadi kesalahan saat menyimpan ke database.';
-              addAlert(`Gagal mengimpor guru: ${detail}`, 'error');
-            }
+          try {
+            // Await caller to handle DB insert and surface errors
+            await onUpdate(toInsert);
+            addAlert(`Berhasil mengimpor ${toInsert.length} guru.`, 'success');
+          } catch (err: any) {
+            console.error('Import teachers failed:', err);
+            // Try to extract which row failed from error if available, otherwise generic message
+            const detail = err?.message || 'Terjadi kesalahan saat menyimpan ke database.';
+            addAlert(`Gagal mengimpor guru: ${detail}`, 'error');
+          }
         } else {
           if (validationErrors.length === 0) {
             addAlert('Format Excel salah atau tidak ada data yang valid (Nama wajib diisi).', 'error');
@@ -151,56 +152,56 @@ const TeacherManager: React.FC<TeacherManagerProps> = ({ teachers, onUpdate, onA
     const passwordToUse = formData.password || 'password';
 
     try {
-        if (modalMode === 'add') {
+      if (modalMode === 'add') {
         const teacher: User = {
-            id: generateUUID(),
+          id: generateUUID(),
+          name: formData.name,
+          email: emailToUse,
+          subject: formData.subject,
+          nis: formData.nip, // Store NIP in NIS field
+          role: 'teacher',
+          password: passwordToUse
+        };
+        await onAddTeacher(teacher);
+      } else if (modalMode === 'edit' && editingId) {
+        const editedTeacher = teachers.find(t => t.id === editingId);
+        if (editedTeacher) {
+          const updatedTeacher: User = {
+            ...editedTeacher,
             name: formData.name,
             email: emailToUse,
             subject: formData.subject,
-            nis: formData.nip, // Store NIP in NIS field
-            role: 'teacher',
+            nis: formData.nip,
             password: passwordToUse
-        };
-        await onAddTeacher(teacher);
-        } else if (modalMode === 'edit' && editingId) {
-            const editedTeacher = teachers.find(t => t.id === editingId);
-            if (editedTeacher) {
-              const updatedTeacher: User = {
-                ...editedTeacher,
-                name: formData.name,
-                email: emailToUse,
-                subject: formData.subject,
-                nis: formData.nip,
-                password: passwordToUse
-              };
-              if (onEditTeacher) {
-                await onEditTeacher(updatedTeacher);
-              } else {
-                const updatedTeachers = teachers.map(t => t.id === editingId ? updatedTeacher : t);
-                onUpdate(updatedTeachers);
-              }
-            }
+          };
+          if (onEditTeacher) {
+            await onEditTeacher(updatedTeacher);
+          } else {
+            const updatedTeachers = teachers.map(t => t.id === editingId ? updatedTeacher : t);
+            onUpdate(updatedTeachers);
+          }
         }
+      }
 
-        setFormData({ name: '', email: '', subject: '', nip: '', password: '' });
-        setModalMode(null);
-        setEditingId(null);
+      setFormData({ name: '', email: '', subject: '', nip: '', password: '' });
+      setModalMode(null);
+      setEditingId(null);
     } catch (error: any) {
-        console.error("Failed to save teacher:", error);
-        addAlert(`Gagal menyimpan data guru ${formData.name}: ${error?.message || 'Unknown error'}`, 'error');
+      console.error("Failed to save teacher:", error);
+      addAlert(`Gagal menyimpan data guru ${formData.name}: ${error?.message || 'Unknown error'}`, 'error');
     } finally {
-        setIsSubmitting(false);
+      setIsSubmitting(false);
     }
   };
 
   const handleDelete = async (id: string) => {
     if (confirm('Hapus guru ini dari daftar?')) {
-        try {
-            await onDeleteTeacher(id);
-        } catch (error) {
-            console.error("Failed to delete teacher:", error);
-            alert("Gagal menghapus guru.");
-        }
+      try {
+        await onDeleteTeacher(id);
+      } catch (error) {
+        console.error("Failed to delete teacher:", error);
+        alert("Gagal menghapus guru.");
+      }
     }
   };
 
@@ -320,7 +321,7 @@ const TeacherManager: React.FC<TeacherManagerProps> = ({ teachers, onUpdate, onA
                 <input
                   type="text"
                   value={formData.name}
-                  onChange={(e) => setFormData({...formData, name: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   className="w-full px-5 py-4 rounded-2xl bg-gray-50 border-transparent focus:border-indigo-500 focus:bg-white outline-none font-bold transition-all"
                   placeholder="Contoh: Budi Santoso, S.Pd."
                   required
@@ -332,7 +333,7 @@ const TeacherManager: React.FC<TeacherManagerProps> = ({ teachers, onUpdate, onA
                 <input
                   type="text"
                   value={formData.nip}
-                  onChange={(e) => setFormData({...formData, nip: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, nip: e.target.value })}
                   className="w-full px-5 py-4 rounded-2xl bg-gray-50 border-transparent focus:border-indigo-500 focus:bg-white outline-none font-bold transition-all font-mono"
                   placeholder="Contoh: 19800101..."
                 />
@@ -341,14 +342,14 @@ const TeacherManager: React.FC<TeacherManagerProps> = ({ teachers, onUpdate, onA
               <div>
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Mata Pelajaran</label>
                 <div className="relative">
-                    <BookOpen className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-                    <input
+                  <BookOpen className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                  <input
                     type="text"
                     value={formData.subject}
-                    onChange={(e) => setFormData({...formData, subject: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
                     className="w-full pl-11 pr-5 py-4 rounded-2xl bg-gray-50 border-transparent focus:border-indigo-500 focus:bg-white outline-none font-bold transition-all"
                     placeholder="Misal: Matematika, Fisika"
-                    />
+                  />
                 </div>
               </div>
 
@@ -357,7 +358,7 @@ const TeacherManager: React.FC<TeacherManagerProps> = ({ teachers, onUpdate, onA
                 <input
                   type="email"
                   value={formData.email}
-                  onChange={(e) => setFormData({...formData, email: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   className="w-full px-5 py-4 rounded-2xl bg-gray-50 border-transparent focus:border-indigo-500 focus:bg-white outline-none font-bold transition-all"
                   placeholder="guru@sekolah.id"
                 />
@@ -366,14 +367,14 @@ const TeacherManager: React.FC<TeacherManagerProps> = ({ teachers, onUpdate, onA
               <div>
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Password</label>
                 <div className="relative">
-                    <Key className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-                    <input
+                  <Key className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                  <input
                     type="text"
                     value={formData.password}
-                    onChange={(e) => setFormData({...formData, password: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                     className="w-full pl-11 pr-5 py-4 rounded-2xl bg-gray-50 border-transparent focus:border-indigo-500 focus:bg-white outline-none font-bold transition-all"
                     placeholder="Set password (default: password)"
-                    />
+                  />
                 </div>
               </div>
 

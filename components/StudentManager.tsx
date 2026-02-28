@@ -2,12 +2,13 @@
 import React, { useState, useRef } from 'react';
 import { generateUUID } from '../lib/uuid';
 import { User } from '../types';
-import { 
-  Users, Upload, Download, FileSpreadsheet, Trash2, 
+import {
+  Users, Upload, Download, FileSpreadsheet, Trash2,
   UserPlus, Search, X, CheckCircle2, AlertCircle, Edit3, Save,
   BadgeCheck, Key
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { useNotification } from '../context/NotificationContext';
 
 interface StudentManagerProps {
   students: User[];
@@ -25,23 +26,27 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
   const [formData, setFormData] = useState({ name: '', email: '', grade: '', nis: '', password: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { addAlert } = useNotification();
 
-  const filteredStudents = students.filter(s => 
-    s.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+  const filteredStudents = students.filter(s =>
+    s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     s.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (s.grade && s.grade.toLowerCase().includes(searchTerm.toLowerCase())) ||
     (s.nis && s.nis.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   const handleDownloadTemplate = () => {
+    // Gunakan email contoh yang jelas tidak akan collision dengan data nyata
     const templateData = [
-      { Nama: 'Budi Santoso', Email: 'budi@sekolah.id', Kelas: 'X-1', NIS: '12345', Password: 'rahasia123' },
-      { Nama: 'Siti Aminah', Email: 'siti@sekolah.id', Kelas: 'X-2', NIS: '67890', Password: 'password' },
+      { Nama: 'Contoh Siswa Pertama', Email: 'siswa001.contoh@sekolah.id', Kelas: 'X-1', NIS: '2025001', Password: 'rahasia123' },
+      { Nama: 'Contoh Siswa Kedua', Email: 'siswa002.contoh@sekolah.id', Kelas: 'X-2', NIS: '2025002', Password: 'password123' },
+      { Nama: 'Contoh Siswa Ketiga', Email: 'siswa003.contoh@sekolah.id', Kelas: 'XI-1', NIS: '2025003', Password: 'rahasia456' },
     ];
     const ws = XLSX.utils.json_to_sheet(templateData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Daftar Siswa");
     XLSX.writeFile(wb, "Template_Import_Siswa_Examo_v2.xlsx");
+    addAlert('✅ Template siswa berhasil didownload!', 'success');
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -58,23 +63,43 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
         const worksheet = workbook.Sheets[sheetName];
         const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[];
 
-        const importedStudents: User[] = jsonData
+        const rawStudents: User[] = jsonData
           .filter(row => row.Nama && (row.Email || row.NIS)) // Require Name and (Email OR NIS)
-          .map((row, idx) => ({
-            id: `temp-${Date.now()}-${idx}`, // Temp ID, server should generate real ID
-            name: row.Nama,
-            email: row.Email || `user-${Date.now()}-${idx}@placeholder.com`, // Fallback email
-            grade: row.Kelas || '-',
-            nis: row.NIS ? String(row.NIS) : undefined,
-            role: 'student',
-            password: row.Password ? String(row.Password) : 'password' // Use Excel password or default
-          }));
+          .map((row, idx) => {
+            const nis = row.NIS ? String(row.NIS) : '';
+            // Fallback email: pakai NIS agar unik, bukan timestamp yang bisa collision antar baris
+            const email = row.Email
+              ? String(row.Email).trim().toLowerCase()
+              : nis
+                ? `${nis}@sekolah.id`
+                : `siswa-${Date.now()}-${idx}@sekolah.id`;
+            return {
+              id: `temp-${Date.now()}-${idx}`, // Temp ID, server will generate real ID
+              name: String(row.Nama).trim(),
+              email,
+              grade: row.Kelas ? String(row.Kelas) : '-',
+              nis: nis || undefined,
+              role: 'student',
+              password: row.Password ? String(row.Password) : 'password',
+            } as User;
+          });
+
+        // Deduplikasi email dalam file Excel itu sendiri (ambil baris pertama jika email sama)
+        const seenEmails = new Set<string>();
+        const importedStudents = rawStudents.filter(s => {
+          const emailKey = s.email.toLowerCase();
+          if (seenEmails.has(emailKey)) return false;
+          seenEmails.add(emailKey);
+          return true;
+        });
+
+        const skippedInFile = rawStudents.length - importedStudents.length;
 
         if (importedStudents.length > 0) {
-            // Combine existing students with new imported ones to prevent overwriting if simpler logic is used
-            // However, App.tsx's handleStudentUpdate filters duplicates.
-            // Passing just the new list is fine as App.tsx handles the merge.
-            onUpdate(importedStudents);
+          if (skippedInFile > 0) {
+            alert(`⚠️ ${skippedInFile} baris dilewati karena email duplikat dalam file Excel.\nTotal yang akan diproses: ${importedStudents.length} siswa.`);
+          }
+          onUpdate(importedStudents);
         } else {
           alert('Format Excel salah atau tidak ada data yang valid (Nama wajib diisi).');
         }
@@ -107,66 +132,66 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
       alert("Nama dan salah satu dari Email atau NIS wajib diisi.");
       return;
     }
-    
+
     setIsSubmitting(true);
     // Fallback email if empty but NIS provided
     const emailToUse = formData.email || `${formData.nis}@sekolah.id`;
     const passwordToUse = formData.password || 'password';
 
     try {
-        if (modalMode === 'add') {
+      if (modalMode === 'add') {
         const student: User = {
-            id: generateUUID(), // Will be replaced with DB ID after insert
+          id: generateUUID(), // Will be replaced with DB ID after insert
+          name: formData.name,
+          email: emailToUse,
+          grade: formData.grade,
+          nis: formData.nis,
+          role: 'student',
+          password: passwordToUse
+        };
+        await onAddStudent(student);
+      } else if (modalMode === 'edit' && editingId) {
+        // Use new onEditStudent callback if available, otherwise fall back to onUpdate
+        const editedStudent = students.find(s => s.id === editingId);
+        if (editedStudent) {
+          const updatedStudent: User = {
+            ...editedStudent,
             name: formData.name,
             email: emailToUse,
             grade: formData.grade,
             nis: formData.nis,
-            role: 'student',
             password: passwordToUse
-        };
-        await onAddStudent(student);
-        } else if (modalMode === 'edit' && editingId) {
-            // Use new onEditStudent callback if available, otherwise fall back to onUpdate
-            const editedStudent = students.find(s => s.id === editingId);
-            if (editedStudent) {
-              const updatedStudent: User = {
-                ...editedStudent,
-                name: formData.name,
-                email: emailToUse,
-                grade: formData.grade,
-                nis: formData.nis,
-                password: passwordToUse
-              };
-              if (onEditStudent) {
-                // Use dedicated edit handler that syncs to DB
-                await onEditStudent(updatedStudent);
-              } else {
-                // Fallback to onUpdate for backward compatibility
-                const updatedStudents = students.map(s => s.id === editingId ? updatedStudent : s);
-                onUpdate(updatedStudents);
-              }
-            }
+          };
+          if (onEditStudent) {
+            // Use dedicated edit handler that syncs to DB
+            await onEditStudent(updatedStudent);
+          } else {
+            // Fallback to onUpdate for backward compatibility
+            const updatedStudents = students.map(s => s.id === editingId ? updatedStudent : s);
+            onUpdate(updatedStudents);
+          }
         }
+      }
 
-        setFormData({ name: '', email: '', grade: '', nis: '', password: '' });
-        setModalMode(null);
-        setEditingId(null);
+      setFormData({ name: '', email: '', grade: '', nis: '', password: '' });
+      setModalMode(null);
+      setEditingId(null);
     } catch (error) {
-        console.error("Failed to save student:", error);
-        alert("Gagal menyimpan data siswa.");
+      console.error("Failed to save student:", error);
+      alert("Gagal menyimpan data siswa.");
     } finally {
-        setIsSubmitting(false);
+      setIsSubmitting(false);
     }
   };
 
   const handleDelete = async (id: string) => {
     if (confirm('Hapus siswa ini dari daftar?')) {
-        try {
-            await onDeleteStudent(id);
-        } catch (error) {
-            console.error("Failed to delete student:", error);
-            alert("Gagal menghapus siswa.");
-        }
+      try {
+        await onDeleteStudent(id);
+      } catch (error) {
+        console.error("Failed to delete student:", error);
+        alert("Gagal menghapus siswa.");
+      }
     }
   };
 
@@ -178,20 +203,20 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
           <p className="text-gray-400 font-medium mt-1">Kelola akun dan kelas siswa pengakses ujian.</p>
         </div>
         <div className="flex flex-wrap gap-3 w-full md:w-auto">
-          <button 
+          <button
             onClick={handleDownloadTemplate}
             className="flex-1 md:flex-none bg-white border-2 border-gray-100 text-gray-600 px-6 py-4 rounded-[20px] font-black hover:bg-gray-50 transition-all flex items-center justify-center gap-2 text-sm"
           >
             <Download className="w-5 h-5" /> Template
           </button>
-          <button 
+          <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isImporting}
             className="flex-1 md:flex-none bg-indigo-50 border-2 border-indigo-100 text-indigo-600 px-6 py-4 rounded-[20px] font-black hover:bg-indigo-100 transition-all flex items-center justify-center gap-2 text-sm shadow-sm"
           >
             <Upload className="w-5 h-5" /> Import Excel
           </button>
-          <button 
+          <button
             onClick={() => {
               setFormData({ name: '', email: '', grade: '', nis: '', password: '' });
               setModalMode('add');
@@ -207,8 +232,8 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
       <div className="bg-white p-4 rounded-[30px] border border-gray-100 shadow-sm mb-8 flex items-center gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-4 top-4 w-5 h-5 text-gray-300" />
-          <input 
-            type="text" 
+          <input
+            type="text"
             placeholder="Cari nama, email, NIS, atau kelas..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -279,14 +304,14 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
               </h3>
               <button type="button" onClick={() => setModalMode(null)} className="p-2 text-gray-400 hover:bg-gray-50 rounded-xl"><X className="w-6 h-6" /></button>
             </div>
-            
+
             <div className="space-y-5">
               <div>
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Nama Lengkap *</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={formData.name}
-                  onChange={(e) => setFormData({...formData, name: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   className="w-full px-5 py-4 rounded-2xl bg-gray-50 border-transparent focus:border-indigo-500 focus:bg-white outline-none font-bold transition-all"
                   placeholder="Contoh: Andi Wijaya"
                   required
@@ -298,7 +323,7 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
                 <input
                   type="text"
                   value={formData.nis}
-                  onChange={(e) => setFormData({...formData, nis: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, nis: e.target.value })}
                   className="w-full px-5 py-4 rounded-2xl bg-gray-50 border-transparent focus:border-indigo-500 focus:bg-white outline-none font-bold transition-all font-mono"
                   placeholder="Contoh: 12345"
                 />
@@ -307,11 +332,11 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
 
               <div>
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Kelas</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   list="grades-list"
                   value={formData.grade}
-                  onChange={(e) => setFormData({...formData, grade: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, grade: e.target.value })}
                   className="w-full px-5 py-4 rounded-2xl bg-gray-50 border-transparent focus:border-indigo-500 focus:bg-white outline-none font-bold transition-all"
                   placeholder="Misal: X-1, XII-IPA-1"
                 />
@@ -324,10 +349,10 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
 
               <div>
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Email Access</label>
-                <input 
-                  type="email" 
+                <input
+                  type="email"
                   value={formData.email}
-                  onChange={(e) => setFormData({...formData, email: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   className="w-full px-5 py-4 rounded-2xl bg-gray-50 border-transparent focus:border-indigo-500 focus:bg-white outline-none font-bold transition-all"
                   placeholder="andi@sekolah.id"
                 />
@@ -337,14 +362,14 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
               <div>
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Password</label>
                 <div className="relative">
-                    <Key className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-                    <input
+                  <Key className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                  <input
                     type="text"
                     value={formData.password}
-                    onChange={(e) => setFormData({...formData, password: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                     className="w-full pl-11 pr-5 py-4 rounded-2xl bg-gray-50 border-transparent focus:border-indigo-500 focus:bg-white outline-none font-bold transition-all"
                     placeholder="Set password (default: password)"
-                    />
+                  />
                 </div>
                 <p className="text-[10px] text-gray-400 mt-1 ml-1">Default: 'password' jika dikosongkan.</p>
               </div>
