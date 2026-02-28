@@ -2,11 +2,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Exam, Question, ExamLog } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { 
-  Clock, CheckCircle, ChevronLeft, ChevronRight, 
-  AlertTriangle, Star, Shuffle, LayoutGrid, 
-  Menu, X, Save, ShieldCheck, Sparkles 
+import {
+  Clock, CheckCircle, ChevronLeft, ChevronRight,
+  AlertTriangle, Star, Shuffle, LayoutGrid,
+  Menu, X, Save, ShieldCheck, Sparkles, Lock, EyeOff, PenLine
 } from 'lucide-react';
+import ScratchCanvas from './ScratchCanvas';
+
 
 interface ExamRunnerProps {
   exam: Exam;
@@ -15,11 +17,11 @@ interface ExamRunnerProps {
   existingProgress?: any;
   onAutosave: (answers: Record<string, any>, logs: ExamLog[]) => void;
   onFinish: (
-    score: number, 
-    pointsObtained: number, 
-    totalPointsPossible: number, 
+    score: number,
+    pointsObtained: number,
+    totalPointsPossible: number,
     stats: { correct: number, incorrect: number, unanswered: number, total: number },
-    answers: Record<string, any>, 
+    answers: Record<string, any>,
     logs: ExamLog[]
   ) => void;
   onExit: () => void;
@@ -28,13 +30,13 @@ interface ExamRunnerProps {
 
 const MAX_VIOLATIONS = 3;
 
-const ExamRunner: React.FC<ExamRunnerProps> = ({ 
-  exam, 
-  userId, 
-  userName, 
-  existingProgress, 
-  onAutosave, 
-  onFinish, 
+const ExamRunner: React.FC<ExamRunnerProps> = ({
+  exam,
+  userId,
+  userName,
+  existingProgress,
+  onAutosave,
+  onFinish,
   onExit,
   isPreview = false
 }) => {
@@ -50,12 +52,29 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
   const [showWarning, setShowWarning] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [violationAlert, setViolationAlert] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showFullscreenBanner, setShowFullscreenBanner] = useState(false);
+  const [warningMessage, setWarningMessage] = useState('');
+
+  // ── Scratch Canvas (lembar coretan matematika) ──────────────────────────
+  const MATH_KEYWORDS = ['matematika', 'math', 'fisika', 'kimia', 'berhitung', 'hitung', 'science'];
+  const isMathExam = MATH_KEYWORDS.some(kw =>
+    exam.category?.toLowerCase().includes(kw) ||
+    exam.title?.toLowerCase().includes(kw)
+  );
+  // Auto-open canvas untuk ujian matematika, bisa toggle manual untuk yang lain
+  const [showScratch, setShowScratch] = useState(isMathExam);
+
 
   const timerRef = useRef<any>(null);
   const answersRef = useRef<Record<string, any>>(answers);
   const logsRef = useRef<ExamLog[]>(logs);
   const violationCountRef = useRef<number>(0);
   const [browserNotificationRequested, setBrowserNotificationRequested] = useState(false);
+  const lastFocusTime = useRef<number>(Date.now());
+  const isMobileDevice = useRef<boolean>(
+    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+  );
 
   // Proper Fisher-Yates shuffle algorithm
   const fisherYatesShuffle = <T,>(array: T[]): T[] => {
@@ -75,7 +94,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
   // Load or generate shuffled questions
   const loadOrGenerateShuffledQuestions = (): Question[] => {
     const cacheKey = getShuffleCacheKey();
-    
+
     // If NOT in preview mode, try to load from cache or existing progress
     if (!isPreview) {
       // If existing progress exists, use the questions from there (preserves order)
@@ -96,7 +115,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
 
     // Generate new shuffle
     let questionsToRun = [...exam.questions];
-    
+
     if (exam.randomizeQuestions) {
       questionsToRun = fisherYatesShuffle(questionsToRun);
     }
@@ -109,25 +128,25 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
           idx: number;
           attachment?: any;
         }
-        
-        const optionsWithIndex: OptionWithAttachment[] = q.options.map((opt, idx) => ({ 
-          opt, 
+
+        const optionsWithIndex: OptionWithAttachment[] = q.options.map((opt, idx) => ({
+          opt,
           idx,
-          attachment: q.optionAttachments?.[idx] 
+          attachment: q.optionAttachments?.[idx]
         }));
         const shuffledOptions = fisherYatesShuffle(optionsWithIndex);
-        
+
         // Find the new index of the correct answer(s)
         const newCorrectIndex = q.type === 'mcq' ? shuffledOptions.findIndex(o => o.idx === q.correctAnswerIndex) : undefined;
-        
+
         let newCorrectIndices: number[] | undefined;
         if (q.type === 'multiple_select' && q.correctAnswerIndices) {
           newCorrectIndices = q.correctAnswerIndices.map(oldIdx => shuffledOptions.findIndex(o => o.idx === oldIdx));
         }
-        
+
         // Update optionAttachments sesuai dengan urutan yang di-shuffle
         const shuffledAttachments = shuffledOptions.map(o => o.attachment);
-        
+
         return {
           ...q,
           options: shuffledOptions.map(o => o.opt),
@@ -145,14 +164,14 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
     if (!isPreview) {
       sessionStorage.setItem(cacheKey, JSON.stringify(questionsToRun));
     }
-    
+
     return questionsToRun;
   };
 
   useEffect(() => {
     const questionsToRun = loadOrGenerateShuffledQuestions();
     setShuffledQuestions(questionsToRun);
-    
+
     if (existingProgress?.startedAt) {
       const started = new Date(existingProgress.startedAt).getTime();
       const now = new Date().getTime();
@@ -161,6 +180,16 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
       setTimeLeft(remaining > 0 ? remaining : 0);
     }
     setIsReady(true); // Remove 1-second artificial delay
+
+    // Auto-fullscreen saat ujian dimuali (Android Chrome + desktop)
+    // iOS Safari via WKWebView juga support webkit variant
+    if (!isPreview) {
+      const el = document.documentElement as any;
+      try {
+        if (el.requestFullscreen) el.requestFullscreen().catch(() => { });
+        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+      } catch (_) { /* Browser mungkin tidak support */ }
+    }
   }, [exam.id, userId]);
 
   useEffect(() => { answersRef.current = answers; }, [answers]);
@@ -182,7 +211,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
     exam.questions.forEach(q => {
       totalPossible += q.points;
       const ans = answersRef.current[q.id];
-      
+
       if (ans === undefined || ans === '') {
         unanswered++;
       } else {
@@ -226,11 +255,11 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
           if (typeof ans === 'string' && ans.trim().length > 0) {
             const studentAnswer = ans.trim().toLowerCase();
             const teacherKey = (q.essayAnswer || '').trim().toLowerCase();
-            
+
             // Cek apakah jawaban siswa mengandung kunci jawaban guru (atau sebaliknya jika kunci pendek)
             // Ini adalah heuristik sederhana.
             const isAccurate = teacherKey && (studentAnswer.includes(teacherKey) || teacherKey.includes(studentAnswer));
-            
+
             if (isAccurate) {
               obtained += (q.points || 0);
               correct++;
@@ -238,7 +267,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
               obtained += 1; // Poin partisipasi
               // Tidak dihitung sebagai 'correct' (benar sempurna) untuk statistik, tapi dapat nilai.
               // Kita anggap 'incorrect' untuk statistik benar/salah, tapi skor bertambah.
-              incorrect++; 
+              incorrect++;
             }
           } else {
             incorrect++;
@@ -248,11 +277,11 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
     });
 
     const score = totalPossible > 0 ? Math.round((obtained / totalPossible) * 100) : 0;
-    return { 
-      score, 
-      obtained, 
-      totalPossible, 
-      stats: { correct, incorrect, unanswered, total: exam.questions.length } 
+    return {
+      score,
+      obtained,
+      totalPossible,
+      stats: { correct, incorrect, unanswered, total: exam.questions.length }
     };
   }, [exam.questions]);
 
@@ -265,15 +294,15 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
     if (timerRef.current) clearInterval(timerRef.current);
     setIsSubmitting(true);
     addLog('submit', forced ? 'Auto-submitted' : 'Manual submit');
-    
+
     setTimeout(() => {
       const result = calculateFinalStats();
       onFinish(
-        result.score, 
-        result.obtained, 
-        result.totalPossible, 
+        result.score,
+        result.obtained,
+        result.totalPossible,
         result.stats,
-        answersRef.current, 
+        answersRef.current,
         logsRef.current
       );
     }, 1500);
@@ -308,7 +337,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
   // Function to send violation alert to Supabase in real-time
   const sendViolationAlert = useCallback(async (violationNum: number, isDisqualified: boolean) => {
     if (!isSupabaseConfigured || !supabase || isPreview) return;
-    
+
     try {
       // Find the current exam result for this student
       const { data: existingResults, error: fetchError } = await supabase
@@ -343,32 +372,114 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
     }
   }, [exam.id, userId, supabase, isSupabaseConfigured, isPreview]);
 
+  // ─── ANTI-CHEAT: Visibility & App-Switch Detection ───────────────────────────
+  const recordViolation = useCallback((reason: string) => {
+    if (isPreview || isSubmitting) return;
+    setViolationCount(v => {
+      const next = v + 1;
+      violationCountRef.current = next;
+      addLog('tab_blur', `${reason} – Pelanggaran #${next}`);
+      if (next >= MAX_VIOLATIONS) {
+        addLog('violation_disqualified', 'Didiskualifikasi karena 3x pelanggaran');
+        sendViolationAlert(next, true);
+        handleSubmit(true);
+      } else {
+        setWarningMessage(`Terdeteksi: ${reason}`);
+        setShowWarning(true);
+        sendViolationAlert(next, false);
+      }
+      return next;
+    });
+  }, [isPreview, isSubmitting, addLog, sendViolationAlert, handleSubmit]);
+
   useEffect(() => {
+    if (!isReady) return;
+
+    // 1️⃣ visibilitychange – berlaku di semua browser termasuk mobile
     const handleVisibility = () => {
-      if (isPreview) return; // Don't track violations in preview mode
-      if (document.visibilityState === 'hidden' && isReady && !isSubmitting) {
-        setViolationCount(v => {
-          const next = v + 1;
-          violationCountRef.current = next;
-          addLog('tab_blur', `Violation #${next}`);
-          
-          // Send real-time alert to teacher
-          if (next >= MAX_VIOLATIONS) {
-            addLog('violation_disqualified', 'Disqualified due to 3 violations');
-            sendViolationAlert(next, true);
-            handleSubmit(true);
-          } else {
-            setShowWarning(true);
-            // Send violation alert to teacher (not disqualified yet)
-            sendViolationAlert(next, false);
-          }
-          return next;
-        });
+      if (document.visibilityState === 'hidden') {
+        recordViolation('Berpindah tab/aplikasi');
       }
     };
+
+    // 2️⃣ pagehide – iOS Safari tidak selalu trigger visibilitychange
+    const handlePageHide = () => {
+      recordViolation('Keluar dari halaman ujian (iOS)');
+    };
+
+    // 3️⃣ blur – perangkat menekan tombol Home / beralih ke app lain
+    const handleBlur = () => {
+      // Ignore brief focus loss (e.g. keyboard pop-up on mobile)
+      const gap = Date.now() - lastFocusTime.current;
+      if (gap > 800) {
+        recordViolation('Jendela browser kehilangan fokus');
+      }
+    };
+    const handleFocus = () => {
+      lastFocusTime.current = Date.now();
+    };
+
+    // 4️⃣ Blokir copy / paste / cut
+    const blockCopy = (e: ClipboardEvent) => { e.preventDefault(); };
+    const blockCut = (e: ClipboardEvent) => { e.preventDefault(); };
+    const blockPaste = (e: ClipboardEvent) => { e.preventDefault(); };
+
+    // 5️⃣ Blokir klik kanan
+    const blockContext = (e: MouseEvent) => { e.preventDefault(); };
+
+    // 6️⃣ Blokir shortcut keyboard berbahaya
+    const blockKeys = (e: KeyboardEvent) => {
+      const meta = e.ctrlKey || e.metaKey;
+      // Print, Save, Inspect, Screenshot
+      if (meta && ['p', 's', 'u'].includes(e.key.toLowerCase())) { e.preventDefault(); }
+      if (e.key === 'F12' || (meta && e.shiftKey && e.key === 'I')) { e.preventDefault(); }
+      if (e.key === 'PrintScreen') { e.preventDefault(); }
+      // iOS: Cmd+Shift+3/4 cannot be blocked at browser level, but we deter
+    };
+
+    // 7️⃣ Fullscreen enforcement & change detection
+    const handleFullscreenChange = () => {
+      const fs = !!document.fullscreenElement;
+      setIsFullscreen(fs);
+      if (!fs && !isPreview) {
+        setShowFullscreenBanner(true);
+      }
+    };
+
     document.addEventListener('visibilitychange', handleVisibility);
-    return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [isReady, isSubmitting, addLog, handleSubmit, isPreview, sendViolationAlert]);
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('copy', blockCopy as EventListener);
+    document.addEventListener('cut', blockCut as EventListener);
+    document.addEventListener('paste', blockPaste as EventListener);
+    document.addEventListener('contextmenu', blockContext);
+    document.addEventListener('keydown', blockKeys);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('copy', blockCopy as EventListener);
+      document.removeEventListener('cut', blockCut as EventListener);
+      document.removeEventListener('paste', blockPaste as EventListener);
+      document.removeEventListener('contextmenu', blockContext);
+      document.removeEventListener('keydown', blockKeys);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+    };
+  }, [isReady, isPreview, recordViolation]);
+
+  // 8️⃣ Request fullscreen saat ujian dimulai (desktop + Android Chrome)
+  const requestFullscreen = useCallback(() => {
+    const el = document.documentElement as any;
+    if (el.requestFullscreen) el.requestFullscreen();
+    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen(); // Safari/iOS WKWebView
+    setShowFullscreenBanner(false);
+  }, []);
 
   const formatTime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
@@ -383,20 +494,76 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
 
   if (!currentQuestion) {
     return (
-        <div className="h-screen bg-white flex flex-col items-center justify-center p-8 text-center">
-            <AlertTriangle className="w-12 h-12 text-amber-500 mb-4" />
-            <h3 className="text-xl font-black text-gray-900">Tidak Ada Pertanyaan</h3>
-            <p className="text-gray-500 mt-2">Ujian ini belum memiliki pertanyaan yang dapat ditampilkan.</p>
-            <button onClick={onExit} className="mt-6 px-6 py-3 bg-gray-900 text-white rounded-xl font-bold">Kembali</button>
-        </div>
+      <div className="h-screen bg-white flex flex-col items-center justify-center p-8 text-center">
+        <AlertTriangle className="w-12 h-12 text-amber-500 mb-4" />
+        <h3 className="text-xl font-black text-gray-900">Tidak Ada Pertanyaan</h3>
+        <p className="text-gray-500 mt-2">Ujian ini belum memiliki pertanyaan yang dapat ditampilkan.</p>
+        <button onClick={onExit} className="mt-6 px-6 py-3 bg-gray-900 text-white rounded-xl font-bold">Kembali</button>
+      </div>
     );
   }
 
   const totalAnswered = Object.keys(answers).length;
   const progressPercent = (totalAnswered / shuffledQuestions.length) * 100;
 
+  // ─── CSS: blokir screenshot via -webkit-user-select & media print ──────────
+  // Diterapkan melalui inline style pada wrapper utama.
+
   return (
-    <div className="flex flex-col h-screen bg-[#FDFDFD] text-left overflow-hidden">
+    <div
+      className="flex flex-col h-screen bg-[#FDFDFD] text-left overflow-hidden relative"
+      style={{
+        WebkitUserSelect: 'none',
+        userSelect: 'none',
+        WebkitTouchCallout: 'none', // iOS: mencegah long-press save image
+      } as React.CSSProperties}
+    >
+      {/* Watermark latar – nama siswa + waktu */}
+      {!isPreview && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 0,
+            pointerEvents: 'none',
+            overflow: 'hidden',
+            opacity: 0.045,
+          }}
+        >
+          {Array.from({ length: 20 }).map((_, i) => (
+            <div
+              key={i}
+              style={{
+                position: 'absolute',
+                left: `${(i % 5) * 22}%`,
+                top: `${Math.floor(i / 5) * 25}%`,
+                transform: 'rotate(-35deg)',
+                fontSize: 18,
+                fontWeight: 900,
+                color: '#4f46e5',
+                whiteSpace: 'nowrap',
+                letterSpacing: 2,
+              }}
+            >
+              {userName} · {exam.title}
+            </div>
+          ))}
+        </div>
+      )}
+      {/* Banner fullscreen untuk perangkat yang support */}
+      {showFullscreenBanner && !isPreview && (
+        <div className="fixed inset-x-0 top-0 z-[150] bg-amber-500 text-white px-4 py-3 flex items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-center gap-2">
+            <Lock className="w-5 h-5 flex-shrink-0" />
+            <span className="text-sm font-bold">Mode layar penuh diperlukan untuk ujian. Ketuk tombol untuk melanjutkan.</span>
+          </div>
+          <button
+            onClick={requestFullscreen}
+            className="bg-white text-amber-600 px-4 py-1.5 rounded-xl text-sm font-black flex-shrink-0"
+          >
+            Layar Penuh
+          </button>
+        </div>
+      )}
       {isPreview && (
         <div className="bg-amber-100 text-amber-800 px-4 py-2 text-center text-xs font-bold uppercase tracking-widest border-b border-amber-200">
           Mode Preview Guru - Jawaban tidak akan disimpan
@@ -429,7 +596,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
             {shuffledQuestions.map((q, idx) => {
               const isAnswered = answers[q.id] !== undefined && answers[q.id] !== '';
               return (
-                <button key={q.id} onClick={() => { setCurrentQuestionIndex(idx); if(window.innerWidth < 768) setShowNav(false); }} className={`w-full aspect-square rounded-xl font-black text-sm flex items-center justify-center border-2 transition-all ${currentQuestionIndex === idx ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : isAnswered ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-white border-gray-100 text-gray-300 hover:border-indigo-200'}`}>{idx + 1}</button>
+                <button key={q.id} onClick={() => { setCurrentQuestionIndex(idx); if (window.innerWidth < 768) setShowNav(false); }} className={`w-full aspect-square rounded-xl font-black text-sm flex items-center justify-center border-2 transition-all ${currentQuestionIndex === idx ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : isAnswered ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-white border-gray-100 text-gray-300 hover:border-indigo-200'}`}>{idx + 1}</button>
               );
             })}
           </div>
@@ -438,27 +605,42 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
         <main className="flex-1 overflow-y-auto bg-[#FDFDFD] p-6 md:p-12">
           <div className="max-w-3xl mx-auto pb-24 text-left">
             <div className="mb-10">
-              <span className="inline-block bg-gray-900 text-white px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] mb-3">PERTANYAAN {currentQuestionIndex + 1}</span>
+              <div className="flex items-center justify-between mb-3">
+                <span className="inline-block bg-gray-900 text-white px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em]">
+                  PERTANYAAN {currentQuestionIndex + 1}
+                </span>
+                {/* Toggle papan coretan – auto-visible untuk exam math */}
+                <button
+                  onClick={() => setShowScratch(s => !s)}
+                  className={`flex items-center gap-2 px-4 py-1.5 rounded-xl border-2 text-xs font-black transition-all ${showScratch
+                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-100'
+                    : 'bg-white border-indigo-200 text-indigo-600 hover:bg-indigo-50'
+                    }`}
+                >
+                  <PenLine className="w-3.5 h-3.5" />
+                  {showScratch ? 'Sembunyikan Coretan' : 'Papan Coretan ✏️'}
+                </button>
+              </div>
 
               {/* Added Image Display Here */}
               {currentQuestion.attachment && currentQuestion.attachment.type === 'image' && (
                 <div className="mb-6 rounded-2xl overflow-hidden border border-gray-200 shadow-sm">
-                    <img
-                        src={currentQuestion.attachment.url}
-                        alt="Lampiran Soal"
-                        className="w-full max-h-[400px] object-contain bg-gray-50"
-                        onError={(e) => (e.currentTarget.style.display = 'none')}
-                    />
-                    {currentQuestion.attachment.caption && (
-                        <p className="p-2 text-center text-xs text-gray-500 bg-gray-50 border-t border-gray-100 italic">
-                            {currentQuestion.attachment.caption}
-                        </p>
-                    )}
+                  <img
+                    src={currentQuestion.attachment.url}
+                    alt="Lampiran Soal"
+                    className="w-full max-h-[400px] object-contain bg-gray-50"
+                    onError={(e) => (e.currentTarget.style.display = 'none')}
+                  />
+                  {currentQuestion.attachment.caption && (
+                    <p className="p-2 text-center text-xs text-gray-500 bg-gray-50 border-t border-gray-100 italic">
+                      {currentQuestion.attachment.caption}
+                    </p>
+                  )}
                 </div>
               )}
 
-              <h1 
-                className="text-2xl md:text-3xl font-bold text-gray-900 leading-tight" 
+              <h1
+                className="text-2xl md:text-3xl font-bold text-gray-900 leading-tight"
                 style={{ textAlign: (currentQuestion.textAlign || 'left') as any }}
               >
                 {currentQuestion.text}
@@ -479,7 +661,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                   }} className={`w-full text-left p-6 rounded-[28px] border-2 transition-all flex items-start gap-5 ${answers[currentQuestion.id] === idx ? 'bg-indigo-50 border-indigo-600 shadow-xl' : 'bg-white border-gray-50 hover:bg-gray-50/30'}`}>
                     <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black flex-shrink-0 mt-1 ${answers[currentQuestion.id] === idx ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-400'}`}>{String.fromCharCode(65 + idx)}</div>
                     <div className="flex-1 space-y-2">
-                      <div className={`font-bold text-lg ${answers[currentQuestion.id] === idx ? 'text-indigo-900' : 'text-gray-700'}`} dangerouslySetInnerHTML={{__html: opt}}></div>
+                      <div className={`font-bold text-lg ${answers[currentQuestion.id] === idx ? 'text-indigo-900' : 'text-gray-700'}`} dangerouslySetInnerHTML={{ __html: opt }}></div>
                       {attachment?.url && (
                         <div className="flex gap-2 items-center">
                           <img
@@ -513,10 +695,10 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                   <button key={idx} onClick={() => {
                     setAnswers(prev => {
                       const prevAns = (prev[currentQuestion.id] as number[]) || [];
-                      const newAns = prevAns.includes(idx) 
-                        ? prevAns.filter(i => i !== idx) 
+                      const newAns = prevAns.includes(idx)
+                        ? prevAns.filter(i => i !== idx)
                         : [...prevAns, idx];
-                      
+
                       addLog('autosave', `Changed answer for Q${currentQuestionIndex + 1} to [${newAns.map(i => String.fromCharCode(65 + i)).join(', ')}]`);
                       return { ...prev, [currentQuestion.id]: newAns };
                     });
@@ -525,7 +707,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                       <CheckCircle className="w-6 h-6" />
                     </div>
                     <div className="flex-1 space-y-2">
-                      <div className={`font-bold text-lg ${isSelected ? 'text-indigo-900' : 'text-gray-700'}`} dangerouslySetInnerHTML={{__html: opt}}></div>
+                      <div className={`font-bold text-lg ${isSelected ? 'text-indigo-900' : 'text-gray-700'}`} dangerouslySetInnerHTML={{ __html: opt }}></div>
                       {attachment?.url && (
                         <div className="flex gap-2 items-center">
                           <img
@@ -576,26 +758,42 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
               )}
 
               {currentQuestion.type === 'short_answer' && (
-                <input 
-                  type="text" 
-                  value={answers[currentQuestion.id] || ''} 
-                  onChange={(e) => setAnswers(prev => ({ ...prev, [currentQuestion.id]: e.target.value }))} 
+                <input
+                  type="text"
+                  value={answers[currentQuestion.id] || ''}
+                  onChange={(e) => setAnswers(prev => ({ ...prev, [currentQuestion.id]: e.target.value }))}
                   onBlur={(e) => addLog('autosave', `Updated answer for Q${currentQuestionIndex + 1}: "${e.target.value}"`)}
-                  className="w-full p-6 rounded-[28px] border-2 border-gray-50 bg-white focus:border-indigo-500 outline-none font-bold text-gray-800 text-xl shadow-inner" 
-                  placeholder="Ketik jawaban singkat Anda di sini..." 
+                  className="w-full p-6 rounded-[28px] border-2 border-gray-50 bg-white focus:border-indigo-500 outline-none font-bold text-gray-800 text-xl shadow-inner"
+                  placeholder="Ketik jawaban singkat Anda di sini..."
                 />
               )}
 
               {currentQuestion.type === 'essay' && (
-                <textarea 
-                  value={answers[currentQuestion.id] || ''} 
-                  onChange={(e) => setAnswers(prev => ({ ...prev, [currentQuestion.id]: e.target.value }))} 
+                <textarea
+                  value={answers[currentQuestion.id] || ''}
+                  onChange={(e) => setAnswers(prev => ({ ...prev, [currentQuestion.id]: e.target.value }))}
                   onBlur={(e) => addLog('autosave', `Updated answer for Q${currentQuestionIndex + 1}: "${e.target.value}"`)}
-                  className="w-full min-h-[500px] p-8 rounded-[40px] border-2 border-gray-50 bg-white focus:border-indigo-500 outline-none font-medium text-gray-800 text-base shadow-inner resize-vertical" 
-                  placeholder="Tulis jawaban lengkap Anda di sini..." 
+                  className="w-full min-h-[500px] p-8 rounded-[40px] border-2 border-gray-50 bg-white focus:border-indigo-500 outline-none font-medium text-gray-800 text-base shadow-inner resize-vertical"
+                  placeholder="Tulis jawaban lengkap Anda di sini..."
                 />
               )}
             </div>
+
+            {/* ── Papan Coretan Matematika ── */}
+            {showScratch && (
+              <div className="mt-8">
+                <div className="flex items-center gap-2 mb-3">
+                  <PenLine className="w-4 h-4 text-indigo-500" />
+                  <span className="text-xs font-black text-indigo-600 uppercase tracking-widest">
+                    Lembar Coretan
+                  </span>
+                  <span className="text-xs text-gray-400 font-medium">
+                    — Tidak dinilai, hanya untuk perhitungan
+                  </span>
+                </div>
+                <ScratchCanvas />
+              </div>
+            )}
           </div>
         </main>
 
@@ -610,12 +808,33 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
       </div>
 
       {showWarning && (
-        <div className="fixed inset-0 bg-red-900/40 backdrop-blur-xl z-[100] flex items-center justify-center p-6 text-left">
+        <div className="fixed inset-0 bg-red-900/60 backdrop-blur-xl z-[110] flex items-center justify-center p-6 text-left">
           <div className="bg-white w-full max-w-sm rounded-[40px] p-10 text-center shadow-2xl">
-            <AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-6" />
-            <h3 className="text-2xl font-black text-gray-900 mb-2">Peringatan!</h3>
-            <p className="text-gray-500 font-medium mb-8">Terdeteksi perpindahan tab. Pelanggaran {violationCount}/{MAX_VIOLATIONS}.</p>
-            <button onClick={() => setShowWarning(false)} className="w-full bg-gray-900 text-white py-5 rounded-2xl font-black">SAYA MENGERTI</button>
+            <AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-6 animate-bounce" />
+            <h3 className="text-2xl font-black text-gray-900 mb-2">⚠️ Peringatan Kecurangan!</h3>
+            <p className="text-sm text-red-500 font-bold mb-1 uppercase tracking-widest">{warningMessage}</p>
+            <p className="text-gray-500 font-medium mb-2">
+              Pelanggaran <span className="font-black text-red-600">{violationCount}</span> dari {MAX_VIOLATIONS}.
+            </p>
+            <p className="text-xs text-gray-400 mb-8">
+              Jika mencapai {MAX_VIOLATIONS} pelanggaran, ujian akan <strong>otomatis dikumpulkan</strong> dan guru akan diberitahu.
+            </p>
+            <div className="flex items-center gap-2 bg-red-50 rounded-2xl p-4 mb-6">
+              <EyeOff className="w-5 h-5 text-red-500 flex-shrink-0" />
+              <p className="text-xs text-red-700 text-left">
+                Guru memantau aktivitas Anda secara <strong>real-time</strong>. Tetap di halaman ujian ini.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setShowWarning(false);
+                // Re-request fullscreen on mobile after warning is closed
+                if (isMobileDevice.current) requestFullscreen();
+              }}
+              className="w-full bg-gray-900 text-white py-5 rounded-2xl font-black"
+            >
+              SAYA MENGERTI
+            </button>
           </div>
         </div>
       )}
