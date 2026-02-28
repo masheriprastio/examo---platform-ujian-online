@@ -2141,6 +2141,10 @@ export default function App() {
     }
   };
 
+  // Helper: strip HTML tags untuk PDF
+  const stripHtml = (html: string) =>
+    html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+
   const exportGradesToPDF = () => {
     const doc = new jsPDF();
     doc.text('Laporan Hasil Ujian - Examo', 14, 20);
@@ -2148,8 +2152,11 @@ export default function App() {
       index + 1, r.studentName, exams.find(e => e.id === r.examId)?.title || '-', `${r.correctCount}/${r.totalQuestions}`, r.score, formatDate(r.submittedAt!)
     ]);
     autoTable(doc, { startY: 30, head: [['No', 'Nama', 'Ujian', 'Benar', 'Nilai', 'Waktu']], body: tableData });
-    doc.save('Laporan_Nilai.pdf');
-    addAlert('✅ Laporan Nilai berhasil diexport ke PDF!', 'success');
+    // Preview di tab baru
+    const blob = doc.output('blob');
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    addAlert('✅ Preview laporan nilai dibuka di tab baru. Gunakan tombol Print/Download browser!', 'success');
   };
 
   const exportGradesToCSV = () => {
@@ -2175,7 +2182,7 @@ export default function App() {
     addAlert('✅ Data nilai berhasil diexport ke CSV!', 'success');
   };
 
-  const exportAnswersToPDF = (resultsToExport: ExamResult[], filename: string) => {
+  const exportAnswersToPDF = (resultsToExport: ExamResult[], filename: string, autoSave = false) => {
     const doc = new jsPDF();
 
     if (resultsToExport.length === 0) {
@@ -2202,17 +2209,16 @@ export default function App() {
       doc.text(`Ujian: ${exam.title}`, 14, yPos);
       doc.text(`Skor: ${result.score}`, 120, yPos);
 
-      // KKM Indicator & Violation Check
       const violationCount = result.logs.filter(l => l.event === 'tab_blur').length;
 
       if (result.status === 'disqualified') {
-        doc.setTextColor(220, 38, 38); // Red
-        doc.text(`(DIDISKUALIFIKASI / DINONAKTIFKAN)`, 140, yPos);
-        doc.setTextColor(0, 0, 0); // Reset
+        doc.setTextColor(220, 38, 38);
+        doc.text(`(DIDISKUALIFIKASI)`, 140, yPos);
+        doc.setTextColor(0, 0, 0);
       } else if (result.score < 75) {
-        doc.setTextColor(220, 38, 38); // Red
+        doc.setTextColor(220, 38, 38);
         doc.text(`(Di Bawah KKM)`, 140, yPos);
-        doc.setTextColor(0, 0, 0); // Reset
+        doc.setTextColor(0, 0, 0);
       }
 
       if (violationCount > 0) {
@@ -2228,41 +2234,43 @@ export default function App() {
 
       const tableBody = exam.questions.map((q, qIdx) => {
         const answer = result.answers[q.id];
+        // Strip HTML dari teks soal
+        const questionText = stripHtml(q.text || '');
         let answerText = '-';
         let status = '';
 
         if (q.type === 'mcq') {
-          answerText = q.options && answer !== undefined && answer !== '' ? `${String.fromCharCode(65 + Number(answer))}. ${q.options[Number(answer)]}` : '-';
-          status = answer === q.correctAnswerIndex ? 'Benar' : 'Salah';
+          const optText = q.options && answer !== undefined && answer !== '' ? stripHtml(q.options[Number(answer)] || '') : '';
+          answerText = optText ? `${String.fromCharCode(65 + Number(answer))}. ${optText}` : '-';
+          status = answer === q.correctAnswerIndex ? '✓ Benar' : '✗ Salah';
         } else if (q.type === 'multiple_select') {
           const ans = (answer as number[]) || [];
           answerText = q.options && ans.length > 0
-            ? ans.map(i => `${String.fromCharCode(65 + i)}. ${q.options![i]}`).join('\n')
+            ? ans.map(i => `${String.fromCharCode(65 + i)}. ${stripHtml(q.options![i] || '')}`).join('\n')
             : '-';
-
           const correctIndices = q.correctAnswerIndices || [];
           const isCorrect = ans.length === correctIndices.length && ans.every(val => correctIndices.includes(val));
-          status = isCorrect ? 'Benar' : 'Salah';
+          status = isCorrect ? '✓ Benar' : '✗ Salah';
         } else if (q.type === 'true_false') {
           answerText = answer === true ? 'BENAR' : answer === false ? 'SALAH' : '-';
-          status = answer === q.trueFalseAnswer ? 'Benar' : 'Salah';
+          status = answer === q.trueFalseAnswer ? '✓ Benar' : '✗ Salah';
         } else if (q.type === 'short_answer') {
-          answerText = answer || '-';
+          answerText = typeof answer === 'string' ? answer : '-';
           const studentTxt = normalizeText(typeof answer === 'string' ? answer : String(answer || ''));
           const keyTxt = normalizeText(q.shortAnswer as string);
           const exactMatch = keyTxt.length > 0 && studentTxt === keyTxt;
           const contains = keyTxt.length > 0 && (studentTxt.includes(keyTxt) || keyTxt.includes(studentTxt));
           const overlap = keyTxt.length > 0 && tokenOverlapRatio(studentTxt, keyTxt) >= 0.6;
-          status = (exactMatch || contains || overlap) ? 'Benar' : 'Salah';
+          status = (exactMatch || contains || overlap) ? '✓ Benar' : '✗ Salah';
         } else if (q.type === 'essay') {
-          answerText = answer || '-';
+          answerText = typeof answer === 'string' && answer.trim() ? answer.trim() : '(Kosong)';
           status = 'Esai';
         }
 
         return [
           qIdx + 1,
-          q.text.substring(0, 50) + (q.text.length > 50 ? '...' : ''),
-          q.type === 'mcq' ? 'PG' : q.type === 'multiple_select' ? 'PG (Banyak)' : q.type === 'true_false' ? 'B/S' : q.type === 'short_answer' ? 'Isian' : 'Esai',
+          questionText.substring(0, 60) + (questionText.length > 60 ? '...' : ''),
+          q.type === 'mcq' ? 'PG' : q.type === 'multiple_select' ? 'PG (B)' : q.type === 'true_false' ? 'B/S' : q.type === 'short_answer' ? 'Isian' : 'Esai',
           answerText,
           status
         ];
@@ -2274,20 +2282,28 @@ export default function App() {
         body: tableBody,
         theme: 'grid',
         headStyles: { fillColor: [79, 70, 229] },
-        styles: { fontSize: 8, cellPadding: 3 },
+        styles: { fontSize: 8, cellPadding: 3, overflow: 'linebreak' },
         margin: { left: 10, right: 10 },
         columnStyles: {
           0: { cellWidth: 8 },
-          1: { cellWidth: 60 },
+          1: { cellWidth: 55 },
           2: { cellWidth: 15 },
           3: { cellWidth: 'auto' },
-          4: { cellWidth: 20 }
+          4: { cellWidth: 22 }
         }
       });
     });
 
-    doc.save(filename);
-    addAlert(`✅ Rekap jawaban berhasil diexport ke PDF!`, 'success');
+    if (autoSave) {
+      doc.save(filename);
+      addAlert(`✅ Rekap jawaban berhasil diexport ke PDF!`, 'success');
+    } else {
+      // Preview di tab baru agar user bisa lihat sebelum download
+      const blob = doc.output('blob');
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      addAlert(`✅ Preview jawaban dibuka di tab baru. Gunakan tombol Download/Print di browser!`, 'success');
+    }
   };
 
   const exportFullAnswersToPDF = () => {
@@ -2296,7 +2312,11 @@ export default function App() {
       addAlert("Belum ada data ujian yang selesai.", 'info');
       return;
     }
-    exportAnswersToPDF(completedResults, 'Rekap_Jawaban_Lengkap.pdf');
+    // Sort by submittedAt terbaru dulu, lalu open preview
+    const sorted = [...completedResults].sort((a, b) =>
+      new Date(b.submittedAt || '').getTime() - new Date(a.submittedAt || '').getTime()
+    );
+    exportAnswersToPDF(sorted, 'Rekap_Jawaban_Lengkap.pdf');
   };
 
   const handleDeleteExam = async (examId: string) => {
@@ -2551,7 +2571,7 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
-                        {results.length === 0 ? <tr><td colSpan={4} className="py-20 text-center text-gray-400 font-medium italic">Belum ada data pengerjaan.</td></tr> : results.map(r => (
+                        {[...results].sort((a, b) => new Date(b.submittedAt || b.startedAt).getTime() - new Date(a.submittedAt || a.startedAt).getTime()).map(r => (
                           <tr key={r.id} className={`hover:bg-gray-50 transition-colors ${r.status === 'disqualified' ? 'bg-red-50/30' : ''} ${r.violation_alert ? 'animate-pulse bg-red-100' : ''}`}>
                             <td className="px-10 py-8 font-bold text-gray-900">
                               {r.studentName}
@@ -2604,6 +2624,7 @@ export default function App() {
                             </td>
                           </tr>
                         ))}
+                        {results.length === 0 && <tr><td colSpan={4} className="py-20 text-center text-gray-400 font-medium italic">Belum ada data pengerjaan.</td></tr>}
                       </tbody>
                     </table>
                   ) : (
