@@ -2425,7 +2425,48 @@ export default function App() {
     }
   };
 
-  if (view === 'LOGIN') return <LoginView onLogin={handleLogin} />;
+  const handleBankUpdate = async (updatedQuestions: Question[]) => {
+  // Update local state immediately (optimistic)
+  const previous = [...bankQuestions];
+  setBankQuestions(updatedQuestions);
+
+  if (!isSupabaseConfigured || !supabase) return;
+
+  try {
+    // Determine removed question IDs (those present before but not in updated list)
+    const removedIds = previous.filter(p => !updatedQuestions.some(u => u.id === p.id)).map(r => r.id);
+
+    if (removedIds.length === 0) return;
+
+    // For each removed question, find containing exam(s) and remove the question there as well
+    for (const removedId of removedIds) {
+      // Find exams that contain this question
+      const affectedExams = exams.filter(ex => Array.isArray(ex.questions) && ex.questions.some(q => String(q.id) === String(removedId)));
+
+      for (const ex of affectedExams) {
+        const newQuestions = (ex.questions || []).filter(q => String(q.id) !== String(removedId));
+        // Optimistic: update local exams state
+        setExams(prev => prev.map(p => p.id === ex.id ? { ...p, questions: newQuestions } : p));
+
+        // Persist change to DB
+        const { error } = await supabase.from('exams').update({ questions: newQuestions }).eq('id', ex.id);
+        if (error) {
+          console.error('Failed to remove question from exam in DB:', error);
+          addAlert(`Gagal menghapus soal dari database (exam ${ex.id}): ${error.message}`, 'error');
+          // Rollback: re-fetch exams to restore correct state
+          await fetchData();
+        }
+      }
+    }
+  } catch (err) {
+    console.error('handleBankUpdate error:', err);
+    addAlert('Terjadi kesalahan saat menyimpan perubahan Bank Soal ke database.', 'error');
+    // Attempt to refresh data
+    await fetchData();
+  }
+};
+
+if (view === 'LOGIN') return <LoginView onLogin={handleLogin} />;
 
   if (view === 'EXAM_SESSION' && activeExam) {
     const progress = results.find(r => r.examId === activeExam.id && r.studentId === currentUser?.id && r.status === 'in_progress');
@@ -2809,7 +2850,7 @@ export default function App() {
                 )}
               </div>
             ) : view === 'TEACHER_BANK' ? (
-              <QuestionBank questions={bankQuestions} onUpdate={setBankQuestions} isLoading={isFetching} />
+              <QuestionBank questions={bankQuestions} onUpdate={handleBankUpdate} isLoading={isFetching} />
             ) : view === 'TEACHER_EXAM_ROOM' ? (
               <div className="max-w-6xl mx-auto animate-in fade-in pb-20">
                 <ExamRoomManager
