@@ -2385,7 +2385,7 @@ export default function App() {
         if (resError) console.error("Failed to delete exam results:", resError);
 
         // Delete Exam
-        const { error } = await supabase.from('exams').delete().eq('id', examId);
+        const { error, count } = await supabase.from('exams').delete().eq('id', examId).select('id', { count: 'exact' });
 
         if (error) {
           console.error("Failed to delete exam:", error);
@@ -2406,6 +2406,16 @@ export default function App() {
           // Force a re-fetch to ensure the UI is 100% in sync with the DB
           shouldFetchRef.current = true;
           fetchData();
+        } else if (count === 0 || count === null) {
+           console.warn("Delete returned 0 rows affected. Likely an RLS or constraint issue silently failing.");
+           addAlert("Gagal menghapus ujian! Data terkunci (RLS/Foreign Key). Jalankan file FIX_EXAM_DELETE_CASCADE.sql di Supabase.", 'error');
+
+           // Rollback local state
+           setExams(prevExams);
+           setResults(prevResults);
+
+           shouldFetchRef.current = true;
+           fetchData();
         } else {
           addAlert("Ujian berhasil dihapus.", 'success');
         }
