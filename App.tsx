@@ -349,11 +349,17 @@ export default function App() {
   const [sortField, setSortField] = useState<'date' | 'score' | 'name'>('date');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
-  // State for token modal
+  // State for token modal (student side)
   const [showTokenModal, setShowTokenModal] = useState(false);
   const [tokenExam, setTokenExam] = useState<Exam | null>(null);
   const [inputToken, setInputToken] = useState('');
   const [tokenError, setTokenError] = useState<string | null>(null);
+
+  // State for release token modal (teacher side)
+  const [releaseTokenExam, setReleaseTokenExam] = useState<Exam | null>(null);
+  const [releasedToken, setReleasedToken] = useState<string>('');
+  const [showReleaseTokenModal, setShowReleaseTokenModal] = useState(false);
+  const [tokenCopied, setTokenCopied] = useState(false);
 
   // State for server error handling
   const [isOffline, setIsOffline] = useState(false);

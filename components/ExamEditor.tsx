@@ -836,7 +836,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                   className="w-full px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white outline-none transition font-bold text-sm"
                 />
               </div>
-              <div className="md:col-span-2 flex flex-col md:flex-row gap-4 mt-2">
+              <div className="md:col-span-2 flex flex-col md:flex-row gap-4 mt-2 flex-wrap">
                 <div className="flex items-center gap-3">
                   <input
                     type="checkbox"
@@ -850,7 +850,31 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                     Acak Urutan Soal
                   </label>
                 </div>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    id="requireToken"
+                    checked={formData.requireToken || false}
+                    onChange={(e) => handleExamChange('requireToken', e.target.checked)}
+                    className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500"
+                  />
+                  <label htmlFor="requireToken" className="text-sm font-bold text-gray-700 flex items-center gap-2">
+                    <Tag className="w-4 h-4 text-gray-400" />
+                    Wajib Token
+                  </label>
+                </div>
               </div>
+              {formData.requireToken && (
+                <div className="md:col-span-2">
+                  <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mt-1">
+                    <AlertCircle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
+                    <p className="text-xs text-amber-700 font-medium leading-relaxed">
+                      Ujian ini <strong>mengharuskan token</strong> sebelum siswa dapat mulai mengerjakan.
+                      Token dapat di-<em>generate</em> melalui tombol <strong>🔑 Release Token</strong> di halaman Manajemen Ujian setelah ujian disimpan.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </section>
 
