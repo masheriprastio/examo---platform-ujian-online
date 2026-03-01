@@ -2463,45 +2463,102 @@ export default function App() {
   };
 
   const handleBankUpdate = async (updatedQuestions: Question[]) => {
-  // Update local state immediately (optimistic)
-  const previous = [...bankQuestions];
-  setBankQuestions(updatedQuestions);
+    // Keep a snapshot of previous bank questions for diffing
+    const previous = [...bankQuestions];
+    // Apply optimistic UI change immediately
+    setBankQuestions(updatedQuestions);
 
-  if (!isSupabaseConfigured || !supabase) return;
+    if (!isSupabaseConfigured || !supabase) return;
 
-  try {
-    // Determine removed question IDs (those present before but not in updated list)
-    const removedIds = previous.filter(p => !updatedQuestions.some(u => u.id === p.id)).map(r => r.id);
+    try {
+      const previousIds = new Set(previous.map(p => String(p?.id)));
+      const updatedIds = new Set(updatedQuestions.map(u => String(u?.id)));
+      const removedIds = [...previousIds].filter(id => !updatedIds.has(id));
 
-    if (removedIds.length === 0) return;
+      // Nothing removed -> nothing to sync
+      if (removedIds.length === 0) {
+        addAlert('Perubahan Bank Soal tersimpan.', 'success');
+        return;
+      }
 
-    // For each removed question, find containing exam(s) and remove the question there as well
-    for (const removedId of removedIds) {
-      // Find exams that contain this question
-      const affectedExams = exams.filter(ex => Array.isArray(ex.questions) && ex.questions.some(q => String(q.id) === String(removedId)));
+      // Find exams that reference any of the removed question ids
+      const affectedExams = exams.filter(ex =>
+        Array.isArray(ex.questions) && ex.questions.some(q => removedIds.includes(String((q as any)?.id)))
+      );
+
+      let hadError = false;
+      const errorMessages: string[] = [];
+
+      // Helper to try updates with several fallbacks
+      const tryUpdate = async (examId: any, payload: any) => {
+        // 1) Try native JSON update
+        let r = await supabase.from('exams').update({ questions: payload }).eq('id', examId).select();
+        if (!r || r.error || !r.data || (Array.isArray(r.data) && r.data.length === 0)) {
+          // 2) Try JSON string (some schemas expect text)
+          r = await supabase.from('exams').update({ questions: JSON.stringify(payload) }).eq('id', examId).select();
+        }
+        return r;
+      };
 
       for (const ex of affectedExams) {
-        const newQuestions = (ex.questions || []).filter(q => String(q.id) !== String(removedId));
-        // Optimistic: update local exams state
+        const newQuestions = (ex.questions || []).filter(q => !removedIds.includes(String((q as any)?.id)));
+
+        // Optimistic local exam update
         setExams(prev => prev.map(p => p.id === ex.id ? { ...p, questions: newQuestions } : p));
 
-        // Persist change to DB
-        const { error } = await supabase.from('exams').update({ questions: newQuestions }).eq('id', ex.id);
-        if (error) {
-          console.error('Failed to remove question from exam in DB:', error);
-          addAlert(`Gagal menghapus soal dari database (exam ${ex.id}): ${error.message}`, 'error');
-          // Rollback: re-fetch exams to restore correct state
-          await fetchData();
+        const cleanedQuestions = JSON.parse(JSON.stringify(newQuestions));
+
+        // Normalize potential numeric id
+        const numericId = (typeof ex.id === 'string' && /^[0-9]+$/.test(ex.id)) ? Number(ex.id) : ex.id;
+
+        // Try direct update by id
+        let res = await tryUpdate(numericId, cleanedQuestions);
+
+        // If no effect, try using string form of id
+        if ((!res || res.error || !res.data || (Array.isArray(res.data) && res.data.length === 0)) && String(ex.id) !== String(numericId)) {
+          res = await tryUpdate(String(ex.id), cleanedQuestions);
+        }
+
+        // If still not updated, try best-effort lookup by title
+        if ((!res || res.error || !res.data || (Array.isArray(res.data) && res.data.length === 0)) && ex.title) {
+          const byTitle = await supabase.from('exams').select('*').ilike('title', ex.title).limit(1);
+          if (byTitle && !byTitle.error && byTitle.data && byTitle.data[0]) {
+            const fallbackId = (byTitle.data[0] as any).id;
+            res = await tryUpdate(fallbackId, cleanedQuestions);
+          }
+        }
+
+        if (res && res.error) {
+          hadError = true;
+          errorMessages.push(`Exam ${ex.id}: ${res.error.message || String(res.error)}`);
+        } else if (res && res.data && res.data[0]) {
+          const saved = res.data[0] as any;
+          const persistedQuestions = Array.isArray(saved.questions) ? saved.questions : (saved.questions ? JSON.parse(saved.questions) : []);
+          setExams(prev => prev.map(p => p.id === ex.id ? { ...p, questions: persistedQuestions } : p));
+        } else {
+          // No rows affected and no explicit error — treat as potential permission/format issue
+          hadError = true;
+          errorMessages.push(`Exam ${ex.id}: tidak ada baris terpengaruh (cek izin atau format kolom).`);
         }
       }
+
+      // Ensure local bankQuestions does not contain removed ids
+      setBankQuestions(prev => prev.filter(q => !removedIds.includes(String(q.id))));
+
+      // Re-fetch to guarantee consistency
+      await fetchData();
+
+      if (hadError) {
+        addAlert(`Beberapa penghapusan tidak tersimpan: ${errorMessages.join('; ')}`, 'error');
+      } else {
+        addAlert('Perubahan Bank Soal tersinkronisasi dengan database.', 'success');
+      }
+    } catch (err: any) {
+      console.error('[BankUpdate] unexpected error:', err);
+      addAlert('Terjadi kesalahan saat menyimpan perubahan Bank Soal ke database.', 'error');
+      await fetchData();
     }
-  } catch (err) {
-    console.error('handleBankUpdate error:', err);
-    addAlert('Terjadi kesalahan saat menyimpan perubahan Bank Soal ke database.', 'error');
-    // Attempt to refresh data
-    await fetchData();
-  }
-};
+  };
 
 if (view === 'LOGIN') return <LoginView onLogin={handleLogin} />;
 
@@ -3365,6 +3422,7 @@ if (view === 'LOGIN') return <LoginView onLogin={handleLogin} />;
                       isDisabled = true;
                       btnIcon = <XCircle className="w-5 h-5" />;
                     } else if (isTaken) {
+  
                       btnText = 'Ulangi Ujian';
                       btnClass = 'bg-white border-2 border-indigo-600 text-indigo-600 shadow-none hover:bg-indigo-50';
                       btnIcon = <RotateCcw className="w-5 h-5" />;
