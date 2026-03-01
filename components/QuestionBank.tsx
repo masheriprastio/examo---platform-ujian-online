@@ -45,7 +45,8 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions = [], onUpdate, i
   };
 
   const handleDeleteQuestion = (id: string) => {
-    onUpdate((questions || []).filter(q => q && q.id !== id));
+    const idStr = String(id);
+    onUpdate((questions || []).filter(q => q && String(q.id) !== idStr));
     setQuestionToDelete(null);
   };
 
@@ -217,7 +218,7 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions = [], onUpdate, i
                   </div>
                   <div className="flex gap-2 shrink-0">
                     <button onClick={() => setEditingQuestion(q)} className="p-2 text-indigo-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"><Edit2 className="w-4 h-4" /></button>
-                    <button onClick={() => setQuestionToDelete(q.id)} className="p-2 text-red-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"><Trash2 className="w-4 h-4" /></button>
+                    <button onClick={() => setQuestionToDelete(String(q.id))} className="p-2 text-red-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"><Trash2 className="w-4 h-4" /></button>
                   </div>
                 </div>
                 <div className="font-bold text-gray-800 line-clamp-2 mb-2 pl-7 md:pl-0" dangerouslySetInnerHTML={{ __html: q.text || '(Tanpa Teks Soal)' }} />
@@ -228,7 +229,7 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions = [], onUpdate, i
         )}
       </div>
 
-      {questionToDelete && (
+      {questionToDelete !== null && (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6 animate-in fade-in">
           <div className="bg-white p-8 rounded-[35px] max-w-sm w-full text-center shadow-2xl">
             <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500">
