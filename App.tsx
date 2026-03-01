@@ -1902,8 +1902,14 @@ export default function App() {
                     addAlert(`Ujian diimport tetapi gagal disimpan ke database: ${res.error.message}`, 'error');
                   } else {
                     const saved = res.data && res.data[0] ? { ...newExam, id: String((res.data as any)[0].id) } : newExam;
-                    setExams(prev => [saved, ...prev]);
-                    setBankQuestions(prev => [...(saved.questions || []), ...prev]);
+                  setExams(prev => {
+                    if (prev.some(e => e.id === saved.id)) return prev;
+                    return [saved, ...prev];
+                  });
+                  setBankQuestions(prev => {
+                    const newQs = (saved.questions || []).filter(q => !prev.some(pq => pq.id === q.id));
+                    return [...newQs, ...prev];
+                  });
                     setEditingExam(saved);
                     setView('EXAM_EDITOR');
                     addAlert(`Berhasil mengimport ${validCount} soal dan menyimpan ujian.`, 'success');
@@ -2117,8 +2123,14 @@ export default function App() {
                   addAlert(`Ujian diimport tetapi gagal disimpan ke database: ${res.error.message}`, 'error');
                 } else {
                   const saved = res.data && res.data[0] ? { ...newExam, id: String((res.data as any)[0].id) } : newExam;
-                  setExams(prev => [saved, ...prev]);
-                  setBankQuestions(prev => [...(saved.questions || []), ...prev]);
+                  setExams(prev => {
+                    if (prev.some(e => e.id === saved.id)) return prev;
+                    return [saved, ...prev];
+                  });
+                  setBankQuestions(prev => {
+                    const newQs = (saved.questions || []).filter(q => !prev.some(pq => pq.id === q.id));
+                    return [...newQs, ...prev];
+                  });
                   setEditingExam(saved);
                   setView('EXAM_EDITOR');
                   addAlert(`Berhasil mengimport ${validCount} soal dan menyimpan ujian.`, 'success');
@@ -2367,23 +2379,48 @@ export default function App() {
     setResults(prev => prev.filter(r => r.examId !== examId));
 
     if (isSupabaseConfigured && supabase) {
-      // Delete Results first (best practice)
-      const { error: resError } = await supabase.from('exam_results').delete().eq('exam_id', examId);
-      if (resError) console.error("Failed to delete exam results:", resError);
+      try {
+        // Delete Results first (best practice)
+        const { error: resError } = await supabase.from('exam_results').delete().eq('exam_id', examId);
+        if (resError) console.error("Failed to delete exam results:", resError);
 
-      // Delete Exam
-      const { error } = await supabase.from('exams').delete().eq('id', examId);
-      if (error) {
-        console.error("Failed to delete exam:", error);
-        addAlert("Gagal menghapus ujian dari database.", 'error');
-        // Rollback
+        // Delete Exam
+        const { error } = await supabase.from('exams').delete().eq('id', examId);
+
+        if (error) {
+          console.error("Failed to delete exam:", error);
+
+          let errorMessage = error.message;
+          if (error.code === '23503') { // Foreign Key Violation
+            errorMessage = "Ujian ini masih digunakan oleh data lain di database. Gunakan file FIX_EXAM_DELETE_CASCADE.sql untuk memperbaikinya.";
+          } else if (error.code === '42501') { // Insufficient Privilege (RLS)
+            errorMessage = "Anda tidak memiliki akses (RLS) untuk menghapus data ini.";
+          }
+
+          addAlert(`Gagal menghapus ujian dari database: ${errorMessage}`, 'error');
+
+          // Rollback local state
+          setExams(prevExams);
+          setResults(prevResults);
+
+          // Force a re-fetch to ensure the UI is 100% in sync with the DB
+          shouldFetchRef.current = true;
+          fetchData();
+        } else {
+          addAlert("Ujian berhasil dihapus.", 'success');
+        }
+      } catch (err: any) {
+        console.error("System error during deletion:", err);
+        addAlert("Terjadi kesalahan sistem saat mencoba menghapus ujian.", 'error');
+
+        // Rollback and sync
         setExams(prevExams);
         setResults(prevResults);
-      } else {
-        addAlert("Ujian berhasil dihapus.", 'success');
+        shouldFetchRef.current = true;
+        fetchData();
       }
     } else {
-      addAlert("Ujian berhasil dihapus.", 'success');
+      addAlert("Ujian berhasil dihapus (Mock Mode).", 'success');
     }
   };
 
