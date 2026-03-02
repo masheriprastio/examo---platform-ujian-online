@@ -1680,7 +1680,7 @@ export default function App() {
       description: '',
       durationMinutes: 60,
       category: 'Umum',
-      status: 'published',
+      status: 'draft',
       createdAt: new Date().toISOString(),
       questions: []
     };
@@ -1853,7 +1853,7 @@ export default function App() {
             description: 'Diimport dari Excel',
             durationMinutes: 60,
             category: 'Umum',
-            status: 'published',
+            status: 'draft',
             createdAt: new Date().toISOString(),
             questions: newQuestions
           };
@@ -2077,7 +2077,7 @@ export default function App() {
           description: 'Diimport dari Word (.docx)',
           durationMinutes: 60,
           category: 'Umum',
-          status: 'published',
+          status: 'draft',
           createdAt: new Date().toISOString(),
           questions: newQuestions
         };
