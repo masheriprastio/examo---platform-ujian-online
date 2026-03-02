@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { UserTracking } from '../types';
 import MonitoringService from '../services/MonitoringService';
 import { Users, Search, Activity, RefreshCw, FileText, Globe, Monitor, Clock, PlayCircle, Loader2 } from 'lucide-react';
-import { isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 // Helper Format
 const fmtDate = (iso?: string) => {
@@ -32,9 +32,33 @@ const UserManagement: React.FC = () => {
 
     useEffect(() => {
         fetchData();
-        // Optional: auto refresh every 30s
+
+        // Auto refresh set-up via Realtime Supabase
+        let channel: any;
+        if (isSupabaseConfigured && supabase) {
+            channel = supabase
+                .channel('user-management-changes')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'user_sessions' }, () => {
+                    fetchData(true);
+                })
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'user_activity_log' }, () => {
+                    fetchData(true);
+                })
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'exam_submission_history' }, () => {
+                    fetchData(true);
+                })
+                .subscribe();
+        }
+
+        // Optional fallback: auto refresh every 30s
         const interval = setInterval(() => fetchData(true), 30000);
-        return () => clearInterval(interval);
+
+        return () => {
+            clearInterval(interval);
+            if (channel) {
+                supabase?.removeChannel(channel);
+            }
+        };
     }, []);
 
     const filteredUsers = users.filter(u =>
@@ -159,7 +183,7 @@ const UserManagement: React.FC = () => {
                                                     <p className="font-bold text-gray-900 text-sm">{user.name}</p>
                                                     <p className="text-xs text-gray-500">{user.email}</p>
                                                     <span className={`inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${user.role === 'teacher' ? 'bg-purple-100 text-purple-700' :
-                                                            user.role === 'admin' ? 'bg-amber-100 text-amber-700' : 'bg-sky-100 text-sky-700'
+                                                        user.role === 'admin' ? 'bg-amber-100 text-amber-700' : 'bg-sky-100 text-sky-700'
                                                         }`}>
                                                         {user.role}
                                                     </span>
