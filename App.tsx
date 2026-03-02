@@ -2225,11 +2225,32 @@ export default function App() {
       doc.text(`Lembar Jawaban Siswa`, 14, yPos);
       yPos += 10;
 
+      let durationStr = '-';
+      let startTimeStr = '-';
+      let endTimeStr = '-';
+      let dateStr = '-';
+
+      if (result.startedAt) {
+        const startDt = new Date(result.startedAt);
+        dateStr = startDt.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+        startTimeStr = startDt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':');
+
+        if (result.submittedAt) {
+          const endDt = new Date(result.submittedAt);
+          endTimeStr = endDt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':');
+          const diffMs = endDt.getTime() - startDt.getTime();
+          const diffMins = Math.max(1, Math.round(diffMs / 60000));
+          durationStr = `${diffMins} menit`;
+        }
+      }
+
       doc.setFontSize(10);
       doc.text(`Nama: ${result.studentName}`, 14, yPos);
-      doc.text(`Waktu: ${result.submittedAt ? formatDate(result.submittedAt) : '-'}`, 120, yPos);
+      doc.text(`Tanggal: ${dateStr}`, 120, yPos);
       yPos += 6;
       doc.text(`Ujian: ${exam.title}`, 14, yPos);
+      doc.text(`Waktu: ${startTimeStr} - ${endTimeStr} (${durationStr})`, 120, yPos);
+      yPos += 6;
       doc.text(`Skor: ${result.score}`, 120, yPos);
 
       const violationCount = result.logs.filter(l => l.event === 'tab_blur').length;
