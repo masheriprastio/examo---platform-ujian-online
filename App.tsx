@@ -2489,15 +2489,34 @@ export default function App() {
       let hadError = false;
       const errorMessages: string[] = [];
 
-      // Helper to try updates with several fallbacks
+      // Helper to try updates with several fallbacks and return full response
       const tryUpdate = async (examId: any, payload: any) => {
-        // 1) Try native JSON update
-        let r = await supabase.from('exams').update({ questions: payload }).eq('id', examId).select();
-        if (!r || r.error || !r.data || (Array.isArray(r.data) && r.data.length === 0)) {
-          // 2) Try JSON string (some schemas expect text)
-          r = await supabase.from('exams').update({ questions: JSON.stringify(payload) }).eq('id', examId).select();
+        const normalizeId = (id: any) => {
+          if (typeof id === 'string' && /^[0-9]+$/.test(id)) return Number(id);
+          return id;
+        };
+
+        const variants = Array.from(new Set([normalizeId(examId), String(examId)]));
+        let lastRes: any = null;
+
+        for (const idVariant of variants) {
+          try {
+            // 1) Try native JSON update (preferred)
+            let res = await supabase.from('exams').update({ questions: payload }).eq('id', idVariant).select();
+            // 2) Fallback: some schemas store JSON as text
+            if (!res || res.error || !res.data || (Array.isArray(res.data) && res.data.length === 0)) {
+              res = await supabase.from('exams').update({ questions: JSON.stringify(payload) }).eq('id', idVariant).select();
+            }
+
+            lastRes = res;
+            // If update affected rows and no error, return immediately
+            if (res && !res.error && res.data && res.data.length > 0) return res;
+          } catch (err) {
+            lastRes = { error: err };
+          }
         }
-        return r;
+
+        return lastRes;
       };
 
       for (const ex of affectedExams) {
