@@ -439,11 +439,34 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
     // 6️⃣ Blokir shortcut keyboard berbahaya
     const blockKeys = (e: KeyboardEvent) => {
       const meta = e.ctrlKey || e.metaKey;
-      // Print, Save, Inspect, Screenshot
       if (meta && ['p', 's', 'u'].includes(e.key.toLowerCase())) { e.preventDefault(); }
       if (e.key === 'F12' || (meta && e.shiftKey && e.key === 'I')) { e.preventDefault(); }
-      if (e.key === 'PrintScreen') { e.preventDefault(); }
-      // iOS: Cmd+Shift+3/4 cannot be blocked at browser level, but we deter
+
+      // Deteksi Screenshot (PrintScreen di Windows, Cmd+Shift+3/4/5 di Mac)
+      if (e.key === 'PrintScreen' || (meta && e.shiftKey && ['3', '4', '5', 's', 'S'].includes(e.key))) {
+        e.preventDefault();
+
+        // Bersihkan clipboard sebagai tindakan preventif
+        try { navigator.clipboard.writeText(''); } catch (e) { }
+
+        recordViolation('Tangkapan layar (Screenshot) terdeteksi');
+
+        // Obscure layar
+        const overlay = document.createElement('div');
+        overlay.style.position = 'fixed';
+        overlay.style.inset = '0';
+        overlay.style.backgroundColor = 'black';
+        overlay.style.zIndex = '9999999';
+        overlay.style.display = 'flex';
+        overlay.style.color = 'white';
+        overlay.style.alignItems = 'center';
+        overlay.style.justifyContent = 'center';
+        overlay.style.fontSize = '24px';
+        overlay.style.fontWeight = 'bold';
+        overlay.innerText = 'SCREENSHOT TIDAK DIIZINKAN';
+        document.body.appendChild(overlay);
+        setTimeout(() => document.body.removeChild(overlay), 3000);
+      }
     };
 
     // 7️⃣ Fullscreen enforcement & change detection
@@ -527,6 +550,11 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
         WebkitTouchCallout: 'none', // iOS: mencegah long-press save image
       } as React.CSSProperties}
     >
+      <style>{`
+        @media print {
+          body { display: none !important; }
+        }
+      `}</style>
       {/* Watermark latar – nama siswa + waktu */}
       {!isPreview && (
         <div

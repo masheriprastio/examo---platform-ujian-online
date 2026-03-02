@@ -23,6 +23,7 @@ import TeacherManager from './components/TeacherManager';
 import MaterialManager from './components/MaterialManager';
 import StudentMaterialList from './components/StudentMaterialList';
 import MonitoringDashboard from './components/MonitoringDashboard';
+import UserManagement from './components/UserManagement';
 import EssayManualScoreInput from './components/EssayManualScoreInput';
 import { MaterialService, Material } from './services/MaterialService';
 
@@ -199,7 +200,10 @@ const Sidebar: React.FC<{
     }] : []),
     { id: 'AI_GENERATOR', label: 'Generator AI', icon: Sparkles },
     { id: 'MATERIAL_MANAGER', label: 'Manajemen Materi', icon: FileText },
-    ...(isAdmin ? [{ id: 'MONITORING', label: 'Monitoring', icon: BarChart2 }] : []),
+    ...(isAdmin ? [
+      { id: 'MONITORING', label: 'Monitoring Sistem', icon: BarChart2 },
+      { id: 'USER_MANAGEMENT', label: 'Monitoring User', icon: Users }
+    ] : []),
   ] : [
     { id: 'STUDENT_DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'STUDENT_MATERIALS', label: 'Materi Belajar', icon: Book },
@@ -2268,7 +2272,7 @@ export default function App() {
         if (q.type === 'mcq') {
           const optText = q.options && answer !== undefined && answer !== '' ? stripHtml(q.options[Number(answer)] || '') : '';
           answerText = optText ? `${String.fromCharCode(65 + Number(answer))}. ${optText}` : '-';
-          status = answer === q.correctAnswerIndex ? '✓ Benar' : '✗ Salah';
+          status = answer === q.correctAnswerIndex ? 'Benar' : 'Salah';
         } else if (q.type === 'multiple_select') {
           const ans = (answer as number[]) || [];
           answerText = q.options && ans.length > 0
@@ -2276,10 +2280,10 @@ export default function App() {
             : '-';
           const correctIndices = q.correctAnswerIndices || [];
           const isCorrect = ans.length === correctIndices.length && ans.every(val => correctIndices.includes(val));
-          status = isCorrect ? '✓ Benar' : '✗ Salah';
+          status = isCorrect ? 'Benar' : 'Salah';
         } else if (q.type === 'true_false') {
           answerText = answer === true ? 'BENAR' : answer === false ? 'SALAH' : '-';
-          status = answer === q.trueFalseAnswer ? '✓ Benar' : '✗ Salah';
+          status = answer === q.trueFalseAnswer ? 'Benar' : 'Salah';
         } else if (q.type === 'short_answer') {
           answerText = typeof answer === 'string' ? answer : '-';
           const studentTxt = normalizeText(typeof answer === 'string' ? answer : String(answer || ''));
@@ -2287,7 +2291,7 @@ export default function App() {
           const exactMatch = keyTxt.length > 0 && studentTxt === keyTxt;
           const contains = keyTxt.length > 0 && (studentTxt.includes(keyTxt) || keyTxt.includes(studentTxt));
           const overlap = keyTxt.length > 0 && tokenOverlapRatio(studentTxt, keyTxt) >= 0.6;
-          status = (exactMatch || contains || overlap) ? '✓ Benar' : '✗ Salah';
+          status = (exactMatch || contains || overlap) ? 'Benar' : 'Salah';
         } else if (q.type === 'essay') {
           answerText = typeof answer === 'string' && answer.trim() ? answer.trim() : '(Kosong)';
           status = 'Esai';
@@ -2295,7 +2299,7 @@ export default function App() {
 
         return [
           qIdx + 1,
-          questionText.substring(0, 60) + (questionText.length > 60 ? '...' : ''),
+          questionText,
           q.type === 'mcq' ? 'PG' : q.type === 'multiple_select' ? 'PG (B)' : q.type === 'true_false' ? 'B/S' : q.type === 'short_answer' ? 'Isian' : 'Esai',
           answerText,
           status
@@ -2311,11 +2315,11 @@ export default function App() {
         styles: { fontSize: 8, cellPadding: 3, overflow: 'linebreak' },
         margin: { left: 10, right: 10 },
         columnStyles: {
-          0: { cellWidth: 8 },
-          1: { cellWidth: 55 },
-          2: { cellWidth: 15 },
+          0: { cellWidth: 12 },
+          1: { cellWidth: 60 },
+          2: { cellWidth: 16 },
           3: { cellWidth: 'auto' },
-          4: { cellWidth: 22 }
+          4: { cellWidth: 18 }
         }
       });
 
@@ -2989,6 +2993,8 @@ export default function App() {
               <MaterialManager />
             ) : view === 'MONITORING' ? (
               <MonitoringDashboard />
+            ) : view === 'USER_MANAGEMENT' ? (
+              <UserManagement />
             ) : view === 'AI_GENERATOR' ? (
               <AIGenerator
                 onExamCreated={handleExamCreate}

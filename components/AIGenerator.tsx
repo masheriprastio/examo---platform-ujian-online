@@ -50,7 +50,7 @@ const AIGenerator: React.FC<AIGeneratorProps> = ({ onExamCreated, onCancel }) =>
 
   const handleGenerate = async () => {
     if (!topic.trim()) return;
-
+    
     setIsLoading(true);
     setError('');
 
@@ -61,16 +61,16 @@ const AIGenerator: React.FC<AIGeneratorProps> = ({ onExamCreated, onCancel }) =>
       } : undefined;
 
       const questions = await generateQuestionsWithAI(topic, questionCount, fileData, questionType);
-
+      
       const newExam: Exam = {
         id: generateUUID(),
         title: `Ujian: ${topic}`,
-        description: selectedFile
+        description: selectedFile 
           ? `Evaluasi otomatis berdasarkan dokumen "${selectedFile.name}" mengenai topik ${topic}`
           : `Evaluasi otomatis mengenai topik ${topic}`,
         durationMinutes: 20,
         category: 'AI Generated',
-        status: 'draft',
+        status: 'published',
         createdAt: new Date().toISOString(),
         questions: questions
       };
@@ -101,7 +101,7 @@ const AIGenerator: React.FC<AIGeneratorProps> = ({ onExamCreated, onCancel }) =>
             {/* Background pattern deco */}
             <div className="absolute -right-10 -top-10 w-40 h-40 bg-white/10 rounded-full blur-3xl"></div>
             <div className="absolute -left-10 -bottom-10 w-40 h-40 bg-indigo-400/20 rounded-full blur-3xl"></div>
-
+            
             <div className="relative z-10">
               <div className="flex items-center gap-3 mb-4">
                 <div className="bg-white/20 p-2.5 rounded-2xl backdrop-blur-md shadow-inner">
@@ -172,10 +172,11 @@ const AIGenerator: React.FC<AIGeneratorProps> = ({ onExamCreated, onCancel }) =>
                   <button
                     key={type.id}
                     onClick={() => setQuestionType(type.id as any)}
-                    className={`py-3 px-4 rounded-xl font-bold text-sm border-2 transition-all ${questionType === type.id
-                      ? 'bg-indigo-50 border-indigo-600 text-indigo-700'
-                      : 'bg-white border-gray-100 text-gray-500 hover:border-gray-200'
-                      }`}
+                    className={`py-3 px-4 rounded-xl font-bold text-sm border-2 transition-all ${
+                      questionType === type.id 
+                        ? 'bg-indigo-50 border-indigo-600 text-indigo-700' 
+                        : 'bg-white border-gray-100 text-gray-500 hover:border-gray-200'
+                    }`}
                   >
                     {type.label}
                   </button>
@@ -192,17 +193,17 @@ const AIGenerator: React.FC<AIGeneratorProps> = ({ onExamCreated, onCancel }) =>
                 </span>
                 <span className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full">REKOMENDASI</span>
               </label>
-
+              
               {!selectedFile ? (
-                <div
+                <div 
                   onClick={() => fileInputRef.current?.click()}
                   className="border-2 border-dashed border-gray-200 rounded-3xl p-8 text-center hover:border-indigo-400 hover:bg-indigo-50/30 transition-all cursor-pointer group"
                 >
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileChange}
-                    className="hidden"
+                  <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    onChange={handleFileChange} 
+                    className="hidden" 
                     accept=".pdf,.txt,.docx"
                   />
                   <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform shadow-sm">
@@ -222,7 +223,7 @@ const AIGenerator: React.FC<AIGeneratorProps> = ({ onExamCreated, onCancel }) =>
                       <p className="text-indigo-400 text-xs font-medium uppercase">File siap dianalisis</p>
                     </div>
                   </div>
-                  <button
+                  <button 
                     onClick={removeFile}
                     className="p-2 text-indigo-400 hover:text-red-500 transition-colors"
                   >

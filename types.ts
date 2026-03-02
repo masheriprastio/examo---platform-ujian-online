@@ -12,6 +12,25 @@ export interface User {
   session_token?: string;
 }
 
+export interface UserTracking {
+  user_id: string;
+  name: string;
+  email: string;
+  role: string;
+  grade?: string;
+  school?: string;
+  is_online: boolean;
+  last_login_at?: string;
+  last_activity_at?: string;
+  ip_address?: string;
+  device_id?: string;
+  user_agent?: string;
+  last_exam_title?: string;
+  last_exam_submitted_at?: string;
+  last_exam_score?: number;
+  last_exam_total_points?: number;
+}
+
 export type QuestionType = 'mcq' | 'true_false' | 'short_answer' | 'essay' | 'multiple_select' | 'essay_dragdrop';
 
 export interface Question {
@@ -122,4 +141,4 @@ export interface Material {
   isPublic: boolean;
 }
 
-export type AppView = 'LOGIN' | 'TEACHER_DASHBOARD' | 'TEACHER_GRADES' | 'TEACHER_BANK' | 'TEACHER_EXAM_ROOM' | 'TEACHER_STUDENTS' | 'TEACHER_TEACHERS' | 'STUDENT_DASHBOARD' | 'STUDENT_HISTORY' | 'STUDENT_MATERIALS' | 'EXAM_SESSION' | 'RESULT' | 'AI_GENERATOR' | 'EXAM_EDITOR' | 'CHANGE_PASSWORD' | 'MATERIAL_MANAGER' | 'MONITORING';
+export type AppView = 'LOGIN' | 'TEACHER_DASHBOARD' | 'TEACHER_GRADES' | 'TEACHER_BANK' | 'TEACHER_EXAM_ROOM' | 'TEACHER_STUDENTS' | 'TEACHER_TEACHERS' | 'STUDENT_DASHBOARD' | 'STUDENT_HISTORY' | 'STUDENT_MATERIALS' | 'EXAM_SESSION' | 'RESULT' | 'AI_GENERATOR' | 'EXAM_EDITOR' | 'CHANGE_PASSWORD' | 'MATERIAL_MANAGER' | 'MONITORING' | 'USER_MANAGEMENT';

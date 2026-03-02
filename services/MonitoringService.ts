@@ -1,4 +1,5 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { UserTracking } from '../types';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -326,6 +327,31 @@ export class MonitoringService {
     else if (ua.includes('Linux')) os = 'Linux';
 
     return `${browser} / ${os}`;
+  }
+
+  /**
+   * Fetch data from user_tracking_view
+   */
+  static async getAllUserTracking(): Promise<UserTracking[]> {
+    if (!isSupabaseConfigured || !supabase) return [];
+
+    try {
+      const { data, error } = await supabase
+        .from('user_tracking_view')
+        .select('*')
+        .order('is_online', { ascending: false })
+        .order('last_login_at', { ascending: false });
+
+      if (error) {
+        console.error('[MonitoringService] getAllUserTracking error:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (err) {
+      console.error('[MonitoringService] getAllUserTracking exception:', err);
+      return [];
+    }
   }
 }
 
