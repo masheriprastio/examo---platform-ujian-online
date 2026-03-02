@@ -2593,15 +2593,10 @@ export default function App() {
         <h2 className="text-3xl font-black text-gray-900 mb-2">Ujian Berhasil Dikirim</h2>
         <p className="text-gray-400 font-medium mb-10">Ringkasan performa pengerjaan Anda</p>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
-          <div className="bg-indigo-600 rounded-[30px] p-8 text-white">
+        <div className="mb-10 flex justify-center">
+          <div className="bg-indigo-600 rounded-[30px] p-8 text-white w-full max-w-sm">
             <p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-80">Skor Akhir</p>
             <h3 className="text-7xl font-black tracking-tighter">{lastResult.score}</h3>
-          </div>
-          <div className="bg-gray-50 rounded-[30px] p-8 border border-gray-100 flex flex-col justify-center gap-4">
-            <div className="flex justify-between items-center"><div className="flex items-center gap-2 text-green-600 font-bold"><CheckCircle className="w-4 h-4" /> Benar</div><span className="font-black text-xl">{lastResult.correctCount}</span></div>
-            <div className="flex justify-between items-center"><div className="flex items-center gap-2 text-red-500 font-bold"><XCircle className="w-4 h-4" /> Salah</div><span className="font-black text-xl">{lastResult.incorrectCount}</span></div>
-            <div className="flex justify-between items-center"><div className="flex items-center gap-2 text-gray-400 font-bold"><HelpCircle className="w-4 h-4" /> Kosong</div><span className="font-black text-xl">{lastResult.unansweredCount}</span></div>
           </div>
         </div>
 

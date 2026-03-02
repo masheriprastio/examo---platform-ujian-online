@@ -71,6 +71,8 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
   const logsRef = useRef<ExamLog[]>(logs);
   const violationCountRef = useRef<number>(0);
   const [browserNotificationRequested, setBrowserNotificationRequested] = useState(false);
+  const [previewResult, setPreviewResult] = useState<any>(null);
+  const [showPreviewResult, setShowPreviewResult] = useState(false);
   const lastFocusTime = useRef<number>(Date.now());
   const isMobileDevice = useRef<boolean>(
     /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
@@ -287,7 +289,14 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
 
   const handleSubmit = useCallback((forced: boolean = false) => {
     if (isPreview) {
-      onExit();
+      if (timerRef.current) clearInterval(timerRef.current);
+      setIsSubmitting(true);
+      setTimeout(() => {
+        const result = calculateFinalStats();
+        setPreviewResult(result);
+        setIsSubmitting(false);
+        setShowPreviewResult(true);
+      }, 500);
       return;
     }
 
@@ -582,8 +591,8 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
           <Clock className={`w-5 h-5 ${timeLeft < 300 ? 'text-red-500' : 'text-indigo-600'}`} />
           <span className="font-mono text-xl font-black">{formatTime(timeLeft)}</span>
         </div>
-        <button onClick={() => isPreview ? onExit() : setShowConfirmFinish(true)} className="bg-indigo-600 text-white px-6 py-2.5 rounded-xl text-xs font-black shadow-lg shadow-indigo-100">
-          {isPreview ? 'TUTUP PREVIEW' : 'KIRIM'}
+        <button onClick={() => setShowConfirmFinish(true)} className="bg-indigo-600 text-white px-6 py-2.5 rounded-xl text-xs font-black shadow-lg shadow-indigo-100">
+          {isPreview ? 'KIRIM PREVIEW' : 'KIRIM'}
         </button>
       </header>
 
@@ -606,9 +615,16 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
           <div className="max-w-3xl mx-auto pb-24 text-left">
             <div className="mb-10">
               <div className="flex items-center justify-between mb-3">
-                <span className="inline-block bg-gray-900 text-white px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em]">
-                  PERTANYAAN {currentQuestionIndex + 1}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="inline-block bg-gray-900 text-white px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em]">
+                    PERTANYAAN {currentQuestionIndex + 1}
+                  </span>
+                  {isPreview && (
+                    <span className="inline-block bg-amber-100 text-amber-800 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest">
+                      {currentQuestion.points} Poin
+                    </span>
+                  )}
+                </div>
                 {/* Hanya tampil badge untuk soal Esai */}
                 {currentQuestion.type === 'essay' && (
                   <span className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-indigo-50 border border-indigo-100 text-[10px] font-black text-indigo-600 uppercase tracking-widest">
@@ -653,9 +669,12 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                       }
                       return { ...prev, [currentQuestion.id]: idx };
                     });
-                  }} className={`w-full text-left p-6 rounded-[28px] border-2 transition-all flex items-start gap-5 ${answers[currentQuestion.id] === idx ? 'bg-indigo-50 border-indigo-600 shadow-xl' : 'bg-white border-gray-50 hover:bg-gray-50/30'}`}>
-                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black flex-shrink-0 mt-1 ${answers[currentQuestion.id] === idx ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-400'}`}>{String.fromCharCode(65 + idx)}</div>
-                    <div className="flex-1 space-y-2">
+                  }} className={`w-full text-left p-6 rounded-[28px] border-2 transition-all flex items-start gap-5 ${answers[currentQuestion.id] === idx ? 'bg-indigo-50 border-indigo-600 shadow-xl' : 'bg-white border-gray-50 hover:bg-gray-50/30'} ${isPreview && currentQuestion.correctAnswerIndex === idx ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''}`}>
+                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black flex-shrink-0 mt-1 ${answers[currentQuestion.id] === idx ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-400'} ${isPreview && currentQuestion.correctAnswerIndex === idx ? 'bg-amber-400 text-white' : ''}`}>{String.fromCharCode(65 + idx)}</div>
+                    <div className="flex-1 space-y-2 relative">
+                      {isPreview && currentQuestion.correctAnswerIndex === idx && (
+                        <span className="absolute -top-6 right-0 text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full uppercase tracking-widest">Jawaban Benar</span>
+                      )}
                       <div className={`font-bold text-lg ${answers[currentQuestion.id] === idx ? 'text-indigo-900' : 'text-gray-700'}`} dangerouslySetInnerHTML={{ __html: opt }}></div>
                       {attachment?.url && (
                         <div className="flex gap-2 items-center">
@@ -697,11 +716,14 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                       addLog('autosave', `Changed answer for Q${currentQuestionIndex + 1} to [${newAns.map(i => String.fromCharCode(65 + i)).join(', ')}]`);
                       return { ...prev, [currentQuestion.id]: newAns };
                     });
-                  }} className={`w-full text-left p-6 rounded-[28px] border-2 transition-all flex items-start gap-5 ${isSelected ? 'bg-indigo-50 border-indigo-600 shadow-xl' : 'bg-white border-gray-50 hover:bg-gray-50/30'}`}>
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center border-2 flex-shrink-0 mt-1 ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-transparent'}`}>
+                  }} className={`w-full text-left p-6 rounded-[28px] border-2 transition-all flex items-start gap-5 ${isSelected ? 'bg-indigo-50 border-indigo-600 shadow-xl' : 'bg-white border-gray-50 hover:bg-gray-50/30'} ${isPreview && currentQuestion.correctAnswerIndices?.includes(idx) ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''}`}>
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center border-2 flex-shrink-0 mt-1 ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-transparent'} ${isPreview && currentQuestion.correctAnswerIndices?.includes(idx) ? 'bg-amber-400 border-amber-400 text-white' : ''}`}>
                       <CheckCircle className="w-6 h-6" />
                     </div>
-                    <div className="flex-1 space-y-2">
+                    <div className="flex-1 space-y-2 relative">
+                      {isPreview && currentQuestion.correctAnswerIndices?.includes(idx) && (
+                        <span className="absolute -top-6 right-0 text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full uppercase tracking-widest">Jawaban Benar</span>
+                      )}
                       <div className={`font-bold text-lg ${isSelected ? 'text-indigo-900' : 'text-gray-700'}`} dangerouslySetInnerHTML={{ __html: opt }}></div>
                       {attachment?.url && (
                         <div className="flex gap-2 items-center">
@@ -736,7 +758,10 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                       }
                       return { ...prev, [currentQuestion.id]: true };
                     });
-                  }} className={`w-full text-center p-8 rounded-[28px] border-2 transition-all ${answers[currentQuestion.id] === true ? 'bg-indigo-50 border-indigo-600 shadow-xl text-indigo-900' : 'bg-white border-gray-50 hover:bg-gray-50/30 text-gray-700'}`}>
+                  }} className={`w-full text-center p-8 rounded-[28px] border-2 transition-all relative ${answers[currentQuestion.id] === true ? 'bg-indigo-50 border-indigo-600 shadow-xl text-indigo-900' : 'bg-white border-gray-50 hover:bg-gray-50/30 text-gray-700'} ${isPreview && currentQuestion.trueFalseAnswer === true ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''}`}>
+                    {isPreview && currentQuestion.trueFalseAnswer === true && (
+                      <span className="absolute top-3 right-3 text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full uppercase tracking-widest">Jawaban Benar</span>
+                    )}
                     <span className="font-black text-2xl">BENAR</span>
                   </button>
                   <button onClick={() => {
@@ -746,21 +771,32 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                       }
                       return { ...prev, [currentQuestion.id]: false };
                     });
-                  }} className={`w-full text-center p-8 rounded-[28px] border-2 transition-all ${answers[currentQuestion.id] === false ? 'bg-indigo-50 border-indigo-600 shadow-xl text-indigo-900' : 'bg-white border-gray-50 hover:bg-gray-50/30 text-gray-700'}`}>
+                  }} className={`w-full text-center p-8 rounded-[28px] border-2 transition-all relative ${answers[currentQuestion.id] === false ? 'bg-indigo-50 border-indigo-600 shadow-xl text-indigo-900' : 'bg-white border-gray-50 hover:bg-gray-50/30 text-gray-700'} ${isPreview && currentQuestion.trueFalseAnswer === false ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''}`}>
+                    {isPreview && currentQuestion.trueFalseAnswer === false && (
+                      <span className="absolute top-3 right-3 text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full uppercase tracking-widest">Jawaban Benar</span>
+                    )}
                     <span className="font-black text-2xl">SALAH</span>
                   </button>
                 </div>
               )}
 
               {currentQuestion.type === 'short_answer' && (
-                <input
-                  type="text"
-                  value={answers[currentQuestion.id] || ''}
-                  onChange={(e) => setAnswers(prev => ({ ...prev, [currentQuestion.id]: e.target.value }))}
-                  onBlur={(e) => addLog('autosave', `Updated answer for Q${currentQuestionIndex + 1}: "${e.target.value}"`)}
-                  className="w-full p-6 rounded-[28px] border-2 border-gray-50 bg-white focus:border-indigo-500 outline-none font-bold text-gray-800 text-xl shadow-inner"
-                  placeholder="Ketik jawaban singkat Anda di sini..."
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={answers[currentQuestion.id] || ''}
+                    onChange={(e) => setAnswers(prev => ({ ...prev, [currentQuestion.id]: e.target.value }))}
+                    onBlur={(e) => addLog('autosave', `Updated answer for Q${currentQuestionIndex + 1}: "${e.target.value}"`)}
+                    className="w-full p-6 rounded-[28px] border-2 border-gray-50 bg-white focus:border-indigo-500 outline-none font-bold text-gray-800 text-xl shadow-inner"
+                    placeholder="Ketik jawaban singkat Anda di sini..."
+                  />
+                  {isPreview && currentQuestion.shortAnswer && (
+                    <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
+                      <p className="text-xs font-bold text-amber-800 uppercase tracking-widest mb-1">Kunci Jawaban Guru:</p>
+                      <p className="font-bold text-gray-900">{currentQuestion.shortAnswer}</p>
+                    </div>
+                  )}
+                </div>
               )}
 
               {currentQuestion.type === 'essay' && (
@@ -783,13 +819,21 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                     </div>
                   )}
                   {/* Textarea jawaban esai (teks) */}
-                  <textarea
-                    value={answers[currentQuestion.id] || ''}
-                    onChange={(e) => setAnswers(prev => ({ ...prev, [currentQuestion.id]: e.target.value }))}
-                    onBlur={(e) => addLog('autosave', `Updated answer for Q${currentQuestionIndex + 1}: "${e.target.value}"`)}
-                    className="w-full min-h-[200px] p-8 rounded-[40px] border-2 border-gray-50 bg-white focus:border-indigo-500 outline-none font-medium text-gray-800 text-base shadow-inner resize-vertical"
-                    placeholder="Tulis jawaban teks Anda di sini (opsional, jika tidak menggunakan papan coretan)..."
-                  />
+                  <div className="relative">
+                    <textarea
+                      value={answers[currentQuestion.id] || ''}
+                      onChange={(e) => setAnswers(prev => ({ ...prev, [currentQuestion.id]: e.target.value }))}
+                      onBlur={(e) => addLog('autosave', `Updated answer for Q${currentQuestionIndex + 1}: "${e.target.value}"`)}
+                      className="w-full min-h-[200px] p-8 rounded-[40px] border-2 border-gray-50 bg-white focus:border-indigo-500 outline-none font-medium text-gray-800 text-base shadow-inner resize-vertical"
+                      placeholder="Tulis jawaban teks Anda di sini (opsional, jika tidak menggunakan papan coretan)..."
+                    />
+                    {isPreview && currentQuestion.essayAnswer && (
+                      <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
+                        <p className="text-xs font-bold text-amber-800 uppercase tracking-widest mb-1">Kunci Jawaban/Petunjuk Guru:</p>
+                        <p className="font-medium text-gray-900 whitespace-pre-wrap">{currentQuestion.essayAnswer}</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -841,12 +885,37 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
       {showConfirmFinish && (
         <div className="fixed inset-0 bg-indigo-900/20 backdrop-blur-md z-[100] flex items-center justify-center p-6 text-left">
           <div className="bg-white w-full max-w-sm rounded-[40px] p-10 text-center shadow-2xl">
-            <h3 className="text-2xl font-black text-gray-900 mb-2">Kirim Sekarang?</h3>
-            <p className="text-gray-500 font-medium mb-10">Pastikan semua jawaban sudah benar.</p>
+            <h3 className="text-2xl font-black text-gray-900 mb-2">Kirim {isPreview ? 'Preview' : 'Sekarang'}?</h3>
+            <p className="text-gray-500 font-medium mb-10">
+              {isPreview ? 'Lihat simulasi skor berdasarkan jawaban Anda di mode preview ini.' : 'Pastikan semua jawaban sudah benar.'}
+            </p>
             <div className="flex gap-4">
               <button onClick={() => setShowConfirmFinish(false)} className="flex-1 py-4 text-gray-400 font-black">Batal</button>
               <button onClick={() => handleSubmit(false)} className="flex-1 bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-xl shadow-indigo-100">Ya, Kirim</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showPreviewResult && (
+        <div className="fixed inset-0 bg-indigo-900/40 backdrop-blur-md z-[150] flex items-center justify-center p-6 text-left">
+          <div className="bg-white w-full max-w-md rounded-[40px] p-10 text-center shadow-2xl">
+            <div className="w-20 h-20 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Sparkles className="w-10 h-10 text-amber-500" />
+            </div>
+            <h3 className="text-2xl font-black text-gray-900 mb-2">Simulasi Hasil Preview</h3>
+            <p className="text-gray-500 font-medium mb-8">Skor yang Anda dapatkan di mode preview</p>
+
+            <div className="mb-8 flex justify-center">
+              <div className="bg-amber-100 rounded-[30px] p-8 text-amber-900 w-full max-w-sm border border-amber-200">
+                <p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-80">Skor Akhir</p>
+                <h3 className="text-7xl font-black tracking-tighter">{previewResult?.score || 0}</h3>
+              </div>
+            </div>
+
+            <button onClick={onExit} className="w-full bg-gray-900 text-white font-bold py-5 rounded-3xl shadow-xl hover:bg-black transition-all">
+              Tutup Preview & Kembali
+            </button>
           </div>
         </div>
       )}
