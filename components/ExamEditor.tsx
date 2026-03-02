@@ -151,6 +151,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [uploadMode, setUploadMode] = useState<Record<string, 'url' | 'file'>>({});
   const [optionUploadMode, setOptionUploadMode] = useState<Record<string, 'url' | 'file'>>({});
+  const [selectedQuestions, setSelectedQuestions] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [pointsErrors, setPointsErrors] = useState<Record<string, string>>({}); // Track validation errors per question
   const backupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -880,7 +881,46 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
 
           <section className="space-y-4">
             <div className="flex justify-between items-center mb-2">
-              <h3 className="text-xl font-black text-gray-900 tracking-tight">Daftar Pertanyaan</h3>
+              <div className="flex items-center gap-4">
+                <h3 className="text-xl font-black text-gray-900 tracking-tight">Daftar Pertanyaan</h3>
+                {formData.questions.length > 0 && (
+                  <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer font-bold bg-gray-50 px-2 py-1 rounded-lg border border-gray-100">
+                    <input
+                      type="checkbox"
+                      checked={selectedQuestions.length === formData.questions.length}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedQuestions(formData.questions.map(q => q.id));
+                        } else {
+                          setSelectedQuestions([]);
+                        }
+                      }}
+                      className="w-3.5 h-3.5 text-indigo-600 rounded focus:ring-indigo-500"
+                    />
+                    Pilih Semua
+                  </label>
+                )}
+                {selectedQuestions.length > 0 && (
+                  <button
+                    onClick={() => {
+                      if (confirm(`Hapus ${selectedQuestions.length} soal terpilih?`)) {
+                        setFormData(prev => ({
+                          ...prev,
+                          questions: prev.questions.filter(q => !selectedQuestions.includes(q.id))
+                        }));
+                        setSelectedQuestions([]);
+                        if (activeQuestionId && selectedQuestions.includes(activeQuestionId)) {
+                          setActiveQuestionId(null);
+                        }
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors flex items-center gap-1.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Hapus ({selectedQuestions.length})
+                  </button>
+                )}
+              </div>
               <div className="flex gap-2 items-center">
                 <select
                   className="bg-white border border-gray-200 text-gray-700 px-3 py-2 rounded-xl text-xs font-bold outline-none"
@@ -946,6 +986,20 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                     className="px-5 py-4 flex items-center justify-between cursor-pointer hover:bg-gray-50/50"
                   >
                     <div className="flex items-center gap-4 flex-1 overflow-hidden">
+                      <input
+                        type="checkbox"
+                        checked={selectedQuestions.includes(q.id)}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          if (e.target.checked) {
+                            setSelectedQuestions(prev => [...prev, q.id]);
+                          } else {
+                            setSelectedQuestions(prev => prev.filter(id => id !== q.id));
+                          }
+                        }}
+                        onClick={e => e.stopPropagation()}
+                        className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer shrink-0"
+                      />
                       <div className="flex flex-col md:hidden shrink-0">
                         <button onClick={(e) => { e.stopPropagation(); moveQuestion(qIndex, 'up'); }} className="p-1 text-gray-300"><ChevronUp className="w-4 h-4" /></button>
                         <button onClick={(e) => { e.stopPropagation(); moveQuestion(qIndex, 'down'); }} className="p-1 text-gray-300"><ChevronDown className="w-4 h-4" /></button>

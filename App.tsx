@@ -1902,14 +1902,14 @@ export default function App() {
                     addAlert(`Ujian diimport tetapi gagal disimpan ke database: ${res.error.message}`, 'error');
                   } else {
                     const saved = res.data && res.data[0] ? { ...newExam, id: String((res.data as any)[0].id) } : newExam;
-                  setExams(prev => {
-                    if (prev.some(e => e.id === saved.id)) return prev;
-                    return [saved, ...prev];
-                  });
-                  setBankQuestions(prev => {
-                    const newQs = (saved.questions || []).filter(q => !prev.some(pq => pq.id === q.id));
-                    return [...newQs, ...prev];
-                  });
+                    setExams(prev => {
+                      if (prev.some(e => e.id === saved.id)) return prev;
+                      return [saved, ...prev];
+                    });
+                    setBankQuestions(prev => {
+                      const newQs = (saved.questions || []).filter(q => !prev.some(pq => pq.id === q.id));
+                      return [...newQs, ...prev];
+                    });
                     setEditingExam(saved);
                     setView('EXAM_EDITOR');
                     addAlert(`Berhasil mengimport ${validCount} soal dan menyimpan ujian.`, 'success');
@@ -2579,7 +2579,7 @@ export default function App() {
     }
   };
 
-if (view === 'LOGIN') return <LoginView onLogin={handleLogin} />;
+  if (view === 'LOGIN') return <LoginView onLogin={handleLogin} />;
 
   if (view === 'EXAM_SESSION' && activeExam) {
     const progress = results.find(r => r.examId === activeExam.id && r.studentId === currentUser?.id && r.status === 'in_progress');
@@ -3124,9 +3124,10 @@ if (view === 'LOGIN') return <LoginView onLogin={handleLogin} />;
                       <div key={e.id} className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm flex items-center justify-between group">
                         <div>
                           <h3 className="font-bold text-gray-900 text-lg md:text-xl">{e.title}</h3>
-                          <div className="flex gap-4 mt-2 text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                          <div className="flex flex-wrap gap-4 mt-2 text-[10px] font-black text-gray-400 uppercase tracking-widest items-center">
                             <span>{e.category}</span>
                             <span>{e.questions.length} Soal</span>
+                            {e.createdAt && <span>Dibuat: {formatDate(e.createdAt)}</span>}
                             <span className={`px-2 py-0.5 rounded text-xs font-bold ${e.status === 'published' ? 'bg-green-100 text-green-600' :
                               e.status === 'draft' ? 'bg-gray-100 text-gray-600' :
                                 e.status === 'active' ? 'bg-blue-100 text-blue-600' :
@@ -3441,7 +3442,7 @@ if (view === 'LOGIN') return <LoginView onLogin={handleLogin} />;
                       isDisabled = true;
                       btnIcon = <XCircle className="w-5 h-5" />;
                     } else if (isTaken) {
-  
+
                       btnText = 'Ulangi Ujian';
                       btnClass = 'bg-white border-2 border-indigo-600 text-indigo-600 shadow-none hover:bg-indigo-50';
                       btnIcon = <RotateCcw className="w-5 h-5" />;
