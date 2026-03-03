@@ -197,6 +197,30 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
   useEffect(() => { answersRef.current = answers; }, [answers]);
   useEffect(() => { logsRef.current = logs; }, [logs]);
 
+  // Real-time progress tracking per question
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase || isPreview || !isReady) return;
+
+    // Debounce to avoid spamming the database on quick navigation
+    const timeoutId = setTimeout(async () => {
+      try {
+        const sessionId = localStorage.getItem('examo_user_session_id');
+        await supabase.from('exam_realtime_progress').upsert({
+          exam_id: exam.id,
+          student_id: userId,
+          current_question_index: currentQuestionIndex,
+          last_ping_at: new Date().toISOString(),
+          session_id: sessionId || null,
+          device_info: navigator.userAgent
+        }, { onConflict: 'exam_id, student_id' });
+      } catch (err) {
+        console.warn('Gagal update realtime progress:', err);
+      }
+    }, 1000);
+
+    return () => clearTimeout(timeoutId);
+  }, [currentQuestionIndex, exam.id, userId, isPreview, isReady]);
+
   const addLog = useCallback((event: ExamLog['event'], detail?: string) => {
     if (isPreview) return; // Don't log in preview mode
     const newLog: ExamLog = { event, timestamp: new Date().toISOString(), detail };

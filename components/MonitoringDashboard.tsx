@@ -314,6 +314,9 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ onClose }) =>
             .on('postgres_changes', { event: '*', schema: 'public', table: 'user_activity_log' }, () => {
                 loadMetrics(true);
             })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'exam_realtime_progress' }, () => {
+                loadMetrics(true);
+            })
             .subscribe();
 
         realtimeRef.current = channel;
@@ -373,8 +376,8 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ onClose }) =>
                     <button
                         onClick={() => setAutoRefresh(v => !v)}
                         className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all ${autoRefresh
-                                ? 'bg-emerald-50 text-emerald-600 border border-emerald-200'
-                                : 'bg-gray-100 text-gray-500 border border-gray-200'
+                            ? 'bg-emerald-50 text-emerald-600 border border-emerald-200'
+                            : 'bg-gray-100 text-gray-500 border border-gray-200'
                             }`}
                     >
                         {autoRefresh ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
@@ -520,6 +523,47 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({ onClose }) =>
                     </div>
                     <VercelSection deployments={m.vercelDeployments} />
                 </div>
+            </div>
+
+            {/* ── Realtime Exam Progress ── */}
+            <div className="bg-white rounded-3xl border border-gray-100 p-6 shadow-sm">
+                <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-indigo-50 rounded-xl">
+                            <Monitor className="w-5 h-5 text-indigo-600" />
+                        </div>
+                        <div>
+                            <h3 className="font-black text-gray-900">Live: Ujian Sedang Berlangsung</h3>
+                            <p className="text-xs text-gray-400">
+                                {m.realtimeExams.length} peserta aktif mengerjakan soal
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                {m.realtimeExams.length === 0 ? (
+                    <div className="text-center py-8">
+                        <Monitor className="w-10 h-10 text-gray-200 mx-auto mb-2" />
+                        <p className="text-gray-400 font-bold text-sm">Belum ada siswa yang sedang mengerjakan ujian</p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {m.realtimeExams.map(exam => (
+                            <div key={`${exam.exam_id}-${exam.student_id}`} className="flex flex-col p-4 rounded-2xl border border-gray-100 bg-gray-50/50">
+                                <div className="flex justify-between items-start mb-2">
+                                    <span className="font-bold text-sm text-gray-900 truncate pr-2">{exam.student_name}</span>
+                                    <span className="text-[10px] bg-indigo-100 text-indigo-700 font-bold px-2 py-0.5 rounded-full shrink-0">
+                                        No. {exam.current_question_index + 1}
+                                    </span>
+                                </div>
+                                <p className="text-xs text-gray-500 font-medium truncate mb-2">{exam.exam_title}</p>
+                                <div className="mt-auto flex items-center gap-1.5 text-[10px] text-gray-400">
+                                    <Clock className="w-3 h-3" /> Update: {fmtTime(exam.last_ping_at)}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
 
             {/* ── Active Users ── */}

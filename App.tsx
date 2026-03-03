@@ -26,6 +26,7 @@ import MonitoringDashboard from './components/MonitoringDashboard';
 import UserManagement from './components/UserManagement';
 import EssayManualScoreInput from './components/EssayManualScoreInput';
 import { MaterialService, Material } from './services/MaterialService';
+import UserActivityService from './services/UserActivityService';
 
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -408,10 +409,7 @@ export default function App() {
 
         // Logout at 5 minutes
         mainTimeout = setTimeout(() => {
-          setView('LOGIN');
-          setCurrentUser(null);
-          localStorage.removeItem('examo_session');
-          addAlert('Sesi Anda telah berakhir karena tidak ada aktivitas selama 5 menit.', 'info', 'session-timeout');
+          handleLogout(true);
         }, SESSION_TIMEOUT_MS);
       }
     };
@@ -588,9 +586,7 @@ export default function App() {
           // If the DB token changes and doesn't match our current token -> kicked out
           if (newUser.session_token && newUser.session_token !== currentUser.session_token) {
             alert("Sesi Anda telah berakhir karena akun ini login di perangkat lain.");
-            setCurrentUser(null);
-            setView('LOGIN');
-            localStorage.removeItem('examo_session');
+            handleLogout();
           }
         }
       )
@@ -909,6 +905,35 @@ export default function App() {
     };
   }, [currentUser]);
 
+  const handleLogout = async (expired = false) => {
+    if (currentUser) {
+      const sessionId = localStorage.getItem('examo_user_session_id');
+      await UserActivityService.logout(sessionId, currentUser.id);
+      localStorage.removeItem('examo_user_session_id');
+    }
+    setCurrentUser(null);
+    setView('LOGIN');
+    localStorage.removeItem('examo_session');
+    if (expired) {
+      addAlert('Sesi Anda telah berakhir karena tidak ada aktivitas selama 5 menit.', 'info', 'session-timeout');
+    }
+  };
+
+  // Heartbeat for Active Session
+  useEffect(() => {
+    let heartbeatInterval: NodeJS.Timeout;
+    if (currentUser && isSupabaseConfigured && supabase) {
+      const sessionId = localStorage.getItem('examo_user_session_id');
+      if (sessionId) {
+        // Update activity every 1 minute
+        heartbeatInterval = setInterval(() => {
+          UserActivityService.updateSessionActivity(sessionId);
+        }, 60000);
+      }
+    }
+    return () => clearInterval(heartbeatInterval);
+  }, [currentUser]);
+
 
   const handleLogin = async (email: string, password?: string): Promise<string | null> => {
     const pwd = password || 'password';
@@ -958,11 +983,31 @@ export default function App() {
         }
       }
 
-      if (error || !data) return "User tidak ditemukan.";
+      if (error || !data) {
+        await UserActivityService.logActivity('00000000-0000-0000-0000-000000000000', email, 'failed_login', 'User tidak ditemukan');
+        return "User tidak ditemukan.";
+      }
 
       // Simple password check (In production, use bcrypt/argon2 on backend or Supabase Auth)
       if (data.password && data.password !== pwd) {
+        await UserActivityService.logActivity(data.id, data.email, 'failed_login', 'Password salah');
         return "Password salah.";
+      }
+
+      // Session and UserActivityService Tracking
+      const deviceId = UserActivityService.generateDeviceId();
+      const ipAddress = await UserActivityService.getClientIP();
+
+      // Check for active login on another device
+      const validation = await UserActivityService.validateDeviceLogin(data.id, data.email, deviceId, ipAddress);
+      if (!validation.allowed) {
+        return validation.message || "Akun Anda sedang aktif dari device/browser lain.";
+      }
+
+      const sessionId = await UserActivityService.createSession(data.id, data.email, deviceId, ipAddress);
+      if (sessionId) {
+        localStorage.setItem('examo_user_session_id', sessionId);
+        await UserActivityService.logActivity(data.id, data.email, 'login', 'User logged in', ipAddress, deviceId, undefined, sessionId);
       }
 
       // Generate and update Session Token (Single Device Enforcement)
@@ -2735,7 +2780,7 @@ export default function App() {
       {/* Token Modal */}
       {showTokenModal && <TokenModal />}
 
-      <Sidebar user={currentUser!} activeView={view} isOpen={isSidebarOpen} onNavigate={setView} onLogout={() => setView('LOGIN')} onClose={() => setIsSidebarOpen(false)} />
+      <Sidebar user={currentUser!} activeView={view} isOpen={isSidebarOpen} onNavigate={setView} onLogout={() => handleLogout()} onClose={() => setIsSidebarOpen(false)} />
       <div className="flex-1 flex flex-col h-screen overflow-hidden text-left">
         <header className="md:hidden bg-white border-b border-gray-100 p-4 flex items-center justify-between"><button onClick={() => setIsSidebarOpen(true)} className="p-2 text-indigo-600 bg-indigo-50 rounded-xl"><Menu /></button><div className="flex items-center gap-2"><GraduationCap className="text-indigo-600" /><span className="font-black">Examo</span></div><div className="w-10" /></header>
         <main className="flex-1 p-6 md:p-10 overflow-y-auto">

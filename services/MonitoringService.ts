@@ -59,12 +59,22 @@ export interface ActivityFeedItem {
   timestamp: string;
 }
 
+export interface RealtimeExamProgressItem {
+  exam_id: string;
+  student_id: string;
+  current_question_index: number;
+  last_ping_at: string;
+  student_name: string;
+  exam_title: string;
+}
+
 export interface SystemMetrics {
   memory: MemoryInfo;
   supabaseStats: SupabaseStats;
   activeSessions: ActiveUserSession[];
   vercelDeployments: VercelDeployment[];
   activityFeed: ActivityFeedItem[];
+  realtimeExams: RealtimeExamProgressItem[];
   fetchedAt: string;
 }
 
@@ -121,6 +131,7 @@ export class MonitoringService {
         .from('user_sessions')
         .select('*')
         .eq('is_active', true)
+        .gte('last_activity_at', new Date(Date.now() - 5 * 60 * 1000).toISOString())
         .order('last_activity_at', { ascending: false });
 
       if (sessErr || !sessions) return [];
@@ -185,7 +196,7 @@ export class MonitoringService {
         supabase.from('users').select('role', { count: 'exact', head: false }),
         supabase.from('exams').select('id', { count: 'exact', head: true }),
         supabase.from('exam_results').select('id', { count: 'exact', head: true }),
-        supabase.from('user_sessions').select('id', { count: 'exact', head: true }).eq('is_active', true),
+        supabase.from('user_sessions').select('id', { count: 'exact', head: true }).eq('is_active', true).gte('last_activity_at', new Date(Date.now() - 5 * 60 * 1000).toISOString()),
         supabase.from('user_activity_log').select('id', { count: 'exact', head: true }),
       ]);
 
@@ -286,14 +297,54 @@ export class MonitoringService {
   }
 
   /**
+   * Fetch Realtime Exam Progress from the newly created table
+   */
+  static async getRealtimeExamProgress(): Promise<RealtimeExamProgressItem[]> {
+    if (!isSupabaseConfigured || !supabase) return [];
+    try {
+      // Clean up old pings (older than 10 mins) on view if needed, but here we just filter in query
+      const { data, error } = await supabase
+        .from('exam_realtime_progress')
+        .select(`
+          exam_id,
+          student_id,
+          current_question_index,
+          last_ping_at,
+          exams (title),
+          users (name)
+        `)
+        .gte('last_ping_at', new Date(Date.now() - 10 * 60 * 1000).toISOString())
+        .order('last_ping_at', { ascending: false });
+
+      if (error) {
+        console.error('[MonitoringService] getRealtimeExamProgress error:', error);
+        return [];
+      }
+
+      return (data || []).map((row: any) => ({
+        exam_id: row.exam_id,
+        student_id: row.student_id,
+        current_question_index: row.current_question_index,
+        last_ping_at: row.last_ping_at,
+        student_name: row.users?.name || 'Unknown',
+        exam_title: row.exams?.title || 'Unknown'
+      }));
+    } catch (err) {
+      console.error('[MonitoringService] getRealtimeExamProgress exception:', err);
+      return [];
+    }
+  }
+
+  /**
    * Fetch all metrics in one call
    */
   static async getAllMetrics(): Promise<SystemMetrics> {
-    const [activeSessions, supabaseStats, activityFeed, vercelDeployments] = await Promise.all([
+    const [activeSessions, supabaseStats, activityFeed, vercelDeployments, realtimeExams] = await Promise.all([
       this.getActiveSessions(),
       this.getSupabaseStats(),
       this.getActivityFeed(30),
       this.getVercelDeployments(),
+      this.getRealtimeExamProgress(),
     ]);
 
     return {
@@ -302,6 +353,7 @@ export class MonitoringService {
       activeSessions,
       vercelDeployments,
       activityFeed,
+      realtimeExams,
       fetchedAt: new Date().toISOString(),
     };
   }

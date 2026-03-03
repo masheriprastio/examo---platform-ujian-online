@@ -142,7 +142,7 @@ SELECT
     u.role,
     u.grade,
     u.school,
-    COALESCE(s.is_active, false) as is_online,
+    COALESCE(s.is_active AND s.last_activity_at >= NOW() - INTERVAL '5 minutes', false) as is_online,
     s.login_at as last_login_at,
     s.last_activity_at,
     s.ip_address,
