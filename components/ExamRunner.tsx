@@ -174,13 +174,23 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
     const questionsToRun = loadOrGenerateShuffledQuestions();
     setShuffledQuestions(questionsToRun);
 
+    let initialRemaining = exam.durationMinutes * 60;
+    const nowTimestamp = new Date().getTime();
+
     if (existingProgress?.startedAt) {
       const started = new Date(existingProgress.startedAt).getTime();
-      const now = new Date().getTime();
-      const elapsed = Math.floor((now - started) / 1000);
-      const remaining = (exam.durationMinutes * 60) - elapsed;
-      setTimeLeft(remaining > 0 ? remaining : 0);
+      const elapsed = Math.floor((nowTimestamp - started) / 1000);
+      initialRemaining = Math.max(0, initialRemaining - elapsed);
     }
+
+    // Cap strictly to the exam's hard end date, if configured
+    if (exam.endDate) {
+      const endTimestamp = new Date(exam.endDate).getTime();
+      const timeUntilEnd = Math.max(0, Math.floor((endTimestamp - nowTimestamp) / 1000));
+      initialRemaining = Math.min(initialRemaining, timeUntilEnd);
+    }
+
+    setTimeLeft(initialRemaining);
     setIsReady(true); // Remove 1-second artificial delay
 
     // Auto-fullscreen saat ujian dimuali (Android Chrome + desktop)

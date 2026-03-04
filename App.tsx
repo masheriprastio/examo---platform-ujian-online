@@ -201,8 +201,8 @@ const Sidebar: React.FC<{
     }] : []),
     { id: 'AI_GENERATOR', label: 'Generator AI', icon: Sparkles },
     { id: 'MATERIAL_MANAGER', label: 'Manajemen Materi', icon: FileText },
+    { id: 'MONITORING', label: 'Monitoring Ujian & Sistem', icon: BarChart2 },
     ...(isAdmin ? [
-      { id: 'MONITORING', label: 'Monitoring Sistem', icon: BarChart2 },
       { id: 'USER_MANAGEMENT', label: 'Monitoring User', icon: Users }
     ] : []),
   ] : [

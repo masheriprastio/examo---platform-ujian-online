@@ -255,7 +255,27 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   }, [formData]);
 
   const handleExamChange = (field: keyof Exam, value: any) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData(prev => {
+      const updated = { ...prev, [field]: value };
+
+      // Auto-calculate duration based on start and end dates
+      // HANYA UPDATE otomatis jika perbedaan masuk akal (<= 300 menit / 5 jam)
+      // Ini mencegah durasi menjadi ribuan menit jika ujian di-set terbuka berhari-hari.
+      if (field === 'startDate' || field === 'endDate') {
+        if (updated.startDate && updated.endDate) {
+          const start = new Date(updated.startDate).getTime();
+          const end = new Date(updated.endDate).getTime();
+          if (end > start) {
+            const diffMins = Math.floor((end - start) / 60000);
+            if (diffMins > 0 && diffMins <= 300) {
+              updated.durationMinutes = diffMins;
+            }
+          }
+        }
+      }
+
+      return updated;
+    });
   };
 
   const handleQuestionChange = (qIndex: number, field: keyof Question, value: any) => {
@@ -820,7 +840,13 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                 <input type="number" value={formData.durationMinutes} onChange={(e) => handleExamChange('durationMinutes', parseInt(e.target.value))} className="w-full px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white outline-none transition font-bold" />
               </div>
               <div>
-                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Mulai Ujian</label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Mulai Ujian</label>
+                  <button type="button" onClick={() => {
+                    const now = new Date();
+                    handleExamChange('startDate', now.toISOString());
+                  }} className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md hover:bg-indigo-100 transition-colors">Set Sekarang</button>
+                </div>
                 <input
                   type="datetime-local"
                   value={formData.startDate ? formatDateTimeLocal(formData.startDate) : ''}
@@ -829,7 +855,14 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                 />
               </div>
               <div>
-                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Selesai Ujian</label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Selesai Ujian</label>
+                  <button type="button" onClick={() => {
+                    const now = new Date();
+                    now.setHours(now.getHours() + 1);
+                    handleExamChange('endDate', now.toISOString());
+                  }} className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md hover:bg-indigo-100 transition-colors">Set +1 Jam</button>
+                </div>
                 <input
                   type="datetime-local"
                   value={formData.endDate ? formatDateTimeLocal(formData.endDate) : ''}
