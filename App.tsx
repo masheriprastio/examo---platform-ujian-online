@@ -340,6 +340,7 @@ export default function App() {
   const [editingExam, setEditingExam] = useState<Exam | null>(null);
   const [lastResult, setLastResult] = useState<ExamResult | null>(null);
   const [selectedResult, setSelectedResult] = useState<ExamResult | null>(null);
+  const [selectedResultTab, setSelectedResultTab] = useState<'log' | 'jawaban'>('jawaban');
   const [previewMaterial, setPreviewMaterial] = useState<Material | null>(null);
 
   // New State for Gradebook
@@ -2872,7 +2873,7 @@ export default function App() {
                                 <button onClick={() => exportAnswersToPDF([r], `Hasil_${r.studentName.replace(/\s+/g, '_')}.pdf`)} className="p-3 bg-gray-50 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Cetak Hasil Siswa Ini">
                                   <FileDown className="w-5 h-5" />
                                 </button>
-                                <button onClick={() => setSelectedResult(r)} className="p-3 bg-gray-50 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Lihat Log Aktivitas">
+                                <button onClick={() => { setSelectedResult(r); setSelectedResultTab('jawaban'); }} className="p-3 bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-xl transition-all" title="Detail Jawaban & Penilaian">
                                   <FileText className="w-5 h-5" />
                                 </button>
                               </div>
@@ -2991,36 +2992,230 @@ export default function App() {
 
                 {selectedResult && (
                   <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6 animate-in fade-in" onClick={() => setSelectedResult(null)}>
-                    <div className="bg-white w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
-                      <div className="p-8 border-b border-gray-100 flex justify-between items-center bg-gray-50 shrink-0">
+                    <div className="bg-white w-full max-w-4xl rounded-[40px] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+                      <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50 shrink-0">
                         <div>
-                          <h3 className="text-2xl font-black text-gray-900 tracking-tight">Log Aktivitas Siswa</h3>
+                          <h3 className="text-2xl font-black text-gray-900 tracking-tight">Detail Pengerjaan Siswa</h3>
                           <p className="text-gray-500 font-bold mt-1 text-sm">{selectedResult.studentName} • {exams.find(e => e.id === selectedResult.examId)?.title}</p>
                         </div>
                         <button onClick={() => setSelectedResult(null)} className="p-3 bg-white rounded-full text-gray-400 hover:text-gray-900 shadow-sm transition-all hover:rotate-90"><CloseIcon /></button>
                       </div>
-                      <div className="flex-1 overflow-y-auto p-8 space-y-6 bg-white">
-                        {selectedResult.logs.length === 0 ? (
-                          <div className="text-center py-10 text-gray-400 font-medium italic">Tidak ada aktivitas tercatat.</div>
-                        ) : (
-                          selectedResult.logs.map((log, idx) => (
-                            <div key={idx} className="flex gap-6 items-start group">
-                              <div className="w-24 text-xs font-black text-gray-400 pt-1 uppercase tracking-widest shrink-0 text-right">
-                                {new Date(log.timestamp).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                              </div>
-                              <div className="flex-1 pb-6 border-b border-gray-50 last:border-0 relative">
-                                <div className={`absolute -left-[31px] top-1.5 w-2.5 h-2.5 rounded-full border-2 border-white ring-1 ${log.event === 'tab_blur' ? 'bg-red-500 ring-red-100' : log.event === 'submit' ? 'bg-green-500 ring-green-100' : 'bg-indigo-500 ring-indigo-100'}`}></div>
-                                <div className={`font-bold text-sm mb-1 ${log.event === 'tab_blur' ? 'text-red-500' : log.event === 'submit' ? 'text-green-600' : 'text-gray-900'}`}>
-                                  {log.event === 'start' && 'Mulai Ujian'}
-                                  {log.event === 'tab_blur' && 'Meninggalkan Halaman Ujian (Tab Blur)'}
-                                  {log.event === 'tab_focus' && 'Kembali ke Halaman Ujian'}
-                                  {log.event === 'autosave' && 'Jawaban Disimpan'}
-                                  {log.event === 'submit' && 'Mengirim Ujian'}
+
+                      {/* TABS */}
+                      <div className="flex border-b border-gray-100 px-6 pt-2 bg-gray-50 items-end gap-2 shrink-0">
+                        <button
+                          onClick={() => setSelectedResultTab('jawaban')}
+                          className={`px-6 py-3 rounded-t-2xl font-bold text-sm transition-colors ${selectedResultTab === 'jawaban' ? 'bg-white border-x border-t border-gray-100 text-indigo-600 shadow-[0_-4px_10px_-5px_rgba(0,0,0,0.05)]' : 'text-gray-400 hover:bg-gray-100'}`}
+                        >
+                          Detail Jawaban & Penilaian
+                        </button>
+                        <button
+                          onClick={() => setSelectedResultTab('log')}
+                          className={`px-6 py-3 rounded-t-2xl font-bold text-sm transition-colors ${selectedResultTab === 'log' ? 'bg-white border-x border-t border-gray-100 text-indigo-600 shadow-[0_-4px_10px_-5px_rgba(0,0,0,0.05)]' : 'text-gray-400 hover:bg-gray-100'}`}
+                        >
+                          Log Aktivitas
+                        </button>
+                      </div>
+
+                      <div className="flex-1 overflow-y-auto p-6 bg-gray-50/30">
+                        {selectedResultTab === 'log' ? (
+                          <div className="space-y-6">
+                            {selectedResult.logs.length === 0 ? (
+                              <div className="text-center py-10 text-gray-400 font-medium italic">Tidak ada aktivitas tercatat.</div>
+                            ) : (
+                              selectedResult.logs.map((log, idx) => (
+                                <div key={idx} className="flex gap-6 items-start group">
+                                  <div className="w-24 text-xs font-black text-gray-400 pt-1 uppercase tracking-widest shrink-0 text-right">
+                                    {new Date(log.timestamp).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                  </div>
+                                  <div className="flex-1 pb-6 border-b border-gray-100 last:border-0 relative">
+                                    <div className={`absolute -left-[31px] top-1.5 w-2.5 h-2.5 rounded-full border-2 border-white ring-1 ${log.event === 'tab_blur' ? 'bg-red-500 ring-red-100' : log.event === 'submit' ? 'bg-green-500 ring-green-100' : 'bg-indigo-500 ring-indigo-100'}`}></div>
+                                    <div className={`font-bold text-sm mb-1 ${log.event === 'tab_blur' ? 'text-red-500' : log.event === 'submit' ? 'text-green-600' : 'text-gray-900'}`}>
+                                      {log.event === 'start' && 'Mulai Ujian'}
+                                      {log.event === 'tab_blur' && 'Meninggalkan Halaman Ujian (Tab Blur)'}
+                                      {log.event === 'tab_focus' && 'Kembali ke Halaman Ujian'}
+                                      {log.event === 'autosave' && 'Jawaban Disimpan'}
+                                      {log.event === 'submit' && 'Mengirim Ujian'}
+                                    </div>
+                                    {log.detail && <p className="text-xs text-gray-500 font-medium bg-white border border-gray-100 p-3 rounded-xl inline-block mt-2">{log.detail}</p>}
+                                  </div>
                                 </div>
-                                {log.detail && <p className="text-xs text-gray-500 font-medium bg-gray-50 p-3 rounded-xl inline-block">{log.detail}</p>}
+                              ))
+                            )}
+                          </div>
+                        ) : (
+                          <div className="space-y-6">
+                            {/* Score summary */}
+                            <div className="grid grid-cols-3 gap-4 mb-6">
+                              <div className={`p-5 rounded-2xl border-2 text-center col-span-1 ${selectedResult.score >= 75 ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                                <p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-70">Skor Saat Ini</p>
+                                <h3 className="text-4xl font-black">{selectedResult.score}</h3>
+                              </div>
+                              <div className="col-span-2 p-5 rounded-2xl bg-white border border-gray-100 shadow-sm flex flex-col justify-center gap-2">
+                                <div className="flex justify-between"><span className="text-gray-500 font-bold text-sm">Benar</span><span className="font-black text-green-600">{selectedResult.correctCount}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-500 font-bold text-sm">Salah</span><span className="font-black text-red-500">{selectedResult.incorrectCount}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-500 font-bold text-sm">Kosong</span><span className="font-black text-gray-400">{selectedResult.unansweredCount}</span></div>
                               </div>
                             </div>
-                          ))
+
+                            {/* Answer details */}
+                            {exams.find(e => e.id === selectedResult.examId)?.questions.map((q, idx) => {
+                              const answer = selectedResult.answers[q.id];
+                              let isCorrect = false;
+                              let answerText = '(Tidak Dijawab)';
+
+                              if (q.type === 'mcq') {
+                                isCorrect = answer === q.correctAnswerIndex;
+                                const opt = q.options && answer !== undefined && answer !== '' ? q.options[Number(answer)] : '';
+                                answerText = opt ? `${String.fromCharCode(65 + Number(answer))}. ${opt}` : '(Tidak Dijawab)';
+                              } else if (q.type === 'multiple_select') {
+                                const ans = (answer as number[]) || [];
+                                const ci = q.correctAnswerIndices || [];
+                                isCorrect = ans.length === ci.length && ans.every(v => ci.includes(v));
+                                answerText = q.options && ans.length > 0 ? ans.map(i => `${String.fromCharCode(65 + i)}. ${q.options![i]}`).join(', ') : '(Tidak Dijawab)';
+                              } else if (q.type === 'true_false') {
+                                isCorrect = answer === q.trueFalseAnswer;
+                                answerText = answer === true ? 'BENAR' : answer === false ? 'SALAH' : '(Tidak Dijawab)';
+                              } else if (q.type === 'short_answer') {
+                                const st = normalizeText(typeof answer === 'string' ? answer : '');
+                                const kt = normalizeText(q.shortAnswer || '');
+                                isCorrect = kt.length > 0 && (st === kt || st.includes(kt) || kt.includes(st) || tokenOverlapRatio(st, kt) >= 0.6);
+                                answerText = typeof answer === 'string' ? answer : '(Tidak Dijawab)';
+                              } else if (q.type === 'essay') {
+                                answerText = typeof answer === 'string' && answer.trim() ? answer : '(Tidak Dijawab)';
+                              }
+
+                              const isEssay = q.type === 'essay';
+                              const manualScore = selectedResult.answers[`${q.id}_manual_score`] as number | undefined;
+
+                              const statusClass = isEssay
+                                ? (manualScore !== undefined ? 'bg-indigo-100 text-indigo-700' : 'bg-yellow-100 text-yellow-700')
+                                : (isCorrect ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700');
+                              const borderClass = isEssay
+                                ? (manualScore !== undefined ? 'border-l-indigo-500' : 'border-l-yellow-400')
+                                : (isCorrect ? 'border-l-green-500' : 'border-l-red-500');
+
+                              const canvasUrl = selectedResult.answers[`${q.id}_canvas`] as string | undefined;
+
+                              return (
+                                <div key={q.id} className={`p-5 rounded-2xl border-l-4 bg-white shadow-sm ${borderClass}`}>
+                                  <div className="flex justify-between items-start mb-3">
+                                    <span className="font-black text-gray-400 text-xs uppercase tracking-widest">Soal {idx + 1} • {q.points} Poin</span>
+                                    {!isEssay && (
+                                      <span className={`px-2 py-0.5 rounded text-[10px] font-black ${statusClass}`}>
+                                        {isCorrect ? 'Benar' : 'Salah'}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {/* Pertanyaan */}
+                                  <div className="font-bold text-gray-900 mb-4 text-sm" dangerouslySetInnerHTML={{ __html: q.text }} />
+
+                                  {/* Jawaban Siswa & Kunci/Rubrik */}
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                                    {/* Jawaban Siswa */}
+                                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                                      <p className="text-xs font-black text-indigo-600 uppercase tracking-widest mb-2">Jawaban Siswa</p>
+                                      <div className="text-sm font-medium text-gray-800 whitespace-pre-wrap">{answerText}</div>
+
+                                      {isEssay && canvasUrl && canvasUrl.startsWith('data:image') && (
+                                        <div className="mt-3">
+                                          <p className="text-[10px] font-bold text-gray-400 mb-1">Coretan Papan</p>
+                                          <img src={canvasUrl} alt="Coretan siswa" className="w-full rounded-lg border border-gray-200" />
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* Kunci Jawaban / Rubrik (Utamanya untuk Esai atau Isian) */}
+                                    <div className="bg-green-50 p-4 rounded-xl border border-green-100">
+                                      <p className="text-xs font-black text-green-700 uppercase tracking-widest mb-2">
+                                        {isEssay ? 'Kunci Jawaban / Rubrik' : 'Kunci Jawaban'}
+                                      </p>
+                                      <div className="text-sm font-medium text-green-900 whitespace-pre-wrap">
+                                        {q.type === 'mcq' && q.options && q.correctAnswerIndex !== undefined ? `${String.fromCharCode(65 + q.correctAnswerIndex)}. ${q.options[q.correctAnswerIndex]}` :
+                                          q.type === 'essay' ? (q.essayAnswer || '(Tidak ada rubrik)') :
+                                            q.type === 'short_answer' ? q.shortAnswer :
+                                              q.type === 'true_false' ? (q.trueFalseAnswer ? 'BENAR' : 'SALAH') :
+                                                q.type === 'multiple_select' && q.options && q.correctAnswerIndices ? q.correctAnswerIndices.map(i => `${String.fromCharCode(65 + i)}. ${q.options![i]}`).join(', ') :
+                                                  '(Tidak ada kunci)'}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Input Nilai Manual Untuk Esai */}
+                                  {isEssay && (
+                                    <EssayManualScoreInput
+                                      questionId={q.id}
+                                      maxPoints={q.points}
+                                      currentScore={manualScore}
+                                      resultId={selectedResult.id}
+                                      onScoreSaved={async (questionId, points) => {
+                                        const res = results.find(r => r.id === selectedResult.id);
+                                        if (!res) return;
+
+                                        // Update jawaban dan hitung ulang manual score total
+                                        const updatedAnswers = { ...res.answers, [`${questionId}_manual_score`]: points };
+
+                                        // Recalculate score combining auto points + manual points
+                                        let autoPoints = 0;
+                                        let manualPoints = 0;
+
+                                        exams.find(e => e.id === res.examId)?.questions.forEach((qu) => {
+                                          const ans = updatedAnswers[qu.id];
+                                          let correct = false;
+
+                                          // auto grading logic clone
+                                          if (qu.type === 'mcq') correct = ans === qu.correctAnswerIndex;
+                                          else if (qu.type === 'true_false') correct = ans === qu.trueFalseAnswer;
+                                          else if (qu.type === 'short_answer') {
+                                            const st = normalizeText(typeof ans === 'string' ? ans : '');
+                                            const kt = normalizeText(qu.shortAnswer || '');
+                                            correct = kt.length > 0 && (st === kt || st.includes(kt) || kt.includes(st) || tokenOverlapRatio(st, kt) >= 0.6);
+                                          } else if (qu.type === 'multiple_select') {
+                                            const a = (ans as number[]) || [];
+                                            const c = qu.correctAnswerIndices || [];
+                                            correct = a.length === c.length && a.every(v => c.includes(v));
+                                          }
+
+                                          if (qu.type === 'essay') {
+                                            const mScore = updatedAnswers[`${qu.id}_manual_score`];
+                                            if (typeof mScore === 'number') {
+                                              manualPoints += mScore;
+                                            }
+                                          } else if (correct) {
+                                            autoPoints += qu.points;
+                                          }
+                                        });
+
+                                        const totalPossible = res.totalPointsPossible;
+                                        const finalPoints = autoPoints + manualPoints;
+                                        const score100 = totalPossible > 0 ? Math.round((finalPoints / totalPossible) * 100) : 0;
+
+                                        // Update Database
+                                        if (isSupabaseConfigured && supabase) {
+                                          const { error } = await supabase.from('exam_results').update({
+                                            answers: updatedAnswers,
+                                            points_obtained: finalPoints,
+                                            score: score100
+                                          }).eq('id', res.id);
+
+                                          if (error) {
+                                            console.error("Gagal simpan skor esai ke DB:", error);
+                                            throw new Error(error.message);
+                                          }
+                                        }
+
+                                        // Update Local State
+                                        const newResultObj = { ...res, answers: updatedAnswers, pointsObtained: finalPoints, score: score100 };
+                                        setResults(prev => prev.map(r => r.id === newResultObj.id ? newResultObj : r));
+                                        setSelectedResult(newResultObj);
+                                      }}
+                                    />
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
                         )}
                       </div>
                     </div>

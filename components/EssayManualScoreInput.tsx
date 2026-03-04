@@ -7,7 +7,7 @@ interface EssayManualScoreInputProps {
     maxPoints: number;
     currentScore?: number;    // undefined = belum dinilai
     resultId: string;         // exam_results.id
-    onScoreSaved: (questionId: string, points: number) => void;
+    onScoreSaved: (questionId: string, points: number) => Promise<void>;
 }
 
 /**
@@ -35,27 +35,7 @@ const EssayManualScoreInput: React.FC<EssayManualScoreInputProps> = ({
 
         setSaving(true);
         try {
-            // Update answers di DB: gabungkan key manual_score ke JSON answers
-            if (isSupabaseConfigured && supabase) {
-                // Fetch answers terkini dulu agar tidak overwrite field lain
-                const { data: row } = await supabase
-                    .from('exam_results')
-                    .select('answers, score')
-                    .eq('id', resultId)
-                    .maybeSingle();
-
-                const currentAnswers: Record<string, any> = row?.answers || {};
-                const updatedAnswers = { ...currentAnswers, [`${questionId}_manual_score`]: pts };
-
-                // Hitung ulang total skor di sisi client sudah dilakukan via onScoreSaved
-                // Kita hanya perlu update answers di DB di sini; score akan diupdate lewat callback
-                await supabase
-                    .from('exam_results')
-                    .update({ answers: updatedAnswers })
-                    .eq('id', resultId);
-            }
-
-            onScoreSaved(questionId, pts);
+            await onScoreSaved(questionId, pts);
             setSaved(true);
         } catch (err) {
             console.error('Failed to save essay score:', err);
