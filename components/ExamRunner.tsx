@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Exam, Question, ExamLog } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { getDeterministicEssayQuestions, assignEssayQuestions } from '../lib/examAssignments';
 import {
   Clock, CheckCircle, ChevronLeft, ChevronRight,
   AlertTriangle, Star, Shuffle, LayoutGrid,
@@ -94,7 +95,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
   };
 
   // Load or generate shuffled questions
-  const loadOrGenerateShuffledQuestions = (): Question[] => {
+  const loadOrGenerateShuffledQuestions = async (): Promise<Question[]> => {
     const cacheKey = getShuffleCacheKey();
 
     // If NOT in preview mode, try to load from cache or existing progress
@@ -115,7 +116,62 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
       }
     }
 
-    // Generate new shuffle
+    // If exam provides a question bank id (exam.questionBankId) prefer deterministic RPC for essay-only assignments
+    if (!isPreview && isSupabaseConfigured && (exam as any).questionBankId) {
+      try {
+        const bankId = (exam as any).questionBankId;
+        const count = (exam as any).essayCountPerStudent || 5;
+        const assigned = await getDeterministicEssayQuestions(bankId, userId, count);
+        if (assigned && Array.isArray(assigned) && assigned.length > 0) {
+          const questionsFromBank: Question[] = assigned.map(a => ({
+            id: a.question_id,
+            type: 'essay',
+            text: a.content || '',
+            points: (exam as any).defaultEssayPoints || 10
+          }));
+
+          // Attempt to persist a student_exams row and call assign_essay_questions RPC so mapping is stored for audit/grading.
+          if (isSupabaseConfigured && supabase) {
+            try {
+              // Use existing studentExamId if present in existingProgress (resume case)
+              let studentExamId: string | undefined = existingProgress?.studentExamId;
+
+              if (!studentExamId) {
+                const { data: insertData, error: insertError } = await supabase
+                  .from('student_exams')
+                  .insert([{ student_id: userId, exam_id: exam.id }])
+                  .select('id')
+                  .single();
+
+                if (insertError) {
+                  console.warn('Failed to create student_exams row:', insertError);
+                } else if (insertData && (insertData as any).id) {
+                  studentExamId = (insertData as any).id;
+                }
+              }
+
+              if (studentExamId) {
+                // Call RPC to persist assigned questions (will ignore conflicts)
+                await assignEssayQuestions(studentExamId, bankId, userId, count);
+                // store studentExamId in session for durability during refresh
+                sessionStorage.setItem(`${cacheKey}_studentExamId`, studentExamId);
+              }
+            } catch (e) {
+              console.warn('Failed to persist student_exam or assign questions:', e);
+            }
+          }
+
+          // persist to session for durability during refresh
+          sessionStorage.setItem(cacheKey, JSON.stringify(questionsFromBank));
+          return questionsFromBank;
+        }
+      } catch (err) {
+        console.warn('Failed to fetch deterministic essay questions:', err);
+        // fallback to local exam.questions generation below
+      }
+    }
+
+    // Generate new shuffle from in-memory exam.questions
     let questionsToRun = [...exam.questions];
 
     if (exam.randomizeQuestions) {
@@ -161,7 +217,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
       return q;
     });
 
-    // Save to session storage untuk session berikutnya (jika user refresh)
+    // Save to session storage for session berikutnya (jika user refresh)
     // BUT ONLY IF NOT IN PREVIEW MODE
     if (!isPreview) {
       sessionStorage.setItem(cacheKey, JSON.stringify(questionsToRun));
@@ -171,37 +227,39 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
   };
 
   useEffect(() => {
-    const questionsToRun = loadOrGenerateShuffledQuestions();
-    setShuffledQuestions(questionsToRun);
+    (async () => {
+      const questionsToRun = await loadOrGenerateShuffledQuestions();
+      setShuffledQuestions(questionsToRun);
 
-    let initialRemaining = exam.durationMinutes * 60;
-    const nowTimestamp = new Date().getTime();
+      let initialRemaining = exam.durationMinutes * 60;
+      const nowTimestamp = new Date().getTime();
 
-    if (existingProgress?.startedAt) {
-      const started = new Date(existingProgress.startedAt).getTime();
-      const elapsed = Math.floor((nowTimestamp - started) / 1000);
-      initialRemaining = Math.max(0, initialRemaining - elapsed);
-    }
+      if (existingProgress?.startedAt) {
+        const started = new Date(existingProgress.startedAt).getTime();
+        const elapsed = Math.floor((nowTimestamp - started) / 1000);
+        initialRemaining = Math.max(0, initialRemaining - elapsed);
+      }
 
-    // Cap strictly to the exam's hard end date, if configured
-    if (exam.endDate) {
-      const endTimestamp = new Date(exam.endDate).getTime();
-      const timeUntilEnd = Math.max(0, Math.floor((endTimestamp - nowTimestamp) / 1000));
-      initialRemaining = Math.min(initialRemaining, timeUntilEnd);
-    }
+      // Cap strictly to the exam's hard end date, if configured
+      if (exam.endDate) {
+        const endTimestamp = new Date(exam.endDate).getTime();
+        const timeUntilEnd = Math.max(0, Math.floor((endTimestamp - nowTimestamp) / 1000));
+        initialRemaining = Math.min(initialRemaining, timeUntilEnd);
+      }
 
-    setTimeLeft(initialRemaining);
-    setIsReady(true); // Remove 1-second artificial delay
+      setTimeLeft(initialRemaining);
+      setIsReady(true); // Remove 1-second artificial delay
 
-    // Auto-fullscreen saat ujian dimuali (Android Chrome + desktop)
-    // iOS Safari via WKWebView juga support webkit variant
-    if (!isPreview) {
-      const el = document.documentElement as any;
-      try {
-        if (el.requestFullscreen) el.requestFullscreen().catch(() => { });
-        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-      } catch (_) { /* Browser mungkin tidak support */ }
-    }
+      // Auto-fullscreen saat ujian dimuali (Android Chrome + desktop)
+      // iOS Safari via WKWebView juga support webkit variant
+      if (!isPreview) {
+        const el = document.documentElement as any;
+        try {
+          if (el.requestFullscreen) el.requestFullscreen().catch(() => { });
+          else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+        } catch (_) { /* Browser mungkin tidak support */ }
+      }
+    })();
   }, [exam.id, userId]);
 
   useEffect(() => { answersRef.current = answers; }, [answers]);
