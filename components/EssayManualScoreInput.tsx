@@ -80,6 +80,9 @@ const EssayManualScoreInput: React.FC<EssayManualScoreInputProps> = ({
                     ✅ Nilai esai ini sudah diperbarui dan dihitung ke skor akhir siswa.
                 </p>
             )}
+            <p className="text-[10px] text-gray-500 font-semibold mt-1">
+                Nilai asli ditampilkan sebagai poin (misal 85/90), lalu otomatis dikonversi ke skor 0-100.
+            </p>
         </div>
     );
 };

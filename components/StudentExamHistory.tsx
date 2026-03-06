@@ -170,10 +170,10 @@ export const StudentExamHistory: React.FC<StudentExamHistoryProps> = ({
                     <div className="flex items-center gap-6">
                       <div className="text-right">
                         <div className="text-3xl font-black text-indigo-600">
-                          {exam.score}/{exam.total_points}
+                          {getPoints(exam).pointsObt}/{getPoints(exam).totalPts}
                         </div>
                         <div className="text-xs font-bold text-gray-400">
-                          {formatScorePercentage(exam.score, exam.total_points)}%
+                          {formatScorePercentage(getPoints(exam).pointsObt, getPoints(exam).totalPts)}%
                         </div>
                       </div>
                       <div className="text-gray-400">
@@ -319,18 +319,18 @@ export const StudentExamHistory: React.FC<StudentExamHistoryProps> = ({
                         <div className="text-xs font-black text-gray-400 uppercase tracking-widest mb-3">
                           Rincian Nilai
                         </div>
-                        <div className="grid grid-cols-3 gap-4">
+                          <div className="grid grid-cols-3 gap-4">
                           <div className="text-center p-3 bg-green-50 rounded-lg">
-                            <div className="text-sm text-green-600 font-black">Perolehan</div>
-                            <div className="text-2xl font-black text-green-600">{exam.score}</div>
+                            <div className="text-sm text-green-600 font-black">Perolehan (poin)</div>
+                            <div className="text-2xl font-black text-green-600">{getPoints(exam).pointsObt}</div>
                           </div>
                           <div className="text-center p-3 bg-gray-50 rounded-lg">
                             <div className="text-sm text-gray-600 font-black">Total Poin</div>
-                            <div className="text-2xl font-black text-gray-600">{exam.total_points}</div>
+                            <div className="text-2xl font-black text-gray-600">{getPoints(exam).totalPts}</div>
                           </div>
                           <div className="text-center p-3 bg-indigo-50 rounded-lg">
-                            <div className="text-sm text-indigo-600 font-black">Persentase</div>
-                            <div className="text-2xl font-black text-indigo-600">{formatScorePercentage(exam.score, exam.total_points)}%</div>
+                            <div className="text-sm text-indigo-600 font-black">Skor (0–100)</div>
+                            <div className="text-2xl font-black text-indigo-600">{formatNormalizedScore(exam)}</div>
                           </div>
                         </div>
                       </div>

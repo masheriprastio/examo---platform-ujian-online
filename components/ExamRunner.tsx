@@ -30,6 +30,26 @@ interface ExamRunnerProps {
 }
 
 const MAX_VIOLATIONS = 3;
+const ESSAY_PARTICIPATION_POINTS = 1;
+const ESSAY_FULL_THRESHOLD = 0.7;
+const ESSAY_PARTIAL_THRESHOLD = 0.35;
+
+const stripHtml = (text: string): string => text.replace(/<[^>]*>/g, ' ');
+const normalizeEssayText = (text: string): string =>
+  stripHtml(text || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const tokenOverlapRatio = (a: string, b: string): number => {
+  const as = new Set(a.split(' ').filter(Boolean));
+  const bs = new Set(b.split(' ').filter(Boolean));
+  if (as.size === 0 || bs.size === 0) return 0;
+  let inter = 0;
+  as.forEach(t => { if (bs.has(t)) inter += 1; });
+  return inter / Math.max(1, Math.min(as.size, bs.size));
+};
 
 const ExamRunner: React.FC<ExamRunnerProps> = ({
   exam,
@@ -342,26 +362,46 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
             incorrect++;
           }
         } else if (q.type === 'essay') {
-          // Esai: 
-          // - Jika kosong: 0 poin
-          // - Jika isi sesuai kunci (keyword match): Poin Penuh
-          // - Jika isi tidak kosong tapi tidak sesuai: 1 poin (partisipasi)
+          const gradingMode = q.essayGradingMode || 'keyword_auto';
+
+          // Esai:
+          // - manual: tidak dinilai otomatis saat submit, menunggu guru
+          // - keyword_auto: cocok kata-kunci/kemiripan -> poin penuh, jika tidak cocok tapi menjawab -> poin partisipasi
           if (typeof ans === 'string' && ans.trim().length > 0) {
-            const studentAnswer = ans.trim().toLowerCase();
-            const teacherKey = (q.essayAnswer || '').trim().toLowerCase();
-
-            // Cek apakah jawaban siswa mengandung kunci jawaban guru (atau sebaliknya jika kunci pendek)
-            // Ini adalah heuristik sederhana.
-            const isAccurate = teacherKey && (studentAnswer.includes(teacherKey) || teacherKey.includes(studentAnswer));
-
-            if (isAccurate) {
-              obtained += (q.points || 0);
-              correct++;
-            } else {
-              obtained += 1; // Poin partisipasi
-              // Tidak dihitung sebagai 'correct' (benar sempurna) untuk statistik, tapi dapat nilai.
-              // Kita anggap 'incorrect' untuk statistik benar/salah, tapi skor bertambah.
+            if (gradingMode === 'manual') {
+              // Keep points unchanged; teacher will input manual score later.
               incorrect++;
+            } else {
+              const studentAnswer = normalizeEssayText(ans);
+              const teacherKey = normalizeEssayText(q.essayAnswer || '');
+              const overlap = tokenOverlapRatio(studentAnswer, teacherKey);
+              const hasStrongContainment = !!teacherKey && (
+                studentAnswer.includes(teacherKey) ||
+                teacherKey.includes(studentAnswer)
+              );
+              const isFullMatch = hasStrongContainment || overlap >= ESSAY_FULL_THRESHOLD;
+              const isPartialMatch = overlap >= ESSAY_PARTIAL_THRESHOLD;
+
+              if (isFullMatch) {
+                obtained += (q.points || 0);
+                correct++;
+              } else if (isPartialMatch) {
+                // Partial credit for "mendekati" answers.
+                // Keep within [participation+1, points-1] so it is clearly not full score.
+                const maxPts = q.points || 0;
+                const scaled = Math.round(maxPts * overlap);
+                const lowerBound = Math.min(maxPts, ESSAY_PARTICIPATION_POINTS + 1);
+                const upperBound = Math.max(lowerBound, maxPts - 1);
+                const partialPoints = maxPts > 1
+                  ? Math.min(upperBound, Math.max(lowerBound, scaled))
+                  : ESSAY_PARTICIPATION_POINTS;
+                obtained += partialPoints;
+                incorrect++;
+              } else {
+                const participation = Math.min(ESSAY_PARTICIPATION_POINTS, q.points || ESSAY_PARTICIPATION_POINTS);
+                obtained += participation;
+                incorrect++;
+              }
             }
           } else {
             incorrect++;

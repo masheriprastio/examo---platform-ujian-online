@@ -49,6 +49,22 @@ export interface ExamSubmissionRecord {
  * Service untuk mengelola session user, device tracking, dan activity logging
  */
 export class UserActivityService {
+  // Keep aligned with frontend auto-logout (5 minutes) plus grace for timer/network jitter.
+  private static readonly SESSION_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+  private static readonly SESSION_IDLE_GRACE_MS = 2 * 60 * 1000;
+  
+  private static getSessionActivityTimestamp(session: Partial<UserSession> & { login_at?: string; last_activity_at?: string }): number {
+    const activitySource = session.last_activity_at || session.login_at;
+    if (!activitySource) return 0;
+    const ts = new Date(activitySource).getTime();
+    return Number.isFinite(ts) ? ts : 0;
+  }
+
+  private static isSessionStale(session: Partial<UserSession> & { login_at?: string; last_activity_at?: string }, now: number): boolean {
+    const lastActivityTs = this.getSessionActivityTimestamp(session);
+    if (!lastActivityTs) return false;
+    return now - lastActivityTs > (this.SESSION_IDLE_TIMEOUT_MS + this.SESSION_IDLE_GRACE_MS);
+  }
   
   /**
    * Dapatkan IP address pengguna
@@ -117,8 +133,11 @@ export class UserActivityService {
       return { allowed: true }; // Mock mode: always allow
     }
 
+    // Jika ada login hampir bersamaan dari IP berbeda dalam window ini, anggap mencurigakan
+    const SUSPICIOUS_WINDOW_SECONDS = 60;
+
     try {
-      // Cek apakah ada active session untuk user ini dengan device/IP yang berbeda
+      // Ambil active sessions untuk user
       const { data: existingSessions, error } = await supabase
         .from('user_sessions')
         .select('*')
@@ -130,21 +149,75 @@ export class UserActivityService {
         return { allowed: true }; // Fallback: allow on error
       }
 
-      if (existingSessions && existingSessions.length > 0) {
-        const activeSession = existingSessions[0] as UserSession;
-        
-        // Jika device dan IP sama, allow (same device)
-        if (activeSession.device_id === currentDeviceId && activeSession.ip_address === currentIP) {
-          return { allowed: true };
+      if (!existingSessions || existingSessions.length === 0) {
+        return { allowed: true };
+      }
+
+      const now = Date.now();
+      const staleSessions = (existingSessions as any[]).filter(s => this.isSessionStale(s, now));
+      const activeRecentSessions = (existingSessions as any[]).filter(s => !this.isSessionStale(s, now));
+
+      // Auto-clean stale sessions so users are not blocked by abandoned tabs/devices.
+      if (staleSessions.length > 0) {
+        const staleIds = staleSessions.map(s => s.id).filter(Boolean);
+        if (staleIds.length > 0) {
+          const { error: staleUpdateError } = await supabase
+            .from('user_sessions')
+            .update({
+              is_active: false,
+              status: 'inactive',
+              last_activity_at: new Date().toISOString()
+            })
+            .in('id', staleIds);
+          if (staleUpdateError) {
+            console.error('Failed to auto-deactivate stale sessions:', staleUpdateError);
+          }
         }
-        
-        // Jika device atau IP berbeda, dan sudah ada active session, tolak
-        if (activeSession.is_active) {
-          return {
-            allowed: false,
-            message: `Akun Anda sedang aktif dari device lain (IP: ${activeSession.ip_address}). Logout terlebih dahulu atau hubungi admin.`,
-            existingSession: activeSession
-          };
+      }
+
+      if (activeRecentSessions.length === 0) {
+        return { allowed: true };
+      }
+
+      // Jika ada session yang sama device+IP, izinkan
+      const same = activeRecentSessions.find(s => s.device_id === currentDeviceId && s.ip_address === currentIP);
+      if (same) return { allowed: true };
+
+      // Deteksi situasi suspicious: ada active session yang login dalam rentang waktu singkat dari IP berbeda
+      const isSuspicious = activeRecentSessions.some(s => {
+        const loginAt = s.login_at ? new Date(s.login_at).getTime() : 0;
+        return Math.abs(now - loginAt) <= SUSPICIOUS_WINDOW_SECONDS * 1000 && s.ip_address !== currentIP;
+      });
+
+      if (isSuspicious) {
+        // Kembalikan informasi agar frontend bisa menampilkan peringatan / minta verifikasi admin
+        const existingSession = activeRecentSessions[0] as UserSession;
+        return {
+          allowed: false,
+          message: `Terdeteksi login bersamaan dari IP berbeda (${existingSession.ip_address}). Jika ini bukan Anda, hubungi admin atau gunakan fitur force logout.`,
+          existingSession
+        };
+      }
+
+      // Jika tidak mencurigakan, otomatis nonaktifkan session lama supaya login baru tidak gagal
+      try {
+        const { error: rpcErr } = await supabase.rpc('deactivate_sessions_for_user', { p_user_id: userId });
+        if (rpcErr) {
+          // fallback: update langsung
+          await supabase
+            .from('user_sessions')
+            .update({ is_active: false, status: 'inactive', last_activity_at: new Date().toISOString() })
+            .eq('user_id', userId);
+        }
+      } catch (e) {
+        // fallback update on any error
+        try {
+          await supabase
+            .from('user_sessions')
+            .update({ is_active: false, status: 'inactive', last_activity_at: new Date().toISOString() })
+            .eq('user_id', userId);
+        } catch (ee) {
+          console.error('Failed to deactivate previous sessions fallback:', ee);
         }
       }
 
@@ -269,16 +342,24 @@ export class UserActivityService {
 
     try {
       if (sessionId) {
-        await supabase
+        const { error } = await supabase
           .from('user_sessions')
-          .update({ is_active: false, status: 'inactive' })
+          .update({ is_active: false, status: 'inactive', last_activity_at: new Date().toISOString() })
           .eq('id', sessionId);
+        if (error) {
+          console.error('Error deactivating session by id on logout:', error);
+          await supabase.rpc('deactivate_session_by_id', { p_session_id: sessionId });
+        }
       } else {
         // Jika tidak ada sessionId, deactivate semua session untuk user
-        await supabase
+        const { error } = await supabase
           .from('user_sessions')
-          .update({ is_active: false, status: 'inactive' })
+          .update({ is_active: false, status: 'inactive', last_activity_at: new Date().toISOString() })
           .eq('user_id', userId);
+        if (error) {
+          console.error('Error deactivating sessions by user on logout:', error);
+          await supabase.rpc('deactivate_sessions_for_user', { p_user_id: userId });
+        }
       }
 
       await this.logActivity(userId, '', 'logout', undefined, undefined, undefined, undefined, sessionId || undefined);

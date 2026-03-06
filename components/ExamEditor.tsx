@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { generateUUID } from '../lib/uuid';
-import { Exam, Question, QuestionType } from '../types';
+import { Exam, Question, QuestionType, EssayGradingMode } from '../types';
 import RichTextEditor from './RichTextEditor';
 import { supabase } from '../lib/supabase';
 import * as XLSX from 'xlsx';
@@ -409,7 +409,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
 
   // Simple CSV parser for import (expects header row).
   // Header fields supported:
-  // type,text,options,correctAnswerIndex,correctAnswerIndices,points,explanation,topic,difficulty,randomizeOptions,shortAnswer,essayAnswer
+  // type,text,options,correctAnswerIndex,correctAnswerIndices,points,explanation,topic,difficulty,randomizeOptions,shortAnswer,essayAnswer,essayGradingMode
   // - options: separate choices with "||" (double pipe) to allow commas in text
   // - correctAnswerIndices: separate multiple indices with ";" (semicolon) for multiple_select
   const handleImportFile = async (file: File) => {
@@ -490,6 +490,8 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         const randomizeOptions = String(obj['randomizeOptions'] || '').toLowerCase() === 'true';
         const shortAnswer = obj['shortAnswer'] || '';
         const essayAnswer = obj['essayAnswer'] || '';
+        const essayGradingModeRaw = (obj['essayGradingMode'] || '').toLowerCase();
+        const essayGradingMode: EssayGradingMode = essayGradingModeRaw === 'manual' ? 'manual' : 'keyword_auto';
 
         const q: Question = {
           id: generateUUID(),
@@ -505,7 +507,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
           ...(type === 'multiple_select' ? { options: options || ['Pilihan A', 'Pilihan B'], correctAnswerIndices: correctIndices || [], randomizeOptions, optionAttachments: options ? Array(options.length).fill(undefined) : undefined } : {}),
           ...(type === 'true_false' ? { trueFalseAnswer: (String(obj['correctAnswerIndex'] || '').toLowerCase() === 'true') } : {}),
           ...(type === 'short_answer' ? { shortAnswer } : {}),
-          ...(type === 'essay' ? { essayAnswer } : {})
+          ...(type === 'essay' ? { essayAnswer, essayGradingMode } : {})
         };
 
         imported.push(q);
@@ -545,6 +547,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     <li>Untuk <strong>multiple_select</strong>, isi <strong>correctAnswerIndices</strong> dengan indeks dipisah <code>;</code> (mis. <code>0;2</code>).</li>
     <li>Tipe yang didukung: <code>mcq</code>, <code>multiple_select</code>, <code>true_false</code>, <code>short_answer</code>, <code>essay</code>.</li>
     <li>Gunakan <strong>points</strong> untuk bobot (angka). Untuk benar/salah, gunakan <code>true</code> atau <code>false</code> pada <strong>correctAnswerIndex</strong>.</li>
+    <li>Untuk soal esai, isi <strong>essayGradingMode</strong> dengan <code>manual</code> atau <code>keyword_auto</code>.</li>
   </ul>
 
   <table border="1">
@@ -561,6 +564,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
       <th>randomizeOptions</th>
       <th>shortAnswer</th>
       <th>essayAnswer</th>
+      <th>essayGradingMode</th>
     </tr>
     <tr>
       <td>mcq</td>
@@ -573,6 +577,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
       <td>Sejarah</td>
       <td>easy</td>
       <td>false</td>
+      <td></td>
       <td></td>
       <td></td>
     </tr>
@@ -589,6 +594,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
       <td>false</td>
       <td></td>
       <td></td>
+      <td></td>
     </tr>
     <tr>
       <td>true_false</td>
@@ -603,6 +609,22 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
       <td>false</td>
       <td></td>
       <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>essay</td>
+      <td>Apa yang dimaksud internet?</td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td>10</td>
+      <td>Menjelaskan jaringan global dan contoh perangkat terhubung.</td>
+      <td>TIK</td>
+      <td>medium</td>
+      <td>false</td>
+      <td></td>
+      <td>Jaringan global yang menghubungkan banyak perangkat dan sistem informasi.</td>
+      <td>keyword_auto</td>
     </tr>
   </table>
 
@@ -636,7 +658,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
       ...(type === 'multiple_select' ? { options: ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D'], correctAnswerIndices: [], randomizeOptions: false, optionAttachments: [undefined, undefined, undefined, undefined] } : {}),
       ...(type === 'true_false' ? { trueFalseAnswer: true } : {}),
       ...(type === 'short_answer' ? { shortAnswer: '' } : {}),
-      ...(type === 'essay' ? { essayAnswer: '' } : {})
+      ...(type === 'essay' ? { essayAnswer: '', essayGradingMode: 'keyword_auto' as EssayGradingMode } : {})
     };
     setFormData(prev => ({ ...prev, questions: [...prev.questions, newQuestion] }));
     setActiveQuestionId(newQuestion.id);
@@ -1535,14 +1557,31 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                       )}
 
                       {q.type === 'essay' && (
-                        <div>
-                          <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Panduan Jawaban / Rubrik (Esai)</label>
-                          <RichTextEditor
-                            value={q.essayAnswer || ''}
-                            onChange={(value) => handleQuestionChange(qIndex, 'essayAnswer', value)}
-                            placeholder="Masukkan poin-poin penting yang harus ada dalam jawaban siswa..."
-                            height="140px"
-                          />
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Mode Penilaian Esai</label>
+                            <select
+                              value={q.essayGradingMode || 'keyword_auto'}
+                              onChange={(e) => handleQuestionChange(qIndex, 'essayGradingMode', e.target.value as EssayGradingMode)}
+                              className="w-full px-4 py-3 rounded-xl border border-gray-100 focus:ring-2 focus:ring-indigo-500 font-bold outline-none bg-white"
+                            >
+                              <option value="keyword_auto">Otomatis (Kata Kunci)</option>
+                              <option value="manual">Manual oleh Guru</option>
+                            </select>
+                            <p className="text-[11px] text-gray-500 font-semibold mt-2">
+                              Panduan jawaban berfungsi sebagai kunci/rubrik. Pada mode otomatis, sistem membandingkan jawaban siswa dengan panduan ini.
+                            </p>
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Panduan Jawaban / Rubrik (Esai)</label>
+                            <RichTextEditor
+                              value={q.essayAnswer || ''}
+                              onChange={(value) => handleQuestionChange(qIndex, 'essayAnswer', value)}
+                              placeholder="Masukkan poin-poin penting yang harus ada dalam jawaban siswa..."
+                              height="140px"
+                            />
+                          </div>
                         </div>
                       )}
 

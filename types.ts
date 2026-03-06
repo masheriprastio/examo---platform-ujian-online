@@ -32,6 +32,7 @@ export interface UserTracking {
 }
 
 export type QuestionType = 'mcq' | 'true_false' | 'short_answer' | 'essay' | 'multiple_select' | 'essay_dragdrop';
+export type EssayGradingMode = 'manual' | 'keyword_auto';
 
 export interface Question {
   id: string;
@@ -48,6 +49,7 @@ export interface Question {
   trueFalseAnswer?: boolean;
   shortAnswer?: string;
   essayAnswer?: string;
+  essayGradingMode?: EssayGradingMode;
   explanation?: string;
   points: number;
   topic?: string;

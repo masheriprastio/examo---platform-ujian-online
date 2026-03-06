@@ -3046,12 +3046,21 @@ export default function App() {
                         ) : (
                           <div className="space-y-6">
                             {/* Score summary */}
-                            <div className="grid grid-cols-3 gap-4 mb-6">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                               <div className={`p-5 rounded-2xl border-2 text-center col-span-1 ${selectedResult.score >= 75 ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
-                                <p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-70">Skor Saat Ini</p>
+                                <p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-70">Skor Akhir (0-100)</p>
                                 <h3 className="text-4xl font-black">{selectedResult.score}</h3>
+                                <p className="text-[11px] font-bold mt-1 opacity-80">Hasil konversi dari poin</p>
                               </div>
                               <div className="col-span-2 p-5 rounded-2xl bg-white border border-gray-100 shadow-sm flex flex-col justify-center gap-2">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-500 font-bold text-sm">Perolehan Poin Asli</span>
+                                  <span className="font-black text-indigo-600">{selectedResult.pointsObtained}/{selectedResult.totalPointsPossible}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-500 font-bold text-sm">Rumus</span>
+                                  <span className="font-bold text-gray-700 text-xs">({selectedResult.pointsObtained}/{selectedResult.totalPointsPossible}) x 100 = {selectedResult.score}</span>
+                                </div>
                                 <div className="flex justify-between"><span className="text-gray-500 font-bold text-sm">Benar</span><span className="font-black text-green-600">{selectedResult.correctCount}</span></div>
                                 <div className="flex justify-between"><span className="text-gray-500 font-bold text-sm">Salah</span><span className="font-black text-red-500">{selectedResult.incorrectCount}</span></div>
                                 <div className="flex justify-between"><span className="text-gray-500 font-bold text-sm">Kosong</span><span className="font-black text-gray-400">{selectedResult.unansweredCount}</span></div>
