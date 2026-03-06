@@ -43,6 +43,46 @@ export const UserActivityManager: React.FC<UserActivityManagerProps> = ({ onClos
     }
   };
 
+  // Admin actions: force logout utilities
+  const forceLogoutUser = async (userId: string) => {
+    try {
+      setIsLoading(true);
+      await UserActivityService.deactivateSessionsForUser(userId);
+      await loadActivityData();
+      // clear details for that user if expanded
+      setUserActivityDetails(prev => ({ ...prev, [userId]: [] }));
+      if (expandedUserId === userId) setExpandedUserId(null);
+    } catch (err) {
+      console.error('Error forcing logout user:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const forceLogoutSession = async (sessionId: string) => {
+    try {
+      setIsLoading(true);
+      await UserActivityService.deactivateSessionById(sessionId);
+      await loadActivityData();
+    } catch (err) {
+      console.error('Error forcing logout session:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const forceLogoutByIP = async (ip: string) => {
+    try {
+      setIsLoading(true);
+      await UserActivityService.deactivateSessionsByIP(ip);
+      await loadActivityData();
+    } catch (err) {
+      console.error('Error forcing logout by IP:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const formatDate = (iso: string) => new Date(iso).toLocaleDateString('id-ID', {
     day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
   });
@@ -294,6 +334,26 @@ export const UserActivityManager: React.FC<UserActivityManagerProps> = ({ onClos
                             </div>
                           )}
                         </div>
+
+                        {/* Admin controls: force logout */}
+                        <div className="mt-4 flex gap-3">
+                          <button
+                            onClick={() => forceLogoutUser(user.id)}
+                            className="px-3 py-2 bg-red-600 text-white rounded-lg font-bold text-sm"
+                          >
+                            Force Logout User
+                          </button>
+
+                          {user.current_ip && (
+                            <button
+                              onClick={() => forceLogoutByIP(user.current_ip)}
+                              className="px-3 py-2 bg-yellow-600 text-white rounded-lg font-bold text-sm"
+                            >
+                              Force Logout IP
+                            </button>
+                          )}
+                        </div>
+                      </div>
                       </div>
                     </div>
                   )}

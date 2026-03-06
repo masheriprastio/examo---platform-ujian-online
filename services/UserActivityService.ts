@@ -288,6 +288,41 @@ export class UserActivityService {
   }
 
   /**
+   * Admin helpers: call DB RPCs to force-deactivate sessions
+   */
+  static async deactivateSessionsForUser(userId: string): Promise<void> {
+    if (!isSupabaseConfigured || !supabase) return;
+    try {
+      const { error } = await supabase.rpc('deactivate_sessions_for_user', { p_user_id: userId });
+      if (error) console.error('Error deactivating sessions for user:', error);
+    } catch (err) {
+      console.error('Error in deactivateSessionsForUser:', err);
+    }
+  }
+
+  static async deactivateSessionsByIP(ipAddress: string, userId?: string | null): Promise<void> {
+    if (!isSupabaseConfigured || !supabase) return;
+    try {
+      const params: any = { p_ip: ipAddress };
+      if (userId) params.p_user_id = userId;
+      const { error } = await supabase.rpc('deactivate_sessions_by_ip', params);
+      if (error) console.error('Error deactivating sessions by IP:', error);
+    } catch (err) {
+      console.error('Error in deactivateSessionsByIP:', err);
+    }
+  }
+
+  static async deactivateSessionById(sessionId: string): Promise<void> {
+    if (!isSupabaseConfigured || !supabase) return;
+    try {
+      const { error } = await supabase.rpc('deactivate_session_by_id', { p_session_id: sessionId });
+      if (error) console.error('Error deactivating session by id:', error);
+    } catch (err) {
+      console.error('Error in deactivateSessionById:', err);
+    }
+  }
+
+  /**
    * Catat exam submission history
    */
   static async recordExamSubmission(
