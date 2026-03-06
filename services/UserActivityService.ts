@@ -322,6 +322,35 @@ export class UserActivityService {
     }
   }
 
+  // Realtime subscriptions helpers (Supabase Realtime)
+  static subscribeToUserSessions(handler: (payload: any) => void) {
+    if (!isSupabaseConfigured || !supabase) return null;
+    try {
+      const channel = supabase
+        .channel('public:user_sessions')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'user_sessions' },
+          (payload) => handler(payload)
+        )
+        .subscribe();
+      return channel;
+    } catch (err) {
+      console.error('Error subscribing to user_sessions realtime:', err);
+      return null;
+    }
+  }
+
+  static unsubscribeChannel(channel: any) {
+    if (!isSupabaseConfigured || !supabase || !channel) return;
+    try {
+      // supabase v2 channel removal
+      supabase.removeChannel(channel);
+    } catch (err) {
+      console.error('Error removing realtime channel:', err);
+    }
+  }
+
   /**
    * Catat exam submission history
    */
