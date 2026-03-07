@@ -9,7 +9,7 @@ import {
   Mail, Lock, Eye, EyeOff, ArrowRight, AlertTriangle, Database,
   Menu, X as CloseIcon, FileDown, Download, UserPlus, FileSpreadsheet,
   XCircle, HelpCircle, RotateCcw, PenTool, Save, Plus, ChevronDown, Trash2, ShieldCheck,
-  ArrowUpDown, ArrowUp, ArrowDown, Key, AlertCircle, RefreshCw, WifiOff, BarChart2
+  ArrowUpDown, ArrowUp, ArrowDown, Key, AlertCircle, RefreshCw, WifiOff, BarChart2, Bell
 } from 'lucide-react';
 import { useNotification } from './context/NotificationContext';
 
@@ -61,6 +61,11 @@ function tokenOverlapRatio(a: string, b: string) {
   if (aa.length === 0 || bb.length === 0) return 0;
   const common = aa.filter(tok => bb.includes(tok)).length;
   return common / Math.max(aa.length, bb.length);
+}
+
+function hasManualEssayScore(answers?: Record<string, any>): boolean {
+  if (!answers || typeof answers !== 'object') return false;
+  return Object.keys(answers).some(k => k.endsWith('_manual_score') && typeof (answers as any)[k] === 'number');
 }
 
 // Helper: escape HTML for docx template generation
@@ -151,10 +156,11 @@ const Sidebar: React.FC<{
   user: User;
   activeView: AppView;
   isOpen: boolean;
+  endedActivityCount: number;
   onNavigate: (view: AppView) => void;
   onLogout: () => void;
   onClose: () => void;
-}> = ({ user, activeView, isOpen, onNavigate, onLogout, onClose }) => {
+}> = ({ user, activeView, isOpen, endedActivityCount, onNavigate, onLogout, onClose }) => {
   const isTeacherOrAdmin = user.role === 'teacher' || user.role === 'admin';
   const isAdmin = user.role === 'admin';
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false); // Submenu state for Users
@@ -185,7 +191,7 @@ const Sidebar: React.FC<{
         { id: 'TEACHER_EXAM_ROOM', label: 'Ruang Ujian' }
       ]
     },
-    { id: 'TEACHER_GRADES', label: 'Buku Nilai', icon: ClipboardList },
+    { id: 'TEACHER_GRADES', label: 'Buku Nilai', icon: ClipboardList, badge: endedActivityCount },
     // Group "Guru & Siswa" - Only for Admin
     ...(isAdmin ? [{
       id: 'GROUP_USERS',
@@ -214,10 +220,19 @@ const Sidebar: React.FC<{
   return (
     <>
       {isOpen && <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-40 md:hidden" onClick={onClose} />}
-      <aside className={`fixed md:sticky top-0 left-0 h-[100dvh] bg-white border-r border-gray-100 flex flex-col z-50 transition-transform duration-300 w-72 overflow-hidden ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
-        <div className="p-8 flex items-center justify-between shrink-0">
+      <aside className={`fixed md:relative top-0 left-0 h-[100dvh] bg-white border-r border-gray-100 flex flex-col z-50 transition-all duration-300 overflow-hidden ${isOpen ? 'translate-x-0 w-72 md:w-72' : '-translate-x-full w-72 md:translate-x-0 md:w-0 md:border-r-0'}`}>
+        <div className="p-8 pb-4 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3"><div className="bg-indigo-600 p-2.5 rounded-xl text-white shadow-lg shadow-indigo-100"><GraduationCap className="w-6 h-6" /></div><span className="font-black text-2xl text-indigo-900 tracking-tight">Examo</span></div>
           <button onClick={onClose} className="md:hidden p-2 text-gray-400 hover:bg-gray-50 rounded-xl"><CloseIcon /></button>
+        </div>
+        <div className="px-4 pb-2 shrink-0">
+          <div className="bg-indigo-900 rounded-2xl p-4 flex items-center gap-3 border border-indigo-800">
+            <div className="w-11 h-11 rounded-xl bg-white/15 border border-white/20 flex items-center justify-center font-black text-white">{user.name.charAt(0)}</div>
+            <div className="overflow-hidden">
+              <p className="font-black text-white text-sm truncate">{user.name}</p>
+              <p className="text-[10px] font-black text-indigo-200 uppercase tracking-widest">{user.role}</p>
+            </div>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2 scrollbar-hide">
           {menuItems.map((item: any) => (
@@ -249,16 +264,18 @@ const Sidebar: React.FC<{
               </div>
             ) : (
               <button key={item.id} onClick={() => { onNavigate(item.id as AppView); onClose(); }} className={`w-full flex items-center gap-3 px-5 py-4 rounded-2xl font-bold transition-all ${activeView === item.id ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-100' : 'text-gray-400 hover:bg-gray-50'}`}>
-                <item.icon className="w-5 h-5" />{item.label}
+                <item.icon className="w-5 h-5" />
+                <span className="flex-1 text-left">{item.label}</span>
+                {typeof item.badge === 'number' && item.badge > 0 && (
+                  <span className={`min-w-6 h-6 px-1 rounded-full text-[10px] font-black flex items-center justify-center ${activeView === item.id ? 'bg-white text-indigo-600' : 'bg-indigo-600 text-white'}`}>
+                    {item.badge > 99 ? '99+' : item.badge}
+                  </span>
+                )}
               </button>
             )
           ))}
         </div>
         <div className="p-4 border-t border-gray-50 shrink-0 bg-white">
-          <div className="bg-gray-50 rounded-2xl p-4 mb-3 flex items-center gap-3 border border-gray-100">
-            <div className="w-10 h-10 rounded-xl bg-indigo-100 border border-indigo-200 flex items-center justify-center font-black text-indigo-600">{user.name.charAt(0)}</div>
-            <div className="overflow-hidden"><p className="font-bold text-gray-900 text-sm truncate">{user.name}</p><p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{user.role}</p></div>
-          </div>
           <button onClick={() => { onLogout(); onClose(); }} className="w-full flex items-center gap-3 px-5 py-3 rounded-2xl font-bold text-red-400 hover:bg-red-50 transition-all"><LogOut className="w-5 h-5" /> Keluar</button>
         </div>
       </aside>
@@ -267,15 +284,28 @@ const Sidebar: React.FC<{
 };
 
 export default function App() {
+  type DashboardNotification = {
+    id: string;
+    title: string;
+    message: string;
+    type: 'info' | 'warning' | 'success';
+    timestamp: string;
+    read: boolean;
+  };
+
   const [view, setView] = useState<AppView>('LOGIN');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isHeaderNotifOpen, setIsHeaderNotifOpen] = useState(false);
+  const [headerNotifications, setHeaderNotifications] = useState<DashboardNotification[]>([]);
+  const [endedActivityCount, setEndedActivityCount] = useState(0);
+  const [studentTeacherReviewed, setStudentTeacherReviewed] = useState<Record<string, boolean>>({});
+  const seenViolationCountRef = useRef<Record<string, number>>({});
+  const seenSubmissionRef = useRef<Record<string, boolean>>({});
+  const seenDisqualifiedRef = useRef<Record<string, boolean>>({});
   const shouldFetchRef = useRef(true); // Prevent re-fetching stale data after save
   const fileInputRef = useRef<HTMLInputElement>(null);
   const docxFileInputRef = useRef<HTMLInputElement>(null);
-  // Timestamp of when the Realtime subscription was established.
-  // Any violation/event with a log timestamp BEFORE this is historical and should NOT trigger alert.
-  const realtimeSubscribedAtRef = useRef<string | null>(null);
 
   const { addAlert } = useNotification();
 
@@ -283,6 +313,40 @@ export default function App() {
   const notify = (message: string, type: 'info' | 'error' | 'success' = 'info', key?: string) => {
     addAlert(message, type, key);
   };
+
+  const pushHeaderNotification = (title: string, message: string, type: 'info' | 'warning' | 'success' = 'info') => {
+    const item: DashboardNotification = {
+      id: generateUUID(),
+      title,
+      message,
+      type,
+      timestamp: new Date().toISOString(),
+      read: false
+    };
+    setHeaderNotifications(prev => [item, ...prev].slice(0, 30));
+  };
+
+  const handleNavigate = (nextView: AppView) => {
+    setView(nextView);
+    if (nextView === 'TEACHER_GRADES') {
+      setEndedActivityCount(0);
+    }
+  };
+
+  useEffect(() => {
+    if (isHeaderNotifOpen) {
+      setHeaderNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    }
+  }, [isHeaderNotifOpen]);
+
+  // Keep desktop sidebar visible by default, mobile hidden by default.
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)');
+    const syncSidebarMode = () => setIsSidebarOpen(mq.matches);
+    syncSidebarMode();
+    mq.addEventListener('change', syncSidebarMode);
+    return () => mq.removeEventListener('change', syncSidebarMode);
+  }, []);
 
   // Restore session from localStorage so refresh keeps user logged in
   useEffect(() => {
@@ -621,6 +685,17 @@ export default function App() {
     }
   }, [view]);
 
+  useEffect(() => {
+    if (currentUser?.role !== 'student') return;
+    const reviewedMap: Record<string, boolean> = {};
+    results
+      .filter(r => r.studentId === currentUser.id)
+      .forEach(r => {
+        if (hasManualEssayScore(r.answers)) reviewedMap[r.id] = true;
+      });
+    setStudentTeacherReviewed(reviewedMap);
+  }, [results, currentUser]);
+
   // Fetch Students (if Teacher or Admin logged in)
   useEffect(() => {
     const fetchStudents = async () => {
@@ -647,6 +722,62 @@ export default function App() {
     fetchTeachers();
   }, [currentUser]);
 
+  // Realtime for Student: reflect teacher manual grading updates instantly on student dashboard/history.
+  useEffect(() => {
+    if (currentUser?.role !== 'student' || !isSupabaseConfigured || !supabase) return;
+
+    const channel = supabase
+      .channel(`student-result-updates-${currentUser.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'exam_results', filter: `student_id=eq.${currentUser.id}` },
+        (payload: any) => {
+          const row = payload.new as any;
+          const mapped: any = {
+            id: String(row.id),
+            examId: String(row.exam_id),
+            studentId: String(row.student_id),
+            studentName: row.student_name,
+            score: row.score || 0,
+            status: row.status,
+            totalPointsPossible: row.total_points_possible || 0,
+            pointsObtained: row.points_obtained || 0,
+            totalQuestions: row.total_questions || 0,
+            correctCount: row.correct_count || 0,
+            incorrectCount: row.incorrect_count || 0,
+            unansweredCount: row.unanswered_count || 0,
+            startedAt: row.started_at,
+            submittedAt: row.submitted_at,
+            answers: row.answers || {},
+            logs: row.logs || []
+          };
+
+          setResults(prev => {
+            const before = prev.find(p => p.id === mapped.id);
+            const next = before
+              ? prev.map(p => (p.id === mapped.id ? { ...p, ...mapped } : p))
+              : [mapped, ...prev];
+
+            const hasReviewNow = hasManualEssayScore(mapped.answers);
+            const hadReviewBefore = hasManualEssayScore(before?.answers);
+            const teacherReviewedNow = hasReviewNow && (!hadReviewBefore || (before?.score ?? 0) !== mapped.score);
+
+            if (teacherReviewedNow) {
+              setStudentTeacherReviewed(s => ({ ...s, [mapped.id]: true }));
+              addAlert(`Guru memperbarui penilaian ujian Anda. Skor terbaru: ${mapped.score}`, 'success', `teacher-grade:${mapped.id}:${mapped.score}`);
+            }
+
+            return next;
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser, addAlert]);
+
   // Realtime Subscriptions for Teacher (Results, Exams, Users, ExamRooms)
   useEffect(() => {
     if ((currentUser?.role !== 'teacher' && currentUser?.role !== 'admin') || !isSupabaseConfigured || !supabase) return;
@@ -655,18 +786,6 @@ export default function App() {
     if (Notification.permission !== 'granted') {
       Notification.requestPermission();
     }
-
-    // Record the moment this subscription becomes active.
-    // We use this as a time-gate: any event whose latest log timestamp
-    // is BEFORE this moment is considered historical data (already existed
-    // when the teacher logged in) and should NOT trigger an alert.
-    realtimeSubscribedAtRef.current = new Date().toISOString();
-
-    // Helper: returns true only if the log event happened AFTER subscription start
-    const isNewEvent = (logTimestamp?: string): boolean => {
-      if (!logTimestamp || !realtimeSubscribedAtRef.current) return true; // safe fallback
-      return logTimestamp >= realtimeSubscribedAtRef.current;
-    };
 
     // --- Channel 1: Exam Results (Violations & Submissions) ---
     const resultsChannel = supabase
@@ -698,10 +817,11 @@ export default function App() {
               if (prev.find(r => r.id === mapped.id)) return prev;
               return [mapped, ...prev];
             });
-            // Only alert if the exam was started AFTER the teacher logged in
-            if (isNewEvent(newRes.started_at)) {
-              notify(`Siswa ${mapped.studentName} mulai mengerjakan ujian.`, 'info', `start:${mapped.id}`);
-            }
+            pushHeaderNotification(
+              'Siswa Mulai Ujian',
+              `${mapped.studentName} mulai mengerjakan ujian.`,
+              'info'
+            );
           }
           else if (payload.event === 'UPDATE') {
             const newRecord = payload.new as any;
@@ -723,30 +843,44 @@ export default function App() {
 
             setResults(prev => prev.map(r => r.id === mapped.id ? mapped : r));
 
-            if (newRecord.logs && Array.isArray(newRecord.logs)) {
-              const newLogs = newRecord.logs as ExamLog[];
-              const latestLog = newLogs[newLogs.length - 1];
-
-              // Only fire notifications for events that actually happened AFTER login
-              if (latestLog && isNewEvent(latestLog.timestamp)) {
-                if (latestLog.event === 'violation_disqualified') {
-                  notify(`PELANGGARAN BERAT: Siswa ${newRecord.student_name} didiskualifikasi (3x keluar tab)!`, 'error', `violation:${newRecord.id}`);
-                  if (Notification.permission === 'granted') {
-                    new Notification('Pelanggaran Berat!', { body: `Siswa ${newRecord.student_name} didiskualifikasi!`, icon: '/vite.svg' });
-                  }
-                } else if (latestLog.event === 'tab_blur') {
-                  notify(`Peringatan: Siswa ${newRecord.student_name} keluar dari tab ujian!`, 'error', `tabblur:${newRecord.id}`);
-                  if (Notification.permission === 'granted') {
-                    new Notification('Pelanggaran Ujian', { body: `Siswa ${newRecord.student_name} terdeteksi keluar tab!`, icon: '/vite.svg' });
-                  }
-                } else if (latestLog.event === 'submit') {
-                  notify(`Siswa ${newRecord.student_name} telah mengirimkan ujian.`, 'success', `submit:${newRecord.id}`);
-                  if (Notification.permission === 'granted') {
-                    new Notification('Ujian Selesai', { body: `Siswa ${newRecord.student_name} telah mengirimkan ujian.`, icon: '/vite.svg' });
-                  }
-                }
-              }
+            const resultKey = String(newRecord.id);
+            const latestViolationCount = Number(newRecord.violation_count || 0);
+            const prevViolationCount = seenViolationCountRef.current[resultKey] || 0;
+            if (latestViolationCount > prevViolationCount) {
+              pushHeaderNotification(
+                'Peringatan Ujian',
+                `Siswa ${newRecord.student_name} melakukan pelanggaran (${latestViolationCount}x).`,
+                'warning'
+              );
+              seenViolationCountRef.current[resultKey] = latestViolationCount;
             }
+
+            const isDisqualifiedNow = newRecord.status === 'disqualified';
+            if (isDisqualifiedNow && !seenDisqualifiedRef.current[resultKey]) {
+              pushHeaderNotification(
+                'Pelanggaran Berat',
+                `Siswa ${newRecord.student_name} didiskualifikasi (3x keluar tab).`,
+                'warning'
+              );
+              setEndedActivityCount(prev => prev + 1);
+              seenDisqualifiedRef.current[resultKey] = true;
+            } else if (!isDisqualifiedNow) {
+              seenDisqualifiedRef.current[resultKey] = false;
+            }
+
+            const isSubmittedNow = !!newRecord.submitted_at;
+            if (isSubmittedNow && !seenSubmissionRef.current[resultKey]) {
+              pushHeaderNotification(
+                'Ujian Selesai',
+                `Siswa ${newRecord.student_name} telah mengirimkan ujian.`,
+                'success'
+              );
+              setEndedActivityCount(prev => prev + 1);
+              seenSubmissionRef.current[resultKey] = true;
+            } else if (!isSubmittedNow) {
+              seenSubmissionRef.current[resultKey] = false;
+            }
+
           }
           else if (payload.event === 'DELETE') {
             setResults(prev => prev.filter(r => r.id !== payload.old.id));
@@ -1033,16 +1167,21 @@ export default function App() {
       const isStaff = userWithToken.role === 'teacher' || userWithToken.role === 'admin';
       setView(isStaff ? 'TEACHER_DASHBOARD' : 'STUDENT_DASHBOARD');
 
-      // Fetch fresh data and notify existing violations to teacher
+      // Fetch fresh data: only mark state, do not show historical notifications on login.
       const fetched = await fetchData();
       if (isStaff && fetched.results) {
+        const initialEnded = fetched.results.filter((r: any) => r.status === 'completed' || r.status === 'disqualified').length;
+        setEndedActivityCount(initialEnded);
+        seenViolationCountRef.current = {};
+        seenSubmissionRef.current = {};
+        seenDisqualifiedRef.current = {};
         fetched.results.forEach(r => {
+          const key = String((r as any).id || '');
+          seenViolationCountRef.current[key] = Number((r as any).violation_count || 0);
+          seenSubmissionRef.current[key] = !!(r as any).submittedAt;
+          seenDisqualifiedRef.current[key] = (r as any).status === 'disqualified';
           if (r.violation_alert) {
-            const msg = r.logs && Array.isArray(r.logs) && r.logs.some((l: any) => l.event === 'violation_disqualified')
-              ? `PELANGGARAN BERAT: Siswa ${r.studentName} didiskualifikasikan!`
-              : `Peringatan: Siswa ${r.studentName} terdeteksi keluar tab ujian.`;
-            notify(msg, 'error', `violation:${r.id}`);
-            // mark in state so UI shows highlight
+            // Mark in state so UI still shows highlight in table.
             setResults(prev => prev.map(p => p.id === r.id ? { ...p, violation_alert: true } : p));
           }
         });
@@ -1069,11 +1208,21 @@ export default function App() {
         setView(isStaff ? 'TEACHER_DASHBOARD' : 'STUDENT_DASHBOARD');
 
         if (isStaff) {
-          // For mock mode, check any existing results in state and notify
+          const initialEnded = results.filter(r => r.status === 'completed' || r.status === 'disqualified').length;
+          setEndedActivityCount(initialEnded);
+          seenViolationCountRef.current = {};
+          seenSubmissionRef.current = {};
+          seenDisqualifiedRef.current = {};
+          results.forEach(r => {
+            const key = String(r.id);
+            const vCount = Array.isArray(r.logs) ? r.logs.filter((l: any) => l.event === 'tab_blur').length : 0;
+            seenViolationCountRef.current[key] = vCount;
+            seenSubmissionRef.current[key] = !!r.submittedAt;
+            seenDisqualifiedRef.current[key] = r.status === 'disqualified';
+          });
+          // For mock mode, mark historical violations without popup alerts
           results.forEach(r => {
             if (r.logs && Array.isArray(r.logs) && r.logs.some(l => l.event === 'tab_blur' || l.event === 'violation_disqualified')) {
-              const isDisq = r.logs.some((l: any) => l.event === 'violation_disqualified');
-              notify(isDisq ? `PELANGGARAN BERAT: Siswa ${r.studentName} didiskualifikasikan!` : `Peringatan: Siswa ${r.studentName} terdeteksi keluar tab ujian.`, 'error', `violation:${r.id}`);
               setResults(prev => prev.map(p => p.id === r.id ? { ...p, violation_alert: true } : p));
             }
           });
@@ -2771,6 +2920,9 @@ export default function App() {
     </div>
   ) : null;
 
+  const isStaffUser = !!currentUser && (currentUser.role === 'teacher' || currentUser.role === 'admin');
+  const unreadHeaderNotifCount = headerNotifications.filter(n => !n.read).length;
+
   return (
     <div className="flex bg-[#fcfdfe] min-h-screen font-sans relative">
       <OfflineIndicator />
@@ -2781,9 +2933,77 @@ export default function App() {
       {/* Token Modal */}
       {showTokenModal && <TokenModal />}
 
-      <Sidebar user={currentUser!} activeView={view} isOpen={isSidebarOpen} onNavigate={setView} onLogout={() => handleLogout()} onClose={() => setIsSidebarOpen(false)} />
+      <Sidebar user={currentUser!} activeView={view} isOpen={isSidebarOpen} endedActivityCount={endedActivityCount} onNavigate={handleNavigate} onLogout={() => handleLogout()} onClose={() => setIsSidebarOpen(false)} />
       <div className="flex-1 flex flex-col h-screen overflow-hidden text-left">
-        <header className="md:hidden bg-white border-b border-gray-100 p-4 flex items-center justify-between"><button onClick={() => setIsSidebarOpen(true)} className="p-2 text-indigo-600 bg-indigo-50 rounded-xl"><Menu /></button><div className="flex items-center gap-2"><GraduationCap className="text-indigo-600" /><span className="font-black">Examo</span></div><div className="w-10" /></header>
+        {isStaffUser ? (
+          <header className="bg-indigo-900 border-b border-indigo-800 px-4 md:px-6 py-3 flex items-center justify-between text-white relative">
+            <div className="flex items-center gap-3">
+              <button onClick={() => setIsSidebarOpen(v => !v)} className="p-2 bg-white/10 hover:bg-white/20 rounded-xl">
+                <Menu className="w-5 h-5" />
+              </button>
+              <div className="flex items-center gap-2">
+                <GraduationCap className="w-5 h-5 text-indigo-200" />
+                <span className="font-black tracking-tight">Dashboard</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <button
+                  onClick={() => setIsHeaderNotifOpen(v => !v)}
+                  className="relative p-2.5 rounded-xl bg-white/10 hover:bg-white/20 transition"
+                  title="Notifikasi"
+                >
+                  <Bell className="w-5 h-5" />
+                  {unreadHeaderNotifCount > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 min-w-5 h-5 px-1 rounded-full bg-orange-500 text-white text-[10px] font-black flex items-center justify-center">
+                      {unreadHeaderNotifCount > 9 ? '9+' : unreadHeaderNotifCount}
+                    </span>
+                  )}
+                </button>
+
+                {isHeaderNotifOpen && (
+                  <div className="absolute right-0 mt-2 w-[320px] max-h-[360px] overflow-y-auto rounded-2xl border border-gray-100 bg-white shadow-2xl z-[120] text-gray-900">
+                    <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                      <p className="font-black text-sm">Notifikasi Dashboard</p>
+                      <button onClick={() => setHeaderNotifications([])} className="text-[11px] font-bold text-gray-400 hover:text-red-500">Hapus Semua</button>
+                    </div>
+                    {headerNotifications.length === 0 ? (
+                      <p className="px-4 py-6 text-sm text-gray-400 text-center">Belum ada notifikasi.</p>
+                    ) : (
+                      <div className="divide-y divide-gray-100">
+                        {headerNotifications.map(item => (
+                          <div key={item.id} className="px-4 py-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <p className="text-sm font-black text-gray-800">{item.title}</p>
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${item.type === 'warning' ? 'bg-red-50 text-red-600' : item.type === 'success' ? 'bg-green-50 text-green-600' : 'bg-indigo-50 text-indigo-600'}`}>
+                                {item.type}
+                              </span>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1">{item.message}</p>
+                            <p className="text-[10px] text-gray-400 mt-1">{new Date(item.timestamp).toLocaleString('id-ID')}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="hidden sm:flex items-center gap-3 pl-3 border-l border-white/20">
+                <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center font-black text-xs">
+                  {currentUser?.name?.charAt(0) || 'U'}
+                </div>
+                <div className="leading-tight">
+                  <p className="font-black text-sm">{currentUser?.name}</p>
+                  <p className="text-[10px] uppercase text-indigo-200 font-bold">{currentUser?.role}</p>
+                </div>
+              </div>
+            </div>
+          </header>
+        ) : (
+          <header className="md:hidden bg-white border-b border-gray-100 p-4 flex items-center justify-between"><button onClick={() => setIsSidebarOpen(true)} className="p-2 text-indigo-600 bg-indigo-50 rounded-xl"><Menu /></button><div className="flex items-center gap-2"><GraduationCap className="text-indigo-600" /><span className="font-black">Examo</span></div><div className="w-10" /></header>
+        )}
         <main className="flex-1 p-6 md:p-10 overflow-y-auto">
           {currentUser && (currentUser.role === 'teacher' || currentUser.role === 'admin') ? (
             view === 'TEACHER_GRADES' ? (
@@ -3525,9 +3745,16 @@ export default function App() {
                               <td className="px-6 py-4 text-gray-600 font-medium">{formatDate(r.submittedAt!)}</td>
                               <td className="px-6 py-4 font-bold text-gray-900">{r.score}</td>
                               <td className="px-6 py-4">
-                                <span className={`px-3 py-1 rounded-md text-xs font-bold border ${isPassed ? 'bg-green-50 text-green-600 border-green-200' : 'bg-red-50 text-red-600 border-red-200'}`}>
-                                  {isPassed ? 'Lulus' : 'Tidak Lulus'}
-                                </span>
+                                <div className="flex flex-col items-start gap-1">
+                                  <span className={`px-3 py-1 rounded-md text-xs font-bold border ${isPassed ? 'bg-green-50 text-green-600 border-green-200' : 'bg-red-50 text-red-600 border-red-200'}`}>
+                                    {isPassed ? 'Lulus' : 'Tidak Lulus'}
+                                  </span>
+                                  {studentTeacherReviewed[r.id] && (
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-black bg-indigo-50 text-indigo-600 border border-indigo-100">
+                                      Dinilai Guru
+                                    </span>
+                                  )}
+                                </div>
                               </td>
                               <td className="px-6 py-4 text-right flex justify-end gap-2">
                                 <button onClick={() => setSelectedResult(r)} className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg font-bold text-sm hover:bg-gray-50 transition-all shadow-sm">

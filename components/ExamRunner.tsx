@@ -312,7 +312,9 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
   const addLog = useCallback((event: ExamLog['event'], detail?: string) => {
     if (isPreview) return; // Don't log in preview mode
     const newLog: ExamLog = { event, timestamp: new Date().toISOString(), detail };
-    setLogs(prev => [...prev, newLog]);
+    const nextLogs = [...logsRef.current, newLog];
+    logsRef.current = nextLogs;
+    setLogs(nextLogs);
   }, [isPreview]);
 
   const calculateFinalStats = useCallback(() => {
