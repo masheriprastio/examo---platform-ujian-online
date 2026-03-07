@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ExamResult } from '../types';
-import { ChevronDown, ChevronUp, Clock, CheckCircle, AlertTriangle, MapPin, Wifi, Calendar } from 'lucide-react';
+import { ChevronDown, ChevronUp, Clock, AlertTriangle, MapPin, Wifi, Calendar } from 'lucide-react';
 import UserActivityService, { ExamSubmissionRecord } from '../services/UserActivityService';
 import EssayManualScoreInput from './EssayManualScoreInput';
 
@@ -44,6 +43,18 @@ export const StudentExamHistory: React.FC<StudentExamHistoryProps> = ({
 
   const formatScorePercentage = (score: number, total: number) => {
     return total > 0 ? Math.round((score / total) * 100) : 0;
+  };
+
+  const getPoints = (exam: ExamSubmissionRecord) => {
+    const pointsObt = Number((exam as any).points_obtained ?? exam.score ?? 0);
+    const totalPts = Number((exam as any).total_points ?? 0);
+    return { pointsObt: Math.max(0, pointsObt), totalPts: Math.max(0, totalPts) };
+  };
+
+  const formatNormalizedScore = (exam: ExamSubmissionRecord) => {
+    const { pointsObt, totalPts } = getPoints(exam);
+    if (totalPts <= 0) return 0;
+    return Math.round((pointsObt / totalPts) * 100);
   };
 
   const openManualScoring = (exam: ExamSubmissionRecord) => {

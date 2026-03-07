@@ -418,6 +418,7 @@ export default function App() {
   // State for sorting riwayat pengerjaan
   const [sortField, setSortField] = useState<'date' | 'score' | 'name'>('date');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const resultsRef = useRef<ExamResult[]>([]);
 
   // State for token modal (student side)
   const [showTokenModal, setShowTokenModal] = useState(false);
@@ -494,6 +495,26 @@ export default function App() {
   }, [currentUser, addAlert]);
 
   // Load Data from Supabase. Returns fetched exams and results for callers to act on.
+  const mapExamResultRow = (r: any): ExamResult => ({
+    id: String(r.id),
+    examId: String(r.exam_id),
+    studentId: String(r.student_id),
+    studentName: r.student_name || 'Unknown',
+    score: r.score || 0,
+    status: (r.status || 'in_progress').toString().toLowerCase().trim(),
+    totalPointsPossible: r.total_points_possible || 0,
+    pointsObtained: r.points_obtained || 0,
+    totalQuestions: r.total_questions || 0,
+    correctCount: r.correct_count || 0,
+    incorrectCount: r.incorrect_count || 0,
+    unansweredCount: r.unanswered_count || 0,
+    startedAt: r.started_at,
+    submittedAt: r.submitted_at,
+    answers: r.answers || {},
+    logs: r.logs || [],
+    violation_alert: Boolean(r.violation_alert) || (Array.isArray(r.logs) && r.logs.some((l: any) => l.event === 'tab_blur' || l.event === 'violation_disqualified'))
+  });
+
   const fetchData = async () => {
     if (!isSupabaseConfigured || !supabase) {
       // Helpful debug when Supabase isn't configured so user understands why no network logs appear
@@ -561,25 +582,7 @@ export default function App() {
       // 2. Process Results
       let mappedResults: ExamResult[] = [];
       if (resultsRes.data && !resultsRes.error) {
-        mappedResults = resultsRes.data.map((r: any) => ({
-          id: String(r.id),
-          examId: String(r.exam_id),
-          studentId: String(r.student_id),
-          studentName: r.student_name || 'Unknown',
-          score: r.score || 0,
-          status: (r.status || 'in_progress').toString().toLowerCase().trim(),
-          totalPointsPossible: r.total_points_possible || 0,
-          pointsObtained: r.points_obtained || 0,
-          totalQuestions: r.total_questions || 0,
-          correctCount: r.correct_count || 0,
-          incorrectCount: r.incorrect_count || 0,
-          unansweredCount: r.unanswered_count || 0,
-          startedAt: r.started_at,
-          submittedAt: r.submitted_at,
-          answers: r.answers || {},
-          logs: r.logs || [],
-          violation_alert: Array.isArray(r.logs) && r.logs.some((l: any) => l.event === 'tab_blur' || l.event === 'violation_disqualified')
-        }));
+        mappedResults = resultsRes.data.map((r: any) => mapExamResultRow(r));
         setResults(mappedResults);
         try { console.log('DEBUG: mappedResults', mappedResults); } catch (e) { }
       }
@@ -622,6 +625,11 @@ export default function App() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Keep an always-fresh reference so polling/realtime callbacks can diff safely.
+  useEffect(() => {
+    resultsRef.current = results;
+  }, [results]);
 
   // Sync editingExam when exams list updates to avoid stale draft view vs published list
   useEffect(() => {
@@ -795,8 +803,9 @@ export default function App() {
         { event: '*', schema: 'public', table: 'exam_results' },
         (payload: any) => {
           console.log('Realtime Exam Result update received:', payload);
+          const eventType = payload?.eventType || payload?.event;
 
-          if (payload.event === 'INSERT') {
+          if (eventType === 'INSERT') {
             const newRes = payload.new as any;
             const mapped = {
               id: String(newRes.id),
@@ -823,7 +832,7 @@ export default function App() {
               'info'
             );
           }
-          else if (payload.event === 'UPDATE') {
+          else if (eventType === 'UPDATE') {
             const newRecord = payload.new as any;
             const mapped = {
               id: String(newRecord.id),
@@ -841,7 +850,11 @@ export default function App() {
               startedAt: newRecord.started_at
             };
 
-            setResults(prev => prev.map(r => r.id === mapped.id ? mapped : r));
+            setResults(prev => {
+              const exists = prev.some(r => r.id === mapped.id);
+              if (exists) return prev.map(r => r.id === mapped.id ? mapped : r);
+              return [mapped, ...prev];
+            });
 
             const resultKey = String(newRecord.id);
             const latestViolationCount = Number(newRecord.violation_count || 0);
@@ -882,7 +895,7 @@ export default function App() {
             }
 
           }
-          else if (payload.event === 'DELETE') {
+          else if (eventType === 'DELETE') {
             setResults(prev => prev.filter(r => r.id !== payload.old.id));
           }
         }
@@ -897,8 +910,9 @@ export default function App() {
         { event: '*', schema: 'public', table: 'exams' },
         (payload: any) => {
           console.log('Realtime Exam update received:', payload);
+          const eventType = payload?.eventType || payload?.event;
 
-          if (payload.event === 'INSERT') {
+          if (eventType === 'INSERT') {
             const newExam = payload.new as any;
             const mappedExam: Exam = {
               ...newExam,
@@ -921,7 +935,7 @@ export default function App() {
             });
             notify(`Ujian baru ditambahkan: ${mappedExam.title}`, 'info');
           }
-          else if (payload.event === 'UPDATE') {
+          else if (eventType === 'UPDATE') {
             const updated = payload.new as any;
             const mappedExam: Exam = {
               ...updated,
@@ -940,7 +954,7 @@ export default function App() {
             };
             setExams(prev => prev.map(e => String(e.id) === mappedExam.id ? mappedExam : e));
           }
-          else if (payload.event === 'DELETE') {
+          else if (eventType === 'DELETE') {
             setExams(prev => prev.filter(e => e.id !== payload.old.id));
           }
         }
@@ -955,8 +969,9 @@ export default function App() {
         { event: '*', schema: 'public', table: 'users' },
         (payload: any) => {
           console.log('Realtime User update received:', payload);
+          const eventType = payload?.eventType || payload?.event;
 
-          if (payload.event === 'INSERT') {
+          if (eventType === 'INSERT') {
             const newUser = payload.new as User;
             if (newUser.role === 'student') {
               setStudents(prev => {
@@ -969,14 +984,14 @@ export default function App() {
                 return [newUser, ...prev];
               });
             }
-          } else if (payload.event === 'UPDATE') {
+          } else if (eventType === 'UPDATE') {
             const updatedUser = payload.new as User;
             if (updatedUser.role === 'student') {
               setStudents(prev => prev.map(s => s.id === updatedUser.id ? updatedUser : s));
             } else if (updatedUser.role === 'teacher') {
               setTeachers(prev => prev.map(t => t.id === updatedUser.id ? updatedUser : t));
             }
-          } else if (payload.event === 'DELETE') {
+          } else if (eventType === 'DELETE') {
             const deletedId = payload.old.id;
             setStudents(prev => prev.filter(s => s.id !== deletedId));
             setTeachers(prev => prev.filter(t => t.id !== deletedId));
@@ -993,8 +1008,9 @@ export default function App() {
         { event: '*', schema: 'public', table: 'exam_rooms' },
         (payload: any) => {
           console.log('Realtime Room update received:', payload);
+          const eventType = payload?.eventType || payload?.event;
 
-          if (payload.event === 'INSERT') {
+          if (eventType === 'INSERT') {
             const newRoom = payload.new as any;
             const mappedRoom: ExamRoom = {
               id: String(newRoom.id),
@@ -1011,7 +1027,7 @@ export default function App() {
               if (prev.find(r => String(r.id) === mappedRoom.id)) return prev;
               return [mappedRoom, ...prev];
             });
-          } else if (payload.event === 'UPDATE') {
+          } else if (eventType === 'UPDATE') {
             const updated = payload.new as any;
             const mappedRoom: ExamRoom = {
               id: String(updated.id),
@@ -1025,7 +1041,7 @@ export default function App() {
               updatedAt: updated.updated_at || new Date().toISOString()
             };
             setExamRooms(prev => prev.map(r => String(r.id) === mappedRoom.id ? mappedRoom : r));
-          } else if (payload.event === 'DELETE') {
+          } else if (eventType === 'DELETE') {
             setExamRooms(prev => prev.filter(r => String(r.id) !== String(payload.old.id)));
           }
         }
@@ -1039,6 +1055,85 @@ export default function App() {
       supabase.removeChannel(roomsChannel);
     };
   }, [currentUser]);
+
+  // Fallback auto-refresh for teacher/admin if realtime channel misses events.
+  useEffect(() => {
+    if ((currentUser?.role !== 'teacher' && currentUser?.role !== 'admin') || !isSupabaseConfigured || !supabase) return;
+    if (!['TEACHER_DASHBOARD', 'TEACHER_GRADES', 'MONITORING'].includes(view)) return;
+
+    let isMounted = true;
+    let isPolling = false;
+
+    const pollResults = async () => {
+      if (isPolling) return;
+      isPolling = true;
+      try {
+        const { data, error } = await supabase.from('exam_results').select('*');
+        if (error || !data || !isMounted) return;
+
+        const mapped = data.map((row: any) => mapExamResultRow(row));
+        const prevMap = new Map(resultsRef.current.map(r => [String(r.id), r]));
+
+        mapped.forEach((row: any) => {
+          const key = String(row.id);
+          const prev = prevMap.get(key) as any;
+
+          const currentViolation = Number(row.violation_count || row.logs?.filter((l: any) => l.event === 'tab_blur').length || 0);
+          const prevViolation = Number(prev?.violation_count || prev?.logs?.filter((l: any) => l.event === 'tab_blur').length || 0);
+          const seenViolation = Number(seenViolationCountRef.current[key] || 0);
+          if (currentViolation > Math.max(prevViolation, seenViolation)) {
+            pushHeaderNotification(
+              'Peringatan Ujian',
+              `Siswa ${row.studentName} melakukan pelanggaran (${currentViolation}x).`,
+              'warning'
+            );
+            seenViolationCountRef.current[key] = currentViolation;
+          } else {
+            seenViolationCountRef.current[key] = Math.max(seenViolation, currentViolation);
+          }
+
+          const isDisqualifiedNow = row.status === 'disqualified';
+          const wasDisqualified = prev?.status === 'disqualified';
+          if (isDisqualifiedNow && !wasDisqualified && !seenDisqualifiedRef.current[key]) {
+            pushHeaderNotification(
+              'Pelanggaran Berat',
+              `Siswa ${row.studentName} didiskualifikasi (3x keluar tab).`,
+              'warning'
+            );
+            seenDisqualifiedRef.current[key] = true;
+          } else if (!isDisqualifiedNow) {
+            seenDisqualifiedRef.current[key] = false;
+          }
+
+          const isSubmittedNow = !!row.submittedAt;
+          const wasSubmitted = !!prev?.submittedAt;
+          if (isSubmittedNow && !wasSubmitted && !seenSubmissionRef.current[key]) {
+            pushHeaderNotification(
+              'Ujian Selesai',
+              `Siswa ${row.studentName} telah mengirimkan ujian.`,
+              'success'
+            );
+            seenSubmissionRef.current[key] = true;
+          } else if (!isSubmittedNow) {
+            seenSubmissionRef.current[key] = false;
+          }
+        });
+
+        setResults(mapped);
+        setEndedActivityCount(mapped.filter(r => r.status === 'completed' || r.status === 'disqualified').length);
+      } finally {
+        isPolling = false;
+      }
+    };
+
+    pollResults();
+    const intervalId = setInterval(pollResults, 5000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
+  }, [currentUser, view]);
 
   const handleLogout = async (expired = false) => {
     if (currentUser) {

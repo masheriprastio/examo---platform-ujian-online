@@ -354,7 +354,6 @@ export const UserActivityManager: React.FC<UserActivityManagerProps> = ({ onClos
                           )}
                         </div>
                       </div>
-                      </div>
                     </div>
                   )}
                 </div>
