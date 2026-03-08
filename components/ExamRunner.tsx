@@ -51,6 +51,11 @@ const tokenOverlapRatio = (a: string, b: string): number => {
   return inter / Math.max(1, Math.min(as.size, bs.size));
 };
 
+const isDragDropAnswerFilled = (answer: any): boolean => {
+  if (!answer || typeof answer !== 'object') return false;
+  return Object.values(answer as Record<string, string>).some(v => typeof v === 'string' && v.trim().length > 0);
+};
+
 const ExamRunner: React.FC<ExamRunnerProps> = ({
   exam,
   userId,
@@ -76,6 +81,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showFullscreenBanner, setShowFullscreenBanner] = useState(false);
   const [warningMessage, setWarningMessage] = useState('');
+  const [selectedDragItem, setSelectedDragItem] = useState<string | null>(null);
 
   // ── Scratch Canvas (lembar coretan matematika) ──────────────────────────
   const MATH_KEYWORDS = ['matematika', 'math', 'fisika', 'kimia', 'ipa', 'biologi', 'berhitung', 'hitung', 'science'];
@@ -284,6 +290,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
 
   useEffect(() => { answersRef.current = answers; }, [answers]);
   useEffect(() => { logsRef.current = logs; }, [logs]);
+  useEffect(() => { setSelectedDragItem(null); }, [currentQuestionIndex]);
 
   // Real-time progress tracking per question
   useEffect(() => {
@@ -327,8 +334,12 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
     exam.questions.forEach(q => {
       totalPossible += q.points;
       const ans = answersRef.current[q.id];
+      const isUnanswered =
+        ans === undefined ||
+        ans === '' ||
+        (q.type === 'essay_dragdrop' && !isDragDropAnswerFilled(ans));
 
-      if (ans === undefined || ans === '') {
+      if (isUnanswered) {
         unanswered++;
       } else {
         if (q.type === 'mcq') {
@@ -407,6 +418,38 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
             }
           } else {
             incorrect++;
+          }
+        } else if (q.type === 'essay_dragdrop') {
+          const mapping = (ans || {}) as Record<string, string>;
+          const targets = q.dragDropTargets || [];
+          const answerKey = q.dragDropAnswer || {};
+          const totalTargets = targets.length;
+          if (totalTargets === 0) {
+            incorrect++;
+          } else {
+            const correctCount = targets.filter(targetId => {
+              const student = (mapping[targetId] || '').trim();
+              const key = (answerKey[targetId] || '').trim();
+              return student.length > 0 && key.length > 0 && student === key;
+            }).length;
+
+            const scoringMode = q.dragDropScoringMode || 'partial';
+            if (scoringMode === 'all_or_nothing') {
+              if (correctCount === totalTargets) {
+                obtained += q.points;
+                correct++;
+              } else {
+                incorrect++;
+              }
+            } else {
+              const partialPoints = (q.points || 0) * (correctCount / totalTargets);
+              obtained += partialPoints;
+              if (correctCount === totalTargets) {
+                correct++;
+              } else {
+                incorrect++;
+              }
+            }
           }
         }
       }
@@ -656,6 +699,12 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
 
   if (!isReady) return <div className="h-screen bg-white flex items-center justify-center"><LoaderComponent text="Mempersiapkan Lembar Ujian..." /></div>;
 
+  const isQuestionAnswered = (question: Question): boolean => {
+    const answer = answers[question.id];
+    if (question.type === 'essay_dragdrop') return isDragDropAnswerFilled(answer);
+    return answer !== undefined && answer !== '';
+  };
+
   const currentQuestion = shuffledQuestions[currentQuestionIndex];
 
   if (!currentQuestion) {
@@ -669,7 +718,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
     );
   }
 
-  const totalAnswered = Object.keys(answers).length;
+  const totalAnswered = shuffledQuestions.filter(isQuestionAnswered).length;
   const progressPercent = (totalAnswered / shuffledQuestions.length) * 100;
 
   // ─── CSS: blokir screenshot via -webkit-user-select & media print ──────────
@@ -765,7 +814,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
           <div className="p-6 border-b border-gray-50 flex justify-between items-center"><h3 className="font-black text-gray-900">Navigasi Soal</h3><button onClick={() => setShowNav(false)} className="md:hidden p-1 text-gray-400"><X /></button></div>
           <div className="flex-1 overflow-y-auto p-6 grid grid-cols-5 gap-3 content-start">
             {shuffledQuestions.map((q, idx) => {
-              const isAnswered = answers[q.id] !== undefined && answers[q.id] !== '';
+              const isAnswered = isQuestionAnswered(q);
               return (
                 <button key={q.id} onClick={() => { setCurrentQuestionIndex(idx); if (window.innerWidth < 768) setShowNav(false); }} className={`w-full aspect-square rounded-xl font-black text-sm flex items-center justify-center border-2 transition-all ${currentQuestionIndex === idx ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : isAnswered ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-white border-gray-100 text-gray-300 hover:border-indigo-200'}`}>{idx + 1}</button>
               );
@@ -813,8 +862,8 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
               )}
 
               {/* Teks pertanyaan — support rich text dari editor */}
-              <h1
-                className="text-2xl md:text-3xl font-bold text-gray-900 leading-tight"
+              <div
+                className="text-2xl md:text-3xl font-bold text-gray-900 leading-tight [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-gray-300 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-gray-300 [&_th]:px-2 [&_th]:py-1 [&_th]:bg-gray-50"
                 style={{ textAlign: (currentQuestion.textAlign || 'left') as any }}
                 dangerouslySetInnerHTML={{ __html: currentQuestion.text }}
               />
@@ -837,7 +886,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                       {isPreview && currentQuestion.correctAnswerIndex === idx && (
                         <span className="absolute -top-6 right-0 text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full uppercase tracking-widest">Jawaban Benar</span>
                       )}
-                      <div className={`font-bold text-lg ${answers[currentQuestion.id] === idx ? 'text-indigo-900' : 'text-gray-700'}`} dangerouslySetInnerHTML={{ __html: opt }}></div>
+                      <div className={`font-bold text-lg ${answers[currentQuestion.id] === idx ? 'text-indigo-900' : 'text-gray-700'} [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-gray-300 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-gray-300 [&_th]:px-2 [&_th]:py-1 [&_th]:bg-gray-50`} dangerouslySetInnerHTML={{ __html: opt }}></div>
                       {attachment?.url && (
                         <div className="flex gap-2 items-center">
                           <img
@@ -886,7 +935,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                       {isPreview && currentQuestion.correctAnswerIndices?.includes(idx) && (
                         <span className="absolute -top-6 right-0 text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full uppercase tracking-widest">Jawaban Benar</span>
                       )}
-                      <div className={`font-bold text-lg ${isSelected ? 'text-indigo-900' : 'text-gray-700'}`} dangerouslySetInnerHTML={{ __html: opt }}></div>
+                      <div className={`font-bold text-lg ${isSelected ? 'text-indigo-900' : 'text-gray-700'} [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-gray-300 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-gray-300 [&_th]:px-2 [&_th]:py-1 [&_th]:bg-gray-50`} dangerouslySetInnerHTML={{ __html: opt }}></div>
                       {attachment?.url && (
                         <div className="flex gap-2 items-center">
                           <img
@@ -960,6 +1009,169 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
                   )}
                 </div>
               )}
+
+              {currentQuestion.type === 'essay_dragdrop' && (() => {
+                const targets = currentQuestion.dragDropTargets || [];
+                const answerMap = ((answers[currentQuestion.id] as Record<string, string>) || {});
+                const sourceItems: string[] = (currentQuestion.dragDropItems || [])
+                  .map(i => String(i || '').trim())
+                  .filter(i => i.length > 0);
+                const uniqueItems: string[] = Array.from(new Set<string>(sourceItems));
+                const usedItems = new Set<string>(Object.values(answerMap).filter((v): v is string => typeof v === 'string' && v.trim().length > 0));
+                const availableItems = uniqueItems.filter(item => !usedItems.has(item));
+                const textWithSlots = currentQuestion.text || '';
+                const parts = textWithSlots.split(/(\[\[[a-zA-Z0-9_-]+\]\])/g);
+
+                const upsertDropAnswer = (updater: (prevMap: Record<string, string>) => Record<string, string>) => {
+                  setAnswers(prev => {
+                    const currentMap = ((prev[currentQuestion.id] as Record<string, string>) || {});
+                    const nextMap = updater(currentMap);
+                    return { ...prev, [currentQuestion.id]: nextMap };
+                  });
+                };
+
+                const placeItemToTarget = (item: string, targetId: string) => {
+                  upsertDropAnswer(prevMap => {
+                    const cleaned: Record<string, string> = { ...prevMap };
+                    Object.keys(cleaned).forEach(key => {
+                      if (cleaned[key] === item) cleaned[key] = '';
+                    });
+                    cleaned[targetId] = item;
+                    return cleaned;
+                  });
+                  addLog('autosave', `DragDrop Q${currentQuestionIndex + 1}: ${item} -> ${targetId}`);
+                  setSelectedDragItem(null);
+                };
+
+                const clearTarget = (targetId: string) => {
+                  upsertDropAnswer(prevMap => ({ ...prevMap, [targetId]: '' }));
+                  addLog('autosave', `DragDrop Q${currentQuestionIndex + 1}: clear ${targetId}`);
+                };
+
+                const parsePayload = (payload: string): { item: string; fromTarget?: string } | null => {
+                  try {
+                    const parsed = JSON.parse(payload);
+                    if (parsed && typeof parsed.item === 'string') {
+                      return parsed;
+                    }
+                  } catch {
+                    return null;
+                  }
+                  return null;
+                };
+
+                const renderDropSlot = (targetId: string) => {
+                  const placed = (answerMap[targetId] || '').trim();
+                  return (
+                    <span
+                      key={targetId}
+                      className={`inline-flex items-center gap-2 min-w-[160px] min-h-[44px] px-3 py-1.5 rounded-xl border-2 align-middle mx-1 ${placed ? 'border-green-500 bg-green-50' : 'border-dashed border-indigo-300 bg-indigo-50/50'}`}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const payload = parsePayload(e.dataTransfer.getData('application/json'));
+                        if (!payload) return;
+                        placeItemToTarget(payload.item, targetId);
+                      }}
+                      onClick={() => {
+                        if (selectedDragItem) placeItemToTarget(selectedDragItem, targetId);
+                      }}
+                    >
+                      {placed ? (
+                        <>
+                          <span
+                            className="px-2 py-1 bg-white border border-green-300 rounded-lg text-sm font-bold text-green-700 cursor-move"
+                            draggable
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData('application/json', JSON.stringify({ item: placed, fromTarget: targetId }));
+                            }}
+                          >
+                            {placed}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              clearTarget(targetId);
+                            }}
+                            className="text-xs font-bold text-red-500 hover:text-red-700"
+                            title="Kosongkan"
+                          >
+                            x
+                          </button>
+                        </>
+                      ) : (
+                        <span className="text-xs font-bold text-indigo-500">Drop di sini</span>
+                      )}
+                    </span>
+                  );
+                };
+
+                return (
+                  <div className="space-y-4">
+                    <div className="p-4 rounded-2xl bg-white border border-gray-100 text-lg leading-relaxed">
+                      {parts.map((part, idx) => {
+                        const tokenMatch = part.match(/^\[\[([a-zA-Z0-9_-]+)\]\]$/);
+                        if (!tokenMatch) {
+                          return <span key={idx} dangerouslySetInnerHTML={{ __html: part }} />;
+                        }
+                        const targetId = tokenMatch[1];
+                        return renderDropSlot(targetId);
+                      })}
+                    </div>
+
+                    <div
+                      className="p-4 rounded-2xl border-2 border-dashed border-gray-200 bg-white"
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const payload = parsePayload(e.dataTransfer.getData('application/json'));
+                        if (!payload?.fromTarget) return;
+                        clearTarget(payload.fromTarget);
+                      }}
+                    >
+                      <p className="text-xs font-black text-gray-500 uppercase tracking-widest mb-3">
+                        Pilihan Kata/Frasa
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {availableItems.map(item => (
+                          <button
+                            key={item}
+                            type="button"
+                            draggable
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData('application/json', JSON.stringify({ item }));
+                            }}
+                            onClick={() => setSelectedDragItem(prev => (prev === item ? null : item))}
+                            className={`px-3 py-2 rounded-xl border text-sm font-bold transition ${selectedDragItem === item ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-gray-50 border-gray-200 text-gray-700 hover:border-indigo-300'}`}
+                          >
+                            {item}
+                          </button>
+                        ))}
+                        {availableItems.length === 0 && (
+                          <span className="text-sm font-semibold text-gray-400">Semua item sudah digunakan.</span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-gray-400 mt-3">
+                        Tip: bisa drag item ke slot, atau klik item lalu klik slot. Drag item dari slot ke area ini untuk mengosongkan.
+                      </p>
+                    </div>
+
+                    {isPreview && (
+                      <div className="mt-2 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
+                        <p className="text-xs font-bold text-amber-800 uppercase tracking-widest mb-1">Kunci Jawaban</p>
+                        <div className="text-sm font-bold text-gray-900 space-y-1">
+                          {targets.map(targetId => (
+                            <div key={targetId}>
+                              {targetId}: {currentQuestion.dragDropAnswer?.[targetId] || '-'}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {currentQuestion.type === 'essay' && (
                 <div className="space-y-4">

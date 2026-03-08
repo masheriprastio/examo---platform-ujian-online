@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { generateUUID } from '../lib/uuid';
 import { Question, QuestionType } from '../types';
 import RichTextEditor from './RichTextEditor';
@@ -13,13 +13,23 @@ interface QuestionBankProps {
   questions: Question[];
   onUpdate: (questions: Question[]) => void;
   isLoading?: boolean;
+  onCreateExamFromSelection?: (payload: {
+    title: string;
+    category: string;
+    questions: Question[];
+  }) => void | Promise<void>;
 }
 
-const QuestionBank: React.FC<QuestionBankProps> = ({ questions = [], onUpdate, isLoading = false }) => {
+const QuestionBank: React.FC<QuestionBankProps> = ({ questions = [], onUpdate, isLoading = false, onCreateExamFromSelection }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<QuestionType | 'all'>('all');
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [questionToDelete, setQuestionToDelete] = useState<string | null>(null);
+  const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
+  const [showWrapModal, setShowWrapModal] = useState(false);
+  const [wrapTitle, setWrapTitle] = useState('');
+  const [wrapCategory, setWrapCategory] = useState('Umum');
+  const [isCreatingExam, setIsCreatingExam] = useState(false);
 
   // Drag and Drop state
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -34,6 +44,12 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions = [], onUpdate, i
   });
 
   const isReorderable = !searchTerm && filterType === 'all';
+  const selectedQuestions = (questions || []).filter(q => q && selectedQuestionIds.includes(String(q.id)));
+
+  useEffect(() => {
+    const existingIds = new Set((questions || []).map(q => String(q?.id)));
+    setSelectedQuestionIds(prev => prev.filter(id => existingIds.has(id)));
+  }, [questions]);
 
   const handleSaveQuestion = (updatedQ: Question) => {
     if ((questions || []).some(q => q && q.id === updatedQ.id)) {
@@ -65,6 +81,51 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions = [], onUpdate, i
       topic: ''
     };
     setEditingQuestion(newQ);
+  };
+
+  const handleToggleSelect = (id: string, checked: boolean) => {
+    const idStr = String(id);
+    setSelectedQuestionIds(prev => {
+      if (checked) {
+        if (prev.includes(idStr)) return prev;
+        return [...prev, idStr];
+      }
+      return prev.filter(x => x !== idStr);
+    });
+  };
+
+  const handleOpenWrapModal = () => {
+    if (selectedQuestionIds.length === 0) return;
+    const now = new Date();
+    const dateText = `${now.getDate()}/${now.getMonth() + 1}/${now.getFullYear()}`;
+    setWrapTitle(`Ujian Bank Soal - ${dateText}`);
+    setWrapCategory('Umum');
+    setShowWrapModal(true);
+  };
+
+  const handleCreateWrappedExam = async () => {
+    if (!onCreateExamFromSelection) return;
+    if (!wrapTitle.trim()) {
+      alert('Judul ujian wajib diisi.');
+      return;
+    }
+    if (selectedQuestions.length === 0) {
+      alert('Pilih minimal 1 soal dari bank soal.');
+      return;
+    }
+
+    setIsCreatingExam(true);
+    try {
+      await Promise.resolve(onCreateExamFromSelection({
+        title: wrapTitle.trim(),
+        category: wrapCategory || 'Umum',
+        questions: selectedQuestions
+      }));
+      setShowWrapModal(false);
+      setSelectedQuestionIds([]);
+    } finally {
+      setIsCreatingExam(false);
+    }
   };
 
   const handleDragStart = (e: React.DragEvent, index: number) => {
@@ -121,6 +182,14 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions = [], onUpdate, i
         >
           <Plus className="w-5 h-5" /> Tambah Soal
         </button>
+        {selectedQuestionIds.length > 0 && (
+          <button
+            onClick={handleOpenWrapModal}
+            className="bg-emerald-600 text-white px-6 py-3 rounded-2xl font-black hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-lg shadow-emerald-100"
+          >
+            <Database className="w-5 h-5" /> Bungkus Jadi Ujian ({selectedQuestionIds.length})
+          </button>
+        )}
       </div>
 
       <div className="bg-white p-4 rounded-[30px] shadow-sm border border-gray-100 mb-6 flex flex-col md:flex-row gap-4">
@@ -201,6 +270,14 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions = [], onUpdate, i
               >
                 <div className="flex justify-between items-start gap-4 mb-3">
                   <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedQuestionIds.includes(String(q.id))}
+                      onChange={(e) => handleToggleSelect(String(q.id), e.target.checked)}
+                      onClick={e => e.stopPropagation()}
+                      className="mt-1.5 w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer"
+                      title="Pilih soal untuk digabung ke ujian"
+                    />
                     {isReorderable && (
                       <div className="cursor-grab active:cursor-grabbing text-gray-300 hover:text-indigo-500 transition-colors p-1 -ml-2 self-center">
                         <GripVertical className="w-5 h-5" />
@@ -240,6 +317,68 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ questions = [], onUpdate, i
             <div className="flex gap-3">
               <button onClick={() => setQuestionToDelete(null)} className="flex-1 py-3 bg-gray-50 text-gray-500 rounded-xl font-bold hover:bg-gray-100 transition-all">Batal</button>
               <button onClick={() => handleDeleteQuestion(questionToDelete)} className="flex-1 py-3 bg-red-600 text-white rounded-xl font-black hover:bg-red-700 transition-all shadow-lg shadow-red-100">Hapus</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showWrapModal && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-6 animate-in fade-in">
+          <div className="bg-white p-8 rounded-[35px] max-w-xl w-full shadow-2xl">
+            <h3 className="text-xl font-black text-gray-900 mb-2">Bungkus Soal Jadi 1 Ujian</h3>
+            <p className="text-sm text-gray-500 font-medium mb-6">
+              {selectedQuestionIds.length} soal terpilih akan dimasukkan ke satu draft ujian baru.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Judul Ujian</label>
+                <input
+                  type="text"
+                  value={wrapTitle}
+                  onChange={(e) => setWrapTitle(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-bold"
+                  placeholder="Contoh: Ujian Esai IF"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Kategori / Mata Pelajaran</label>
+                <select
+                  value={wrapCategory}
+                  onChange={(e) => setWrapCategory(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-gray-800"
+                >
+                  <option value="Umum">Umum</option>
+                  <option value="Matematika">Matematika</option>
+                  <option value="Fisika">Fisika</option>
+                  <option value="Kimia">Kimia</option>
+                  <option value="Biologi">Biologi</option>
+                  <option value="Bahasa Indonesia">Bahasa Indonesia</option>
+                  <option value="Bahasa Inggris">Bahasa Inggris</option>
+                  <option value="IPS">IPS</option>
+                  <option value="Sejarah">Sejarah</option>
+                  <option value="Geografi">Geografi</option>
+                  <option value="Ekonomi">Ekonomi</option>
+                  <option value="Informatika">Informatika / TIK</option>
+                  <option value="Lainnya">Lainnya</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-8">
+              <button
+                onClick={() => setShowWrapModal(false)}
+                className="flex-1 py-3 bg-gray-50 text-gray-500 rounded-xl font-bold hover:bg-gray-100 transition-all"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleCreateWrappedExam}
+                disabled={isCreatingExam}
+                className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-black hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 disabled:opacity-70"
+              >
+                {isCreatingExam ? 'Membuat...' : 'Buat 1 Ujian'}
+              </button>
             </div>
           </div>
         </div>

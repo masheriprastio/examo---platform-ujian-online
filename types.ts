@@ -33,6 +33,7 @@ export interface UserTracking {
 
 export type QuestionType = 'mcq' | 'true_false' | 'short_answer' | 'essay' | 'multiple_select' | 'essay_dragdrop';
 export type EssayGradingMode = 'manual' | 'keyword_auto';
+export type DragDropScoringMode = 'partial' | 'all_or_nothing';
 
 export interface Question {
   id: string;
@@ -60,8 +61,9 @@ export interface Question {
   updatedAt?: string;
   // Untuk Essay Drag & Drop
   dragDropItems?: string[];                    // Item yang bisa di-drag (kiri)
-  dragDropTargets?: string[];                  // Target drop zones (kanan)
-  dragDropAnswer?: { [key: string]: string }; // Mapping: item → target
+  dragDropTargets?: string[];                  // Target ID, cocokkan dengan token [[target_id]] di teks soal
+  dragDropAnswer?: { [targetId: string]: string }; // Mapping: target_id → item yang benar
+  dragDropScoringMode?: DragDropScoringMode;
   attachment?: {
     type: 'image' | 'video' | 'audio';
     url: string;
@@ -88,6 +90,7 @@ export interface Exam {
   title: string;
   description: string;
   durationMinutes: number;
+  passingScore?: number; // Nilai minimum kelulusan (KKM), default 75
   questions: Question[];
   category: string;
   status: 'draft' | 'published';

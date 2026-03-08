@@ -68,14 +68,12 @@ function hasManualEssayScore(answers?: Record<string, any>): boolean {
   return Object.keys(answers).some(k => k.endsWith('_manual_score') && typeof (answers as any)[k] === 'number');
 }
 
-// Helper: escape HTML for docx template generation
-function escapeHtml(s: string) {
-  return String(s)
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '"')
-    .replace(/'/g, '&#039;');
+function getExamPassingScore(exam?: Exam | null): number {
+  const raw = exam?.passingScore;
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return Math.max(0, Math.min(100, raw));
+  }
+  return 75;
 }
 
 const LoginView: React.FC<{
@@ -549,6 +547,7 @@ export default function App() {
           title: e.title,
           description: e.description,
           durationMinutes: e.duration_minutes || e.durationMinutes || 60,
+          passingScore: e.passing_score ?? e.passingScore ?? 75,
           category: e.category,
           // Normalize status to lowercase trimmed string (handle variants like "Publish"/"PUBLISHED")
           status: (() => {
@@ -1890,6 +1889,7 @@ export default function App() {
         title: updatedExam.title,
         description: updatedExam.description,
         duration_minutes: updatedExam.durationMinutes,
+        passing_score: updatedExam.passingScore ?? 75,
         category: updatedExam.category,
         status: updatedExam.status,
         questions: updatedExam.questions,
@@ -1909,6 +1909,18 @@ export default function App() {
           // Insert new exam
           const res = await supabase.from('exams').insert(dbExam);
           error = res.error;
+        }
+
+        // Backward compatibility: if DB column `passing_score` does not exist yet, retry without it.
+        if (error && /passing_score/i.test(error.message || '')) {
+          const { passing_score, ...legacyDbExam } = dbExam as any;
+          if (exists) {
+            const retry = await supabase.from('exams').update(legacyDbExam).eq('id', updatedExam.id);
+            error = retry.error;
+          } else {
+            const retry = await supabase.from('exams').insert(legacyDbExam);
+            error = retry.error;
+          }
         }
 
         if (error) {
@@ -1945,6 +1957,7 @@ export default function App() {
         title: newExam.title,
         description: newExam.description,
         duration_minutes: newExam.durationMinutes,
+        passing_score: newExam.passingScore ?? 75,
         category: newExam.category,
         status: newExam.status,
         questions: newExam.questions,
@@ -1953,7 +1966,12 @@ export default function App() {
         created_by: currentUser?.id,
         created_at: newExam.createdAt
       };
-      const { error } = await supabase.from('exams').insert(dbExam);
+      let { error } = await supabase.from('exams').insert(dbExam);
+      if (error && /passing_score/i.test(error.message || '')) {
+        const { passing_score, ...legacyDbExam } = dbExam as any;
+        const retry = await supabase.from('exams').insert(legacyDbExam);
+        error = retry.error;
+      }
       if (error) {
         console.error("Failed to create exam in database:", error);
         addAlert("Gagal menyimpan ujian ke database: " + error.message, 'error');
@@ -1970,10 +1988,11 @@ export default function App() {
   const handleCreateManual = () => {
     const newExam: Exam = {
       id: generateUUID(),
-      title: 'Ujian Baru Tanpa Judul',
+      title: '',
       description: '',
       durationMinutes: 60,
-      category: 'Umum',
+      passingScore: 75,
+      category: '',
       status: 'draft',
       createdAt: new Date().toISOString(),
       questions: []
@@ -1981,6 +2000,34 @@ export default function App() {
     setEditingExam(newExam);
     setView('EXAM_EDITOR');
     setShowCreateMenu(false);
+  };
+
+  const handleCreateExamFromBankSelection = (payload: { title: string; category: string; questions: Question[] }) => {
+    const clonedQuestions: Question[] = (payload.questions || []).map((q) => {
+      const cloned = JSON.parse(JSON.stringify(q)) as Question;
+      return {
+        ...cloned,
+        id: generateUUID(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+    });
+
+    const newExam: Exam = {
+      id: generateUUID(),
+      title: payload.title?.trim() || 'Ujian Baru dari Bank Soal',
+      description: `Dibuat dari ${clonedQuestions.length} soal di Bank Soal`,
+      durationMinutes: 60,
+      passingScore: 75,
+      category: payload.category || 'Umum',
+      status: 'draft',
+      createdAt: new Date().toISOString(),
+      questions: clonedQuestions
+    };
+
+    setEditingExam(newExam);
+    setView('EXAM_EDITOR');
+    addAlert(`Draft ujian baru dibuat dari ${clonedQuestions.length} soal bank.`, 'success');
   };
 
   const handleDownloadTemplate = () => {
@@ -2019,31 +2066,27 @@ export default function App() {
     addAlert('✅ Template soal berhasil didownload!', 'success');
   };
 
-  const handleDownloadDocxTemplate = () => {
-    const sample = [
-      'Ibukota Indonesia adalah...?', 'Tipe: PG', 'A. Jakarta', 'B. Bandung', 'C. Surabaya', 'D. Medan', 'E. Makassar', 'Jawaban: A', 'Poin: 10',
-      '',
-      'Air adalah benda padat.', 'Tipe: Benar Salah', 'Jawaban: False', 'Poin: 10',
-      '',
-      'Sebutkan 3 sifat air.', 'Tipe: Esai', 'Jawaban: Cair, bening, mengalir', 'Poin: 20'
-    ].join('\n');
+  const handleDownloadDocxTemplate = async () => {
+    try {
+      const response = await fetch('/templates/Template_Import_Soal_Examo.docx');
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
 
-    // Use HTML-based Word-compatible document (widely supported). File extension .docx for user convenience.
-    const html = `
-      <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-        <head><meta charset="utf-8"><title>Template Import Soal</title></head>
-        <body><pre style="font-family: Calibri, Arial, sans-serif; font-size: 12pt; line-height: 1.4;">${escapeHtml(sample)}</pre></body>
-      </html>
-    `;
-
-    const blob = new Blob([html], { type: 'application/msword' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'Template_Import_Soal_Examo.docx';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    addAlert('✅ Template soal (.docx) berhasil didownload!', 'success');
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'Template_Import_Soal_Examo.docx';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      addAlert('✅ Template soal (.docx) berhasil didownload!', 'success');
+    } catch (err: any) {
+      console.error('Download DOCX template failed:', err);
+      addAlert('Gagal mengunduh template .docx. Silakan coba lagi.', 'error');
+    }
   };
 
   const handleImportExam = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2544,21 +2587,15 @@ export default function App() {
       doc.text(`Skor: ${result.score}`, 120, yPos);
 
       const violationCount = result.logs.filter(l => l.event === 'tab_blur').length;
-
-      const hasEssay = exam.questions.some(q => q.type === 'essay');
+      const passingScore = getExamPassingScore(exam);
 
       if (result.status === 'disqualified') {
         doc.setTextColor(220, 38, 38);
         doc.text(`(DIDISKUALIFIKASI)`, 140, yPos);
         doc.setTextColor(0, 0, 0);
-      } else if (hasEssay) {
-        // Jika ada soal esai, skor menunggu penilaian manual — jangan tampilkan KKM
-        doc.setTextColor(120, 80, 20);
-        doc.text(`(Menunggu Penilaian Esai)`, 140, yPos);
-        doc.setTextColor(0, 0, 0);
-      } else if (result.score < 75) {
+      } else if (result.score < passingScore) {
         doc.setTextColor(220, 38, 38);
-        doc.text(`(Di Bawah KKM)`, 140, yPos);
+        doc.text(`(Di Bawah KKM ${passingScore})`, 140, yPos);
         doc.setTextColor(0, 0, 0);
       }
 
@@ -2606,12 +2643,24 @@ export default function App() {
         } else if (q.type === 'essay') {
           answerText = typeof answer === 'string' && answer.trim() ? answer.trim() : '(Kosong)';
           status = 'Esai';
+        } else if (q.type === 'essay_dragdrop') {
+          const mapping = (answer as Record<string, string>) || {};
+          const targets = q.dragDropTargets || [];
+          answerText = targets.length > 0
+            ? targets.map(t => `${t}: ${mapping[t] || '-'}`).join('\n')
+            : '-';
+          const key = q.dragDropAnswer || {};
+          const correctCount = targets.filter(t => (mapping[t] || '').trim() === (key[t] || '').trim() && (key[t] || '').trim().length > 0).length;
+          const mode = q.dragDropScoringMode || 'partial';
+          status = mode === 'all_or_nothing'
+            ? (targets.length > 0 && correctCount === targets.length ? 'Benar' : 'Salah')
+            : `${correctCount}/${targets.length}`;
         }
 
         return [
           qIdx + 1,
           questionText,
-          q.type === 'mcq' ? 'PG' : q.type === 'multiple_select' ? 'PG (B)' : q.type === 'true_false' ? 'B/S' : q.type === 'short_answer' ? 'Isian' : 'Esai',
+          q.type === 'mcq' ? 'PG' : q.type === 'multiple_select' ? 'PG (B)' : q.type === 'true_false' ? 'B/S' : q.type === 'short_answer' ? 'Isian' : q.type === 'essay_dragdrop' ? 'DragDrop' : 'Esai',
           answerText,
           status
         ];
@@ -3130,6 +3179,56 @@ export default function App() {
                   </button>
                 </div>
 
+                {(() => {
+                  const completedResults = results.filter(r => r.status === 'completed');
+                  const avgScore = completedResults.length > 0
+                    ? Math.round(completedResults.reduce((sum, r) => sum + r.score, 0) / completedResults.length)
+                    : 0;
+                  const highestScore = completedResults.length > 0
+                    ? Math.max(...completedResults.map(r => r.score))
+                    : 0;
+                  const lowestScore = completedResults.length > 0
+                    ? Math.min(...completedResults.map(r => r.score))
+                    : 0;
+                  const passCount = completedResults.filter(r => {
+                    const examForResult = exams.find(e => e.id === r.examId);
+                    return r.score >= getExamPassingScore(examForResult);
+                  }).length;
+                  const failCount = completedResults.length - passCount;
+                  const passRate = completedResults.length > 0
+                    ? Math.round((passCount / completedResults.length) * 100)
+                    : 0;
+
+                  return (
+                    <section className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                      <div className="md:col-span-1 bg-indigo-600 text-white rounded-3xl p-6 shadow-lg shadow-indigo-200">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-indigo-100">Rata-Rata Nilai</p>
+                        <p className="text-5xl font-black tracking-tighter mt-2">{avgScore}</p>
+                        <p className="text-xs font-bold text-indigo-100 mt-2">{completedResults.length} hasil selesai</p>
+                      </div>
+                      <div className="md:col-span-2 grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="bg-white border border-gray-100 rounded-2xl p-4">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Nilai Tertinggi</p>
+                          <p className="text-2xl font-black text-green-600 mt-1">{highestScore}</p>
+                        </div>
+                        <div className="bg-white border border-gray-100 rounded-2xl p-4">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Nilai Terendah</p>
+                          <p className="text-2xl font-black text-red-500 mt-1">{lowestScore}</p>
+                        </div>
+                        <div className="bg-white border border-gray-100 rounded-2xl p-4">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Lulus</p>
+                          <p className="text-2xl font-black text-indigo-600 mt-1">{passCount}</p>
+                        </div>
+                        <div className="bg-white border border-gray-100 rounded-2xl p-4">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Tidak Lulus</p>
+                          <p className="text-2xl font-black text-amber-500 mt-1">{failCount}</p>
+                          <p className="text-[10px] font-bold text-gray-400 mt-1">Pass rate {passRate}%</p>
+                        </div>
+                      </div>
+                    </section>
+                  );
+                })()}
+
                 <div className="bg-white rounded-[40px] shadow-sm border border-gray-100 overflow-x-auto">
                   {gradeViewMode === 'history' ? (
                     <table className="w-full min-w-[800px]">
@@ -3142,7 +3241,10 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
-                        {[...results].sort((a, b) => new Date(b.submittedAt || b.startedAt).getTime() - new Date(a.submittedAt || a.startedAt).getTime()).map(r => (
+                        {[...results].sort((a, b) => new Date(b.submittedAt || b.startedAt).getTime() - new Date(a.submittedAt || a.startedAt).getTime()).map(r => {
+                          const examForResult = exams.find(e => e.id === r.examId);
+                          const passingScore = getExamPassingScore(examForResult);
+                          return (
                           <tr key={r.id} className={`hover:bg-gray-50 transition-colors ${r.status === 'disqualified' ? 'bg-red-50/30' : ''} ${r.violation_alert ? 'animate-pulse bg-red-100' : ''}`}>
                             <td className="px-10 py-8 font-bold text-gray-900">
                               {r.studentName}
@@ -3150,7 +3252,7 @@ export default function App() {
                               {r.status === 'disqualified' && <span className="inline-block mt-2 px-2 py-0.5 bg-red-600 text-white text-[10px] font-bold rounded">DISKUALIFIKASI</span>}
                               {r.violation_alert && <div className="mt-2 text-[10px] font-black text-red-600 animate-bounce">🚨 TERJADI PELANGGARAN 🚨</div>}
                             </td>
-                            <td className="px-10 py-8 text-gray-500 font-medium">{exams.find(e => e.id === r.examId)?.title}</td>
+                            <td className="px-10 py-8 text-gray-500 font-medium">{examForResult?.title}</td>
                             <td className="px-10 py-8">
                               <div className="flex items-center justify-center gap-2">
                                 <span className="bg-green-50 text-green-600 px-2 py-1 rounded-lg text-[10px] font-black border border-green-100">{r.correctCount}B</span>
@@ -3161,7 +3263,7 @@ export default function App() {
                             <td className="px-10 py-8 text-right">
                               <div className="flex items-center justify-end gap-4">
                                 <div className="text-right">
-                                  <span className={`font-black text-3xl tracking-tighter block ${r.status === 'completed' && r.score < 75 ? 'text-red-500' : r.status === 'disqualified' ? 'text-gray-400 line-through' : 'text-indigo-600'}`}>
+                                  <span className={`font-black text-3xl tracking-tighter block ${r.status === 'completed' && r.score < passingScore ? 'text-red-500' : r.status === 'disqualified' ? 'text-gray-400 line-through' : 'text-indigo-600'}`}>
                                     {r.status === 'completed' || r.status === 'disqualified' ? r.score : '-'}
                                   </span>
                                   {r.logs.filter(l => l.event === 'tab_blur').length > 0 && (
@@ -3194,7 +3296,7 @@ export default function App() {
                               </div>
                             </td>
                           </tr>
-                        ))}
+                        )})}
                         {results.length === 0 && <tr><td colSpan={4} className="py-20 text-center text-gray-400 font-medium italic">Belum ada data pengerjaan.</td></tr>}
                       </tbody>
                     </table>
@@ -3362,10 +3464,10 @@ export default function App() {
                           <div className="space-y-6">
                             {/* Score summary */}
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                              <div className={`p-5 rounded-2xl border-2 text-center col-span-1 ${selectedResult.score >= 75 ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                              <div className={`p-5 rounded-2xl border-2 text-center col-span-1 ${selectedResult.score >= getExamPassingScore(exams.find(e => e.id === selectedResult.examId)) ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
                                 <p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-70">Skor Akhir (0-100)</p>
                                 <h3 className="text-4xl font-black">{selectedResult.score}</h3>
-                                <p className="text-[11px] font-bold mt-1 opacity-80">Hasil konversi dari poin</p>
+                                <p className="text-[11px] font-bold mt-1 opacity-80">KKM: {getExamPassingScore(exams.find(e => e.id === selectedResult.examId))}</p>
                               </div>
                               <div className="col-span-2 p-5 rounded-2xl bg-white border border-gray-100 shadow-sm flex flex-col justify-center gap-2">
                                 <div className="flex justify-between">
@@ -3407,6 +3509,15 @@ export default function App() {
                                 answerText = typeof answer === 'string' ? answer : '(Tidak Dijawab)';
                               } else if (q.type === 'essay') {
                                 answerText = typeof answer === 'string' && answer.trim() ? answer : '(Tidak Dijawab)';
+                              } else if (q.type === 'essay_dragdrop') {
+                                const mapping = (answer as Record<string, string>) || {};
+                                const targets = q.dragDropTargets || [];
+                                const key = q.dragDropAnswer || {};
+                                const correctCount = targets.filter(t => (mapping[t] || '').trim() === (key[t] || '').trim() && (key[t] || '').trim().length > 0).length;
+                                isCorrect = targets.length > 0 && correctCount === targets.length;
+                                answerText = targets.length > 0
+                                  ? targets.map(t => `${t}: ${mapping[t] || '-'}`).join('\n')
+                                  : '(Tidak Dijawab)';
                               }
 
                               const isEssay = q.type === 'essay';
@@ -3461,6 +3572,7 @@ export default function App() {
                                             q.type === 'short_answer' ? q.shortAnswer :
                                               q.type === 'true_false' ? (q.trueFalseAnswer ? 'BENAR' : 'SALAH') :
                                                 q.type === 'multiple_select' && q.options && q.correctAnswerIndices ? q.correctAnswerIndices.map(i => `${String.fromCharCode(65 + i)}. ${q.options![i]}`).join(', ') :
+                                                  q.type === 'essay_dragdrop' && q.dragDropTargets ? q.dragDropTargets.map(t => `${t}: ${q.dragDropAnswer?.[t] || '-'}`).join('\n') :
                                                   '(Tidak ada kunci)'}
                                       </div>
                                     </div>
@@ -3499,6 +3611,21 @@ export default function App() {
                                             const a = (ans as number[]) || [];
                                             const c = qu.correctAnswerIndices || [];
                                             correct = a.length === c.length && a.every(v => c.includes(v));
+                                          } else if (qu.type === 'essay_dragdrop') {
+                                            const mapping = (ans as Record<string, string>) || {};
+                                            const targets = qu.dragDropTargets || [];
+                                            const answerKey = qu.dragDropAnswer || {};
+                                            const correctCount = targets.filter(targetId => {
+                                              const student = (mapping[targetId] || '').trim();
+                                              const key = (answerKey[targetId] || '').trim();
+                                              return student.length > 0 && key.length > 0 && student === key;
+                                            }).length;
+                                            const mode = qu.dragDropScoringMode || 'partial';
+                                            if (targets.length > 0 && mode === 'partial') {
+                                              autoPoints += qu.points * (correctCount / targets.length);
+                                            } else {
+                                              correct = targets.length > 0 && correctCount === targets.length;
+                                            }
                                           }
 
                                           if (qu.type === 'essay') {
@@ -3547,7 +3674,12 @@ export default function App() {
                 )}
               </div>
             ) : view === 'TEACHER_BANK' ? (
-              <QuestionBank questions={bankQuestions} onUpdate={handleBankUpdate} isLoading={isFetching} />
+              <QuestionBank
+                questions={bankQuestions}
+                onUpdate={handleBankUpdate}
+                isLoading={isFetching}
+                onCreateExamFromSelection={handleCreateExamFromBankSelection}
+              />
             ) : view === 'TEACHER_EXAM_ROOM' ? (
               <div className="max-w-6xl mx-auto animate-in fade-in pb-20">
                 <ExamRoomManager
@@ -3713,6 +3845,9 @@ export default function App() {
                           <div className="flex flex-wrap gap-4 mt-2 text-[10px] font-black text-gray-400 uppercase tracking-widest items-center">
                             <span>{e.category}</span>
                             <span>{e.questions.length} Soal</span>
+                            <span className="px-2 py-0.5 rounded text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                              KKM {getExamPassingScore(e)}
+                            </span>
                             {e.createdAt && <span>Dibuat: {formatDate(e.createdAt)}</span>}
                             <span className={`px-2 py-0.5 rounded text-xs font-bold ${e.status === 'published' ? 'bg-green-100 text-green-600' :
                               e.status === 'draft' ? 'bg-gray-100 text-gray-600' :
@@ -3833,7 +3968,7 @@ export default function App() {
                       <tbody className="divide-y divide-gray-100">
                         {getSortedResults(results.filter(r => r.studentId === currentUser?.id && r.status === 'completed')).map(r => {
                           const exam = exams.find(e => e.id === r.examId);
-                          const isPassed = r.score >= 75;
+                          const isPassed = r.score >= getExamPassingScore(exam);
                           return (
                             <tr key={r.id} className="hover:bg-gray-50 transition-colors">
                               <td className="px-6 py-4 font-bold text-gray-900">{exam?.title || '-'}</td>
@@ -3885,10 +4020,14 @@ export default function App() {
                       <div className="flex-1 overflow-y-auto p-6 bg-gray-50/30 space-y-4">
                         {/* Score summary */}
                         <div className="grid grid-cols-3 gap-4">
-                          <div className={`p-5 rounded-2xl border-2 text-center col-span-1 ${selectedResult.score >= 75 ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                          <div className={`p-5 rounded-2xl border-2 text-center col-span-1 ${selectedResult.score >= getExamPassingScore(exams.find(e => e.id === selectedResult.examId)) ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
                             <p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-70">Skor</p>
                             <h3 className="text-4xl font-black">{selectedResult.score}</h3>
-                            <p className="text-xs font-bold mt-1">{selectedResult.score >= 75 ? 'LULUS' : 'TIDAK LULUS'}</p>
+                            <p className="text-xs font-bold mt-1">
+                              {selectedResult.score >= getExamPassingScore(exams.find(e => e.id === selectedResult.examId))
+                                ? `LULUS (KKM ${getExamPassingScore(exams.find(e => e.id === selectedResult.examId))})`
+                                : `TIDAK LULUS (KKM ${getExamPassingScore(exams.find(e => e.id === selectedResult.examId))})`}
+                            </p>
                           </div>
                           <div className="col-span-2 p-5 rounded-2xl bg-white border border-gray-100 shadow-sm flex flex-col justify-center gap-2">
                             <div className="flex justify-between"><span className="text-gray-500 font-bold text-sm">Benar</span><span className="font-black text-green-600">{selectedResult.correctCount}</span></div>
@@ -3922,6 +4061,15 @@ export default function App() {
                             answerText = typeof answer === 'string' ? answer : '(Tidak Dijawab)';
                           } else if (q.type === 'essay') {
                             answerText = typeof answer === 'string' && answer.trim() ? answer : '(Tidak Dijawab)';
+                          } else if (q.type === 'essay_dragdrop') {
+                            const mapping = (answer as Record<string, string>) || {};
+                            const targets = q.dragDropTargets || [];
+                            const key = q.dragDropAnswer || {};
+                            const correctCount = targets.filter(t => (mapping[t] || '').trim() === (key[t] || '').trim() && (key[t] || '').trim().length > 0).length;
+                            isCorrect = targets.length > 0 && correctCount === targets.length;
+                            answerText = targets.length > 0
+                              ? targets.map(t => `${t}: ${mapping[t] || '-'}`).join(', ')
+                              : '(Tidak Dijawab)';
                           }
 
                           // Status for essay: show manual score or "waiting"
@@ -4049,9 +4197,12 @@ export default function App() {
                       <div key={e.id} className="bg-white p-10 rounded-[50px] border border-gray-100 shadow-sm hover:shadow-2xl transition-all flex flex-col group">
                         <div className="flex justify-between items-center mb-8">
                           <span className="bg-indigo-50 text-indigo-600 text-[10px] font-black uppercase px-4 py-1.5 rounded-full border border-indigo-100 tracking-widest">{e.category}</span>
-                          {isTaken && <CheckCircle className="text-green-500" />}
-                          {isInProgress && !isExpired && <Clock className="text-amber-500" />}
-                          {isExpired && <span className="text-[10px] font-black uppercase bg-red-100 text-red-600 px-2 py-1 rounded">Expired</span>}
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-black uppercase bg-amber-50 text-amber-700 px-2 py-1 rounded border border-amber-200">KKM {getExamPassingScore(e)}</span>
+                            {isTaken && <CheckCircle className="text-green-500" />}
+                            {isInProgress && !isExpired && <Clock className="text-amber-500" />}
+                            {isExpired && <span className="text-[10px] font-black uppercase bg-red-100 text-red-600 px-2 py-1 rounded">Expired</span>}
+                          </div>
                         </div>
                         <h3 className="text-2xl font-bold text-gray-900 mb-2 leading-tight group-hover:text-indigo-600 transition-colors">{e.title}</h3>
 

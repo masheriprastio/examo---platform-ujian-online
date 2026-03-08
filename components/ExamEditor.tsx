@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { generateUUID } from '../lib/uuid';
-import { Exam, Question, QuestionType, EssayGradingMode } from '../types';
+import { Exam, Question, QuestionType, EssayGradingMode, DragDropScoringMode } from '../types';
 import RichTextEditor from './RichTextEditor';
 import { supabase } from '../lib/supabase';
 import * as XLSX from 'xlsx';
@@ -91,6 +91,56 @@ const validatePointsInput = (value: string): { isValid: boolean; error?: string;
   return { isValid: true, parsedValue: parsed };
 };
 
+const getQuestionPreviewText = (html?: string): string => {
+  const source = (html || '').trim();
+  if (!source) return '(Tanpa teks soal)';
+
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(source, 'text/html');
+    const table = doc.querySelector('table');
+    const plainText = (doc.body.textContent || '').replace(/\s+/g, ' ').trim();
+
+    if (plainText) return plainText;
+
+    if (table) {
+      const rows = table.querySelectorAll('tr').length;
+      const cols = table.querySelector('tr')?.querySelectorAll('td,th').length || 0;
+      return `Tabel ${rows} x ${cols}`;
+    }
+  } catch {
+    // Fallback to tag stripping below
+  }
+
+  const stripped = source.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  return stripped || '(Tanpa teks soal)';
+};
+
+const isRichTextEmpty = (html?: string): boolean => {
+  const source = (html || '').trim();
+  if (!source) return true;
+
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(source, 'text/html');
+    const textContent = (doc.body.textContent || '').replace(/\u00a0/g, ' ').trim();
+    if (textContent) return false;
+
+    if (doc.body.querySelector('img,table,video,iframe,svg,math')) {
+      return false;
+    }
+  } catch {
+    // Fallback below
+  }
+
+  const stripped = source
+    .replace(/<br\s*\/?>/gi, '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/\u00a0/g, ' ')
+    .trim();
+  return stripped.length === 0;
+};
+
 // Helper function untuk recover backup dari localStorage
 const recoverBackup = (examId: string, fallback: Exam): Exam => {
   try {
@@ -154,6 +204,11 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   const [selectedQuestions, setSelectedQuestions] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [pointsErrors, setPointsErrors] = useState<Record<string, string>>({}); // Track validation errors per question
+  const [questionTextErrors, setQuestionTextErrors] = useState<Record<string, string>>({});
+  const [examFieldErrors, setExamFieldErrors] = useState<Record<string, string>>({});
+  const [questionListError, setQuestionListError] = useState('');
+  const [hasAttemptedSave, setHasAttemptedSave] = useState(false);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
   const backupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedRef = useRef<string>(JSON.stringify(exam));
 
@@ -254,6 +309,12 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [formData]);
 
+  useEffect(() => {
+    if (formData.questions.length > 0 && questionListError) {
+      setQuestionListError('');
+    }
+  }, [formData.questions.length, questionListError]);
+
   const handleExamChange = (field: keyof Exam, value: any) => {
     setFormData(prev => {
       const updated = { ...prev, [field]: value };
@@ -276,6 +337,26 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
 
       return updated;
     });
+
+    if (hasAttemptedSave) {
+      setExamFieldErrors(prev => {
+        const next = { ...prev };
+        if (field === 'title') {
+          if (String(value || '').trim()) delete next.title;
+          else next.title = 'Judul ujian wajib diisi.';
+        }
+        if (field === 'category') {
+          if (String(value || '').trim()) delete next.category;
+          else next.category = 'Kategori wajib dipilih.';
+        }
+        if (field === 'durationMinutes') {
+          const duration = Number(value);
+          if (Number.isFinite(duration) && duration > 0) delete next.durationMinutes;
+          else next.durationMinutes = 'Durasi ujian harus lebih dari 0 menit.';
+        }
+        return next;
+      });
+    }
   };
 
   const handleQuestionChange = (qIndex: number, field: keyof Question, value: any) => {
@@ -286,6 +367,109 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
       updatedAt: new Date().toISOString() // Update timestamp setiap ada perubahan
     };
     setFormData(prev => ({ ...prev, questions: newQuestions }));
+
+    if (field === 'text') {
+      const qId = newQuestions[qIndex]?.id;
+      if (!qId) return;
+      const isEmpty = isRichTextEmpty(String(value || ''));
+      setQuestionTextErrors(prev => {
+        const next = { ...prev };
+        if (!isEmpty) {
+          delete next[qId];
+        } else if (hasAttemptedSave) {
+          next[qId] = 'Teks pertanyaan wajib diisi.';
+        }
+        return next;
+      });
+    }
+  };
+
+  const validateRequiredQuestions = (): boolean => {
+    if (formData.questions.length === 0) {
+      setQuestionTextErrors({});
+      setQuestionListError('Minimal harus ada 1 pertanyaan.');
+      return false;
+    }
+
+    const nextQuestionErrors: Record<string, string> = {};
+
+    formData.questions.forEach((q) => {
+      if (isRichTextEmpty(q.text)) {
+        nextQuestionErrors[q.id] = 'Teks pertanyaan wajib diisi.';
+      }
+    });
+
+    setQuestionTextErrors(nextQuestionErrors);
+    setQuestionListError('');
+
+    const firstInvalidQuestionId = Object.keys(nextQuestionErrors)[0];
+    if (firstInvalidQuestionId) {
+      setActiveQuestionId(firstInvalidQuestionId);
+    }
+
+    return Object.keys(nextQuestionErrors).length === 0;
+  };
+
+  const validateExamFields = (): boolean => {
+    const nextExamErrors: Record<string, string> = {};
+
+    if (!formData.title?.trim()) {
+      nextExamErrors.title = 'Judul ujian wajib diisi.';
+    }
+
+    if (!formData.category?.trim()) {
+      nextExamErrors.category = 'Kategori wajib dipilih.';
+    }
+
+    const duration = Number(formData.durationMinutes);
+    if (!Number.isFinite(duration) || duration <= 0) {
+      nextExamErrors.durationMinutes = 'Durasi ujian harus lebih dari 0 menit.';
+    }
+
+    setExamFieldErrors(nextExamErrors);
+    return Object.keys(nextExamErrors).length === 0;
+  };
+
+  const handleSaveExam = async (closeAfterSave = false): Promise<boolean> => {
+    setHasAttemptedSave(true);
+
+    const isExamFieldValid = validateExamFields();
+    const isQuestionValid = validateRequiredQuestions();
+    const hasPointsError = Object.keys(pointsErrors).length > 0;
+
+    if (!isExamFieldValid || !isQuestionValid || hasPointsError) {
+      if (!isExamFieldValid) {
+        alert('Lengkapi data ujian bertanda seru terlebih dahulu (judul, kategori, atau durasi).');
+      } else if (formData.questions.length === 0) {
+        alert('Ujian belum memiliki pertanyaan. Tambahkan minimal 1 pertanyaan sebelum menyimpan.');
+      } else if (hasPointsError) {
+        alert('Masih ada bobot nilai yang tidak valid. Periksa kolom Bobot Nilai bertanda seru.');
+      } else {
+        alert('Masih ada teks soal kosong. Isi kolom bertanda seru sebelum menyimpan.');
+      }
+      return false;
+    }
+
+    setIsSaving(true);
+    try {
+      await Promise.resolve(onSave(formData));
+      lastSavedRef.current = JSON.stringify(formData);
+      try { localStorage.removeItem(`exam_draft_${exam.id}`); } catch (_) { }
+      if (closeAfterSave) {
+        onCancel();
+      }
+      return true;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCancelAttempt = () => {
+    if (JSON.stringify(formData) !== lastSavedRef.current) {
+      setShowExitConfirm(true);
+      return;
+    }
+    onCancel();
   };
 
   // Handler khusus untuk points dengan validasi
@@ -405,6 +589,109 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         e.target.value = ''; // Reset input
       }
     }
+  };
+
+  const getNextDragDropTargetId = (targets: string[] = []): string => {
+    let i = 1;
+    while (targets.includes(`blank_${i}`)) i += 1;
+    return `blank_${i}`;
+  };
+
+  const updateDragDropQuestion = (qIndex: number, updater: (q: Question) => Question) => {
+    setFormData(prev => {
+      const questions = [...prev.questions];
+      const current = questions[qIndex];
+      if (!current) return prev;
+      questions[qIndex] = {
+        ...updater(current),
+        updatedAt: new Date().toISOString()
+      };
+      return { ...prev, questions };
+    });
+  };
+
+  const addDragDropBlank = (qIndex: number) => {
+    updateDragDropQuestion(qIndex, (question) => {
+      const targets = [...(question.dragDropTargets || [])];
+      const nextId = getNextDragDropTargetId(targets);
+      targets.push(nextId);
+
+      const updatedAnswer = { ...(question.dragDropAnswer || {}), [nextId]: '' };
+      const updatedText = (question.text || '').includes(`[[${nextId}]]`)
+        ? question.text
+        : `${question.text || ''} [[${nextId}]]`;
+
+      return {
+        ...question,
+        dragDropTargets: targets,
+        dragDropAnswer: updatedAnswer,
+        text: updatedText.trim()
+      };
+    });
+  };
+
+  const removeDragDropBlank = (qIndex: number, targetId: string) => {
+    updateDragDropQuestion(qIndex, (question) => {
+      const targets = (question.dragDropTargets || []).filter(t => t !== targetId);
+      const updatedAnswer = { ...(question.dragDropAnswer || {}) };
+      delete updatedAnswer[targetId];
+
+      return {
+        ...question,
+        dragDropTargets: targets,
+        dragDropAnswer: updatedAnswer
+      };
+    });
+  };
+
+  const updateDragDropAnswerKey = (qIndex: number, targetId: string, correctItem: string) => {
+    updateDragDropQuestion(qIndex, (question) => {
+      const updatedAnswer = { ...(question.dragDropAnswer || {}), [targetId]: correctItem };
+      const items = new Set((question.dragDropItems || []).map(i => i.trim()).filter(Boolean));
+      if (correctItem.trim()) items.add(correctItem.trim());
+
+      return {
+        ...question,
+        dragDropAnswer: updatedAnswer,
+        dragDropItems: Array.from(items)
+      };
+    });
+  };
+
+  const updateDragDropItem = (qIndex: number, itemIndex: number, value: string) => {
+    updateDragDropQuestion(qIndex, (question) => {
+      const items = [...(question.dragDropItems || [])];
+      items[itemIndex] = value;
+      return { ...question, dragDropItems: items };
+    });
+  };
+
+  const addDragDropItem = (qIndex: number) => {
+    updateDragDropQuestion(qIndex, (question) => {
+      const items = [...(question.dragDropItems || []), ''];
+      return { ...question, dragDropItems: items };
+    });
+  };
+
+  const removeDragDropItem = (qIndex: number, itemIndex: number) => {
+    updateDragDropQuestion(qIndex, (question) => {
+      const items = [...(question.dragDropItems || [])];
+      const removed = items[itemIndex];
+      const updatedItems = items.filter((_, i) => i !== itemIndex);
+      const updatedAnswer = { ...(question.dragDropAnswer || {}) };
+
+      Object.keys(updatedAnswer).forEach(targetId => {
+        if ((updatedAnswer[targetId] || '').trim() === (removed || '').trim()) {
+          updatedAnswer[targetId] = '';
+        }
+      });
+
+      return {
+        ...question,
+        dragDropItems: updatedItems,
+        dragDropAnswer: updatedAnswer
+      };
+    });
   };
 
   // Simple CSV parser for import (expects header row).
@@ -648,7 +935,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
     const newQuestion: Question = {
       id: generateUUID(),
       type,
-      text: 'Pertanyaan Baru',
+      text: '',
       points: 10,
       explanation: '',
       difficulty: 'medium',
@@ -658,9 +945,20 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
       ...(type === 'multiple_select' ? { options: ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D'], correctAnswerIndices: [], randomizeOptions: false, optionAttachments: [undefined, undefined, undefined, undefined] } : {}),
       ...(type === 'true_false' ? { trueFalseAnswer: true } : {}),
       ...(type === 'short_answer' ? { shortAnswer: '' } : {}),
-      ...(type === 'essay' ? { essayAnswer: '', essayGradingMode: 'keyword_auto' as EssayGradingMode } : {})
+      ...(type === 'essay' ? { essayAnswer: '', essayGradingMode: 'keyword_auto' as EssayGradingMode } : {}),
+      ...(type === 'essay_dragdrop' ? {
+        text: 'Lengkapi kalimat berikut: [[blank_1]] dan [[blank_2]]',
+        dragDropTargets: ['blank_1', 'blank_2'],
+        dragDropAnswer: {
+          blank_1: 'Jawaban 1',
+          blank_2: 'Jawaban 2'
+        },
+        dragDropItems: ['Jawaban 1', 'Jawaban 2', 'Distraktor'],
+        dragDropScoringMode: 'partial' as DragDropScoringMode
+      } : {})
     };
     setFormData(prev => ({ ...prev, questions: [...prev.questions, newQuestion] }));
+    setQuestionListError('');
     setActiveQuestionId(newQuestion.id);
   };
 
@@ -775,23 +1073,14 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
             </button>
           )}
           <button
-            onClick={onCancel}
+            onClick={handleCancelAttempt}
             className="px-3 py-2 text-gray-500 font-bold hover:bg-gray-50 rounded-xl transition text-xs shrink-0 whitespace-nowrap"
           >
             Batal
           </button>
           {/* ── SIMPAN — selalu terlihat, diberi warna mencolok ── */}
           <button
-            onClick={async () => {
-              setIsSaving(true);
-              try {
-                await Promise.resolve(onSave(formData));
-                lastSavedRef.current = JSON.stringify(formData);
-                try { localStorage.removeItem(`exam_draft_${exam.id}`); } catch (_) { }
-              } finally {
-                setIsSaving(false);
-              }
-            }}
+            onClick={() => { void handleSaveExam(false); }}
             disabled={isSaving}
             className="ml-auto flex items-center gap-1.5 px-5 py-2 bg-indigo-600 text-white rounded-xl font-black text-sm shadow-md shadow-indigo-200 active:scale-95 transition-all disabled:opacity-70 shrink-0 whitespace-nowrap"
           >
@@ -810,17 +1099,33 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
           <section className="bg-white rounded-[30px] md:rounded-[40px] shadow-sm border border-gray-100 p-6 md:p-10">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="md:col-span-2">
-                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Judul Ujian</label>
-                <input type="text" value={formData.title} onChange={(e) => handleExamChange('title', e.target.value)} className="w-full px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold" />
+                <div className="flex items-center justify-between mb-2 ml-1">
+                  <label className="block text-xs font-black text-gray-400 uppercase tracking-widest">Judul Ujian</label>
+                  {examFieldErrors.title && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-black text-red-600">
+                      <AlertCircle className="w-3 h-3" />
+                      {examFieldErrors.title}
+                    </span>
+                  )}
+                </div>
+                <input type="text" value={formData.title} onChange={(e) => handleExamChange('title', e.target.value)} placeholder="Masukkan judul ujian..." className={`w-full px-5 py-3 rounded-xl border-2 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold ${examFieldErrors.title ? 'border-red-500 bg-red-50' : 'border-gray-100'}`} />
               </div>
               <div>
-                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">
-                  Kategori / Mata Pelajaran
-                </label>
+                <div className="flex items-center justify-between mb-2 ml-1">
+                  <label className="block text-xs font-black text-gray-400 uppercase tracking-widest">
+                    Kategori / Mata Pelajaran
+                  </label>
+                  {examFieldErrors.category && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-black text-red-600">
+                      <AlertCircle className="w-3 h-3" />
+                      {examFieldErrors.category}
+                    </span>
+                  )}
+                </div>
                 <select
                   value={formData.category}
                   onChange={(e) => handleExamChange('category', e.target.value)}
-                  className="w-full px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold text-gray-800"
+                  className={`w-full px-5 py-3 rounded-xl border-2 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold text-gray-800 ${examFieldErrors.category ? 'border-red-500 bg-red-50' : 'border-gray-100'}`}
                 >
                   <option value="">-- Pilih Kategori --</option>
                   <optgroup label="🔢 Sains & Matematika (Papan Coretan ✏️ Aktif Otomatis)">
@@ -858,8 +1163,31 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
               </div>
 
               <div>
-                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Durasi (Menit)</label>
-                <input type="number" value={formData.durationMinutes} onChange={(e) => handleExamChange('durationMinutes', parseInt(e.target.value))} className="w-full px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white outline-none transition font-bold" />
+                <div className="flex items-center justify-between mb-2 ml-1">
+                  <label className="block text-xs font-black text-gray-400 uppercase tracking-widest">Durasi (Menit)</label>
+                  {examFieldErrors.durationMinutes && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-black text-red-600">
+                      <AlertCircle className="w-3 h-3" />
+                      {examFieldErrors.durationMinutes}
+                    </span>
+                  )}
+                </div>
+                <input type="number" min={1} value={formData.durationMinutes} onChange={(e) => handleExamChange('durationMinutes', parseInt(e.target.value, 10))} className={`w-full px-5 py-3 rounded-xl border-2 bg-gray-50 focus:bg-white outline-none transition font-bold ${examFieldErrors.durationMinutes ? 'border-red-500 bg-red-50' : 'border-gray-100'}`} />
+              </div>
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Nilai Kelulusan (KKM)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={formData.passingScore ?? 75}
+                  onChange={(e) => {
+                    const v = Number.parseFloat(e.target.value);
+                    const safe = Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 75;
+                    handleExamChange('passingScore', safe);
+                  }}
+                  className="w-full px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white outline-none transition font-bold"
+                />
               </div>
               <div>
                 <div className="flex items-center justify-between mb-2">
@@ -959,13 +1287,17 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                   <button
                     onClick={() => {
                       if (confirm(`Hapus ${selectedQuestions.length} soal terpilih?`)) {
+                        const remainingQuestions = formData.questions.filter(q => !selectedQuestions.includes(q.id));
                         setFormData(prev => ({
                           ...prev,
-                          questions: prev.questions.filter(q => !selectedQuestions.includes(q.id))
+                          questions: remainingQuestions
                         }));
                         setSelectedQuestions([]);
                         if (activeQuestionId && selectedQuestions.includes(activeQuestionId)) {
                           setActiveQuestionId(null);
+                        }
+                        if (remainingQuestions.length === 0 && hasAttemptedSave) {
+                          setQuestionListError('Minimal harus ada 1 pertanyaan.');
                         }
                       }
                     }}
@@ -993,6 +1325,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                   <option value="true_false">Benar / Salah</option>
                   <option value="short_answer">Isian Singkat</option>
                   <option value="essay">Esai</option>
+                  <option value="essay_dragdrop">Drag & Drop (Cloze)</option>
                 </select>
 
                 {/* Import CSV/XLSX (CSV parser simple) */}
@@ -1025,6 +1358,12 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                 </div>
               </div>
             </div>
+            {questionListError && (
+              <div className="mb-2 inline-flex items-center gap-2 text-xs font-black text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                <AlertCircle className="w-4 h-4" />
+                {questionListError}
+              </div>
+            )}
 
             <div className="space-y-3">
               {formData.questions.map((q, qIndex) => (
@@ -1034,7 +1373,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                   onDragStart={(e) => onDragStart(e, qIndex)}
                   onDragOver={(e) => onDragOver(e, qIndex)}
                   onDragEnd={() => setDraggedIndex(null)}
-                  className={`bg-white rounded-[24px] shadow-sm border border-gray-100 overflow-hidden transition-all ${draggedIndex === qIndex ? 'opacity-40 border-indigo-400 border-dashed' : ''}`}
+                  className={`bg-white rounded-[24px] shadow-sm border overflow-hidden transition-all ${questionTextErrors[q.id] ? 'border-red-200' : 'border-gray-100'} ${draggedIndex === qIndex ? 'opacity-40 border-indigo-400 border-dashed' : ''}`}
                 >
                   <div
                     onClick={() => setActiveQuestionId(activeQuestionId === q.id ? null : q.id)}
@@ -1062,9 +1401,14 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                       <div className="hidden md:block p-1 text-gray-300 cursor-grab active:cursor-grabbing"><GripVertical className="w-5 h-5" /></div>
                       <span className="w-8 h-8 rounded-lg bg-gray-900 text-white flex items-center justify-center font-black text-xs shrink-0">{qIndex + 1}</span>
                       <div className="flex-1 overflow-hidden min-w-0">
-                        <span className="text-gray-700 font-bold truncate text-sm block">{q.text}</span>
+                        <span className="text-gray-700 font-bold truncate text-sm block">{getQuestionPreviewText(q.text)}</span>
                         <span className="text-gray-400 text-xs mt-0.5">Dibuat {formatQuestionTimestamp(q.createdAt)}</span>
                       </div>
+                      {questionTextErrors[q.id] && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-black text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-1 shrink-0">
+                          <AlertCircle className="w-3 h-3" /> Wajib isi
+                        </span>
+                      )}
                       {q.attachment?.url && <ImageIcon className="w-4 h-4 text-indigo-500" />}
                     </div>
                     <div className="flex items-center gap-1">
@@ -1109,7 +1453,15 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                       </div>
 
                       <div>
-                        <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Pertanyaan</label>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="block text-[10px] font-black text-gray-400 uppercase">Pertanyaan</label>
+                          {questionTextErrors[q.id] && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-black text-red-600">
+                              <AlertCircle className="w-3 h-3" />
+                              {questionTextErrors[q.id]}
+                            </span>
+                          )}
+                        </div>
                         <div className="mb-2 flex gap-1 bg-gray-100 rounded-lg p-1">
                           <button
                             onClick={() => handleQuestionChange(qIndex, 'textAlign', 'left')}
@@ -1556,6 +1908,98 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                         </div>
                       )}
 
+                      {q.type === 'essay_dragdrop' && (
+                        <div className="space-y-4">
+                          <div className="bg-indigo-50/60 border border-indigo-100 rounded-xl p-3">
+                            <p className="text-xs font-bold text-indigo-700">
+                              Gunakan token <code className="bg-white px-1 rounded">[[blank_n]]</code> pada teks soal.
+                              Contoh: <code className="bg-white px-1 rounded">Inisialisasi proyek dengan [[blank_1]]</code>
+                            </p>
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Mode Penilaian Drag & Drop</label>
+                            <select
+                              value={q.dragDropScoringMode || 'partial'}
+                              onChange={(e) => handleQuestionChange(qIndex, 'dragDropScoringMode', e.target.value as DragDropScoringMode)}
+                              className="w-full px-4 py-3 rounded-xl border border-gray-100 focus:ring-2 focus:ring-indigo-500 font-bold outline-none bg-white"
+                            >
+                              <option value="partial">Parsial (per slot benar)</option>
+                              <option value="all_or_nothing">Semua benar atau 0</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <label className="block text-[10px] font-black text-gray-400 uppercase">Blank & Kunci Jawaban</label>
+                              <button
+                                type="button"
+                                onClick={() => addDragDropBlank(qIndex)}
+                                className="px-2 py-1 text-xs font-bold text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50"
+                              >
+                                + Tambah Blank
+                              </button>
+                            </div>
+                            <div className="space-y-2">
+                              {(q.dragDropTargets || []).map((targetId, targetIdx) => (
+                                <div key={targetId} className="grid grid-cols-12 gap-2 items-center">
+                                  <div className="col-span-3 text-xs font-bold text-gray-600 bg-gray-50 rounded-lg px-2 py-2 border border-gray-100">
+                                    [[{targetId}]]
+                                  </div>
+                                  <input
+                                    value={q.dragDropAnswer?.[targetId] || ''}
+                                    onChange={(e) => updateDragDropAnswerKey(qIndex, targetId, e.target.value)}
+                                    placeholder={`Kunci untuk blank ${targetIdx + 1}`}
+                                    className="col-span-8 px-3 py-2 rounded-lg border border-gray-100 focus:ring-2 focus:ring-indigo-500 text-sm font-semibold outline-none"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => removeDragDropBlank(qIndex, targetId)}
+                                    className="col-span-1 p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                                    title="Hapus Blank"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <label className="block text-[10px] font-black text-gray-400 uppercase">Pilihan Item Drag</label>
+                              <button
+                                type="button"
+                                onClick={() => addDragDropItem(qIndex)}
+                                className="px-2 py-1 text-xs font-bold text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50"
+                              >
+                                + Tambah Item
+                              </button>
+                            </div>
+                            <div className="space-y-2">
+                              {(q.dragDropItems || []).map((item, itemIdx) => (
+                                <div key={itemIdx} className="grid grid-cols-12 gap-2 items-center">
+                                  <input
+                                    value={item}
+                                    onChange={(e) => updateDragDropItem(qIndex, itemIdx, e.target.value)}
+                                    placeholder={`Item ${itemIdx + 1}`}
+                                    className="col-span-11 px-3 py-2 rounded-lg border border-gray-100 focus:ring-2 focus:ring-indigo-500 text-sm font-semibold outline-none"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => removeDragDropItem(qIndex, itemIdx)}
+                                    className="col-span-1 p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                                    title="Hapus Item"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {q.type === 'essay' && (
                         <div className="space-y-3">
                           <div>
@@ -1609,13 +2053,58 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
             <div className="flex gap-3">
               <button onClick={() => setQuestionToDelete(null)} className="flex-1 py-3 bg-gray-50 text-gray-500 rounded-xl font-bold hover:bg-gray-100 transition">Batal</button>
               <button onClick={() => {
+                const nextQuestions = formData.questions.filter(q => q.id !== questionToDelete);
                 setFormData(prev => ({
                   ...prev,
-                  questions: prev.questions.filter(q => q.id !== questionToDelete),
+                  questions: nextQuestions,
                   updatedAt: new Date().toISOString() // Update timestamp saat soal dihapus
                 }));
+                if (nextQuestions.length === 0 && hasAttemptedSave) {
+                  setQuestionListError('Minimal harus ada 1 pertanyaan.');
+                }
                 setQuestionToDelete(null);
               }} className="flex-1 py-3 bg-red-600 text-white rounded-xl font-black hover:bg-red-700 transition">Hapus</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showExitConfirm && (
+        <div className="fixed inset-0 bg-gray-900/60 flex items-center justify-center z-[80] p-6 animate-in fade-in">
+          <div className="bg-white p-8 rounded-[35px] max-w-md w-full">
+            <h3 className="text-xl font-black mb-3">Perubahan belum disimpan</h3>
+            <p className="text-sm text-gray-500 mb-6">
+              Simpan perubahan terlebih dahulu, atau buang perubahan dan keluar editor.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                onClick={() => setShowExitConfirm(false)}
+                className="flex-1 py-3 bg-gray-50 text-gray-600 rounded-xl font-bold hover:bg-gray-100 transition"
+              >
+                Lanjut Edit
+              </button>
+              <button
+                onClick={() => {
+                  try { localStorage.removeItem(`exam_draft_${exam.id}`); } catch (_) { }
+                  setShowExitConfirm(false);
+                  onCancel();
+                }}
+                className="flex-1 py-3 bg-red-50 text-red-600 rounded-xl font-bold hover:bg-red-100 transition"
+              >
+                Buang Perubahan
+              </button>
+              <button
+                onClick={async () => {
+                  const saved = await handleSaveExam(true);
+                  if (saved) {
+                    setShowExitConfirm(false);
+                  }
+                }}
+                disabled={isSaving}
+                className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-black hover:bg-indigo-700 transition disabled:opacity-70"
+              >
+                {isSaving ? 'Menyimpan...' : 'Simpan & Keluar'}
+              </button>
             </div>
           </div>
         </div>
