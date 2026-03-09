@@ -56,6 +56,8 @@ const isDragDropAnswerFilled = (answer: any): boolean => {
   return Object.values(answer as Record<string, string>).some(v => typeof v === 'string' && v.trim().length > 0);
 };
 
+const getExamLockStorageKey = (examId: string, studentId: string): string => `examo_lock_${examId}_${studentId}`;
+
 const ExamRunner: React.FC<ExamRunnerProps> = ({
   exam,
   userId,
@@ -82,6 +84,8 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
   const [showFullscreenBanner, setShowFullscreenBanner] = useState(false);
   const [warningMessage, setWarningMessage] = useState('');
   const [selectedDragItem, setSelectedDragItem] = useState<string | null>(null);
+  const [isLockedBySupervisor, setIsLockedBySupervisor] = useState(false);
+  const isHardLocked = isLockedBySupervisor || violationCount >= MAX_VIOLATIONS;
 
   // ── Scratch Canvas (lembar coretan matematika) ──────────────────────────
   const MATH_KEYWORDS = ['matematika', 'math', 'fisika', 'kimia', 'ipa', 'biologi', 'berhitung', 'hitung', 'science'];
@@ -97,13 +101,35 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
   const answersRef = useRef<Record<string, any>>(answers);
   const logsRef = useRef<ExamLog[]>(logs);
   const violationCountRef = useRef<number>(0);
+  const examResultIdRef = useRef<string | null>(existingProgress?.id || null);
   const [browserNotificationRequested, setBrowserNotificationRequested] = useState(false);
   const [previewResult, setPreviewResult] = useState<any>(null);
   const [showPreviewResult, setShowPreviewResult] = useState(false);
   const lastFocusTime = useRef<number>(Date.now());
+  const suppressViolationUntilRef = useRef<number>(Date.now() + 3000);
+  const hiddenSinceRef = useRef<number | null>(null);
   const isMobileDevice = useRef<boolean>(
     /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
   );
+
+  const hasUnresolvedLock = useCallback((rawLogs: any): boolean => {
+    if (!Array.isArray(rawLogs)) return false;
+    let lastEventByOrder: 'violation_locked' | 'violation_unlocked' | null = null;
+    let lockAt = -1;
+    let unlockAt = -1;
+    for (const item of rawLogs) {
+      const evt = item?.event;
+      if (evt !== 'violation_locked' && evt !== 'violation_unlocked') continue;
+      lastEventByOrder = evt;
+      const ts = new Date(item?.timestamp || 0).getTime();
+      if (!Number.isFinite(ts)) continue;
+      if (evt === 'violation_locked') lockAt = Math.max(lockAt, ts);
+      if (evt === 'violation_unlocked') unlockAt = Math.max(unlockAt, ts);
+    }
+    if (lastEventByOrder) return lastEventByOrder === 'violation_locked';
+    return lockAt > unlockAt;
+  }, []);
+
 
   // Proper Fisher-Yates shuffle algorithm
   const fisherYatesShuffle = <T,>(array: T[]): T[] => {
@@ -286,11 +312,53 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
         } catch (_) { /* Browser mungkin tidak support */ }
       }
     })();
-  }, [exam.id, userId]);
+  }, [exam.id, userId, existingProgress?.id, existingProgress?.startedAt]);
 
   useEffect(() => { answersRef.current = answers; }, [answers]);
   useEffect(() => { logsRef.current = logs; }, [logs]);
   useEffect(() => { setSelectedDragItem(null); }, [currentQuestionIndex]);
+  useEffect(() => {
+    if (existingProgress?.id) examResultIdRef.current = String(existingProgress.id);
+    const isLockedByStatus = existingProgress?.status === 'blocked';
+    const isLockedByLogs = hasUnresolvedLock(existingProgress?.logs || []);
+    setIsLockedBySupervisor(isLockedByStatus || isLockedByLogs);
+  }, [existingProgress?.id, existingProgress?.status, existingProgress?.logs, hasUnresolvedLock]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase || isPreview || !isReady) return;
+
+    const syncLockState = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('exam_results')
+          .select('id, status, logs, started_at')
+          .eq('exam_id', exam.id)
+          .eq('student_id', userId)
+          .is('submitted_at', null)
+          .order('started_at', { ascending: false })
+          .limit(1);
+        if (error || !data || data.length === 0) return;
+        const latest = data[0] as any;
+        examResultIdRef.current = String(latest.id);
+        const rawLogs = Array.isArray(latest.logs) ? latest.logs : [];
+        const isLockedNow = latest.status === 'blocked' || hasUnresolvedLock(rawLogs);
+        console.log('DEBUG: syncLockState', {
+          resultId: latest.id,
+          status: latest.status,
+          violation_count: latest.violation_count,
+          lastLockEvent: [...rawLogs].reverse().find((l: any) => l?.event === 'violation_locked' || l?.event === 'violation_unlocked')?.event,
+          isLockedNow
+        });
+        setIsLockedBySupervisor(isLockedNow);
+      } catch (err) {
+        console.warn('Failed to sync lock state from DB:', err);
+      }
+    };
+
+    syncLockState();
+    const intervalId = setInterval(syncLockState, 2000);
+    return () => clearInterval(intervalId);
+  }, [exam.id, userId, hasUnresolvedLock, isPreview, isReady]);
 
   // Real-time progress tracking per question
   useEffect(() => {
@@ -495,7 +563,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
   }, [calculateFinalStats, onFinish, addLog, isPreview, onExit]);
 
   useEffect(() => {
-    if (isReady && !isSubmitting) {
+    if (isReady && !isSubmitting && !isHardLocked) {
       timerRef.current = setInterval(() => {
         setTimeLeft(prev => {
           if (prev <= 1) {
@@ -518,57 +586,88 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
         clearInterval(autosaveInterval);
       };
     }
-  }, [isReady, isSubmitting, handleSubmit, onAutosave, addLog, isPreview]);
+  }, [isReady, isSubmitting, isHardLocked, handleSubmit, onAutosave, addLog, isPreview]);
 
   // Function to send violation alert to Supabase in real-time
-  const sendViolationAlert = useCallback(async (violationNum: number, isDisqualified: boolean) => {
+  const sendViolationAlert = useCallback(async (violationNum: number, isLocked: boolean) => {
     if (!isSupabaseConfigured || !supabase || isPreview) return;
 
     try {
-      // Find the current exam result for this student
-      const { data: existingResults, error: fetchError } = await supabase
-        .from('exam_results')
-        .select('id')
-        .eq('exam_id', exam.id)
-        .eq('student_id', userId)
-        .eq('status', 'in_progress')
-        .limit(1);
+      let resultId = examResultIdRef.current || existingProgress?.id;
 
-      if (fetchError || !existingResults || existingResults.length === 0) {
-        console.error('Could not find exam result to update:', fetchError);
-        return;
+      // Find the current exam result for this student
+      if (!resultId) {
+        const { data: existingResults, error: fetchError } = await supabase
+          .from('exam_results')
+          .select('id, started_at')
+          .eq('exam_id', exam.id)
+          .eq('student_id', userId)
+          .is('submitted_at', null)
+          .order('started_at', { ascending: false })
+          .limit(1);
+
+        if (fetchError || !existingResults || existingResults.length === 0) {
+          console.error('Could not find exam result to update:', fetchError);
+          return;
+        }
+        resultId = String(existingResults[0].id);
       }
 
-      const resultId = existingResults[0].id;
+      examResultIdRef.current = String(resultId);
 
-      // Update the exam result with violation info
-      await supabase
+      // Update the exam result with violation info.
+      // Some deployments may not yet have all violation columns, so we fallback to a minimal update.
+      const fullPayload = {
+        violation_alert: true,
+        violation_count: violationNum,
+        status: isLocked ? 'blocked' : 'in_progress',
+        logs: logsRef.current
+      };
+      const { error: fullUpdateError } = await supabase
         .from('exam_results')
-        .update({
-          violation_alert: true,
-          violation_count: violationNum,
-          status: isDisqualified ? 'disqualified' : 'in_progress',
-          logs: logsRef.current
-        })
+        .update(fullPayload)
         .eq('id', resultId);
 
-      console.log(`Violation alert sent: ${violationNum} violations${isDisqualified ? ' - DISQUALIFIED' : ''}`);
+      if (fullUpdateError) {
+        const minimalPayload = {
+          status: isLocked ? 'blocked' : 'in_progress',
+          logs: logsRef.current
+        };
+        const { error: minimalUpdateError } = await supabase
+          .from('exam_results')
+          .update(minimalPayload)
+          .eq('id', resultId);
+
+        if (minimalUpdateError) {
+          console.error('Failed to persist violation lock state:', {
+            resultId,
+            fullUpdateError,
+            minimalUpdateError
+          });
+          return;
+        }
+      }
+
+      console.log(`Violation alert persisted: ${violationNum} violations${isLocked ? ' - LOCKED' : ''}`);
     } catch (err) {
       console.error('Failed to send violation alert:', err);
     }
-  }, [exam.id, userId, supabase, isSupabaseConfigured, isPreview]);
+  }, [exam.id, userId, existingProgress?.id, supabase, isSupabaseConfigured, isPreview]);
 
   // ─── ANTI-CHEAT: Visibility & App-Switch Detection ───────────────────────────
   const recordViolation = useCallback((reason: string) => {
-    if (isPreview || isSubmitting) return;
+    if (isPreview || isSubmitting || isHardLocked) return;
     setViolationCount(v => {
       const next = v + 1;
       violationCountRef.current = next;
       addLog('tab_blur', `${reason} – Pelanggaran #${next}`);
       if (next >= MAX_VIOLATIONS) {
-        addLog('violation_disqualified', 'Didiskualifikasi karena 3x pelanggaran');
+        addLog('violation_locked', 'Sesi dikunci karena batas pelanggaran tercapai. Menunggu aktivasi pengawas.');
+        try { localStorage.setItem(getExamLockStorageKey(exam.id, userId), '1'); } catch (_) { }
+        setIsLockedBySupervisor(true);
+        setWarningMessage('Sesi dikunci. Hubungi pengawas/guru untuk aktivasi ulang.');
+        setShowWarning(true);
         sendViolationAlert(next, true);
-        handleSubmit(true);
       } else {
         setWarningMessage(`Terdeteksi: ${reason}`);
         setShowWarning(true);
@@ -576,7 +675,46 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
       }
       return next;
     });
-  }, [isPreview, isSubmitting, addLog, sendViolationAlert, handleSubmit]);
+  }, [isPreview, isSubmitting, isHardLocked, addLog, sendViolationAlert]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase || isPreview || !isReady) return;
+    const resultId = examResultIdRef.current || existingProgress?.id;
+    if (!resultId) return;
+
+    const channel = supabase
+      .channel(`exam-lock-${resultId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'exam_results', filter: `id=eq.${resultId}` },
+        (payload: any) => {
+          const row = payload?.new;
+          if (!row) return;
+          const rawLogs = Array.isArray(row.logs) ? row.logs : [];
+          const isLockedNow = row.status === 'blocked' || hasUnresolvedLock(rawLogs);
+          try {
+            const lockKey = getExamLockStorageKey(exam.id, userId);
+            if (isLockedNow) localStorage.setItem(lockKey, '1');
+            else localStorage.removeItem(lockKey);
+          } catch (_) { }
+          setIsLockedBySupervisor(isLockedNow);
+          if (!isLockedNow) {
+            const nextCount = Math.max(0, Number(row.violation_count || 0));
+            violationCountRef.current = nextCount;
+            setViolationCount(nextCount);
+            suppressViolationUntilRef.current = Date.now() + 3000;
+            lastFocusTime.current = Date.now();
+            setShowWarning(false);
+            setWarningMessage('');
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [existingProgress?.id, hasUnresolvedLock, isPreview, isReady]);
 
   useEffect(() => {
     if (!isReady) return;
@@ -584,20 +722,38 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
     // 1️⃣ visibilitychange – berlaku di semua browser termasuk mobile
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') {
-        recordViolation('Berpindah tab/aplikasi');
+        hiddenSinceRef.current = Date.now();
+        return;
+      }
+      if (document.visibilityState === 'visible') {
+        const hiddenSince = hiddenSinceRef.current;
+        hiddenSinceRef.current = null;
+        if (!hiddenSince) return;
+        if (Date.now() < suppressViolationUntilRef.current) return;
+        const hiddenDuration = Date.now() - hiddenSince;
+        if (hiddenDuration >= 1200) {
+          recordViolation('Berpindah tab/aplikasi');
+        }
       }
     };
 
     // 2️⃣ pagehide – iOS Safari tidak selalu trigger visibilitychange
-    const handlePageHide = () => {
-      recordViolation('Keluar dari halaman ujian (iOS)');
+    const handlePageHide = (e: PageTransitionEvent) => {
+      // Only enforce on mobile to avoid desktop false positives when focus shifts.
+      if (!isMobileDevice.current) return;
+      if (Date.now() < suppressViolationUntilRef.current) return;
+      if (!e.persisted) {
+        recordViolation('Keluar dari halaman ujian (iOS)');
+      }
     };
 
     // 3️⃣ blur – perangkat menekan tombol Home / beralih ke app lain
     const handleBlur = () => {
-      // Ignore brief focus loss (e.g. keyboard pop-up on mobile)
+      if (Date.now() < suppressViolationUntilRef.current) return;
+      if (document.visibilityState !== 'hidden') return;
+      // Ignore brief focus loss (e.g. UI transitions / keyboard pop-up)
       const gap = Date.now() - lastFocusTime.current;
-      if (gap > 800) {
+      if (gap > 1500) {
         recordViolation('Jendela browser kehilangan fokus');
       }
     };
@@ -672,6 +828,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
       window.removeEventListener('pagehide', handlePageHide);
       window.removeEventListener('blur', handleBlur);
       window.removeEventListener('focus', handleFocus);
+      hiddenSinceRef.current = null;
       document.removeEventListener('copy', blockCopy as EventListener);
       document.removeEventListener('cut', blockCut as EventListener);
       document.removeEventListener('paste', blockPaste as EventListener);
@@ -787,6 +944,19 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
       {isPreview && (
         <div className="bg-amber-100 text-amber-800 px-4 py-2 text-center text-xs font-bold uppercase tracking-widest border-b border-amber-200">
           Mode Preview Guru - Jawaban tidak akan disimpan
+        </div>
+      )}
+      {isHardLocked && !isPreview && (
+        <div className="fixed inset-0 z-[105] bg-red-950/75 backdrop-blur-sm flex items-center justify-center p-6 text-left">
+          <div className="w-full max-w-lg bg-white rounded-[32px] p-8 shadow-2xl border border-red-100">
+            <h3 className="text-2xl font-black text-red-600 mb-2">Sesi Ujian Dikunci</h3>
+            <p className="text-sm text-gray-600 font-medium mb-4">
+              Anda mencapai batas pelanggaran. Ujian dipause dan tidak bisa dikerjakan sampai pengawas/guru mengaktifkan ulang.
+            </p>
+            <p className="text-xs text-gray-500 font-bold uppercase tracking-widest">
+              Tetap di halaman ini sambil menunggu aktivasi.
+            </p>
+          </div>
         </div>
       )}
       <header className="bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between shrink-0 z-20">
@@ -1234,7 +1404,7 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
               Pelanggaran <span className="font-black text-red-600">{violationCount}</span> dari {MAX_VIOLATIONS}.
             </p>
             <p className="text-xs text-gray-400 mb-8">
-              Jika mencapai {MAX_VIOLATIONS} pelanggaran, ujian akan <strong>otomatis dikumpulkan</strong> dan guru akan diberitahu.
+              Jika mencapai {MAX_VIOLATIONS} pelanggaran, sesi ujian akan <strong>dikunci</strong> sampai diaktifkan kembali oleh guru/pengawas.
             </p>
             <div className="flex items-center gap-2 bg-red-50 rounded-2xl p-4 mb-6">
               <EyeOff className="w-5 h-5 text-red-500 flex-shrink-0" />
@@ -1244,13 +1414,14 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
             </div>
             <button
               onClick={() => {
+                if (isHardLocked) return;
                 setShowWarning(false);
                 // Re-request fullscreen on mobile after warning is closed
                 if (isMobileDevice.current) requestFullscreen();
               }}
-              className="w-full bg-gray-900 text-white py-5 rounded-2xl font-black"
+              className={`w-full py-5 rounded-2xl font-black ${isHardLocked ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-gray-900 text-white'}`}
             >
-              SAYA MENGERTI
+              {isHardLocked ? 'MENUNGGU AKTIVASI GURU' : 'SAYA MENGERTI'}
             </button>
           </div>
         </div>
@@ -1278,12 +1449,18 @@ const ExamRunner: React.FC<ExamRunnerProps> = ({
               <Sparkles className="w-10 h-10 text-amber-500" />
             </div>
             <h3 className="text-2xl font-black text-gray-900 mb-2">Simulasi Hasil Preview</h3>
-            <p className="text-gray-500 font-medium mb-8">Skor yang Anda dapatkan di mode preview</p>
+            <p className="text-gray-500 font-medium mb-8">Hasil preview berbasis bobot per soal</p>
 
             <div className="mb-8 flex justify-center">
               <div className="bg-amber-100 rounded-[30px] p-8 text-amber-900 w-full max-w-sm border border-amber-200">
-                <p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-80">Skor Akhir</p>
-                <h3 className="text-7xl font-black tracking-tighter">{previewResult?.score || 0}</h3>
+                <p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-80">Poin Bobot</p>
+                <h3 className="text-5xl font-black tracking-tighter">
+                  {Math.round(Number(previewResult?.obtained || 0) * 100) / 100}
+                  <span className="text-2xl font-bold opacity-80"> / {Math.round(Number(previewResult?.totalPossible || 0) * 100) / 100}</span>
+                </h3>
+                <p className="text-xs font-bold mt-3 opacity-80">
+                  Skor 0-100: {previewResult?.score || 0}
+                </p>
               </div>
             </div>
 

@@ -13,6 +13,7 @@ import { useNotification } from '../context/NotificationContext';
 
 interface StudentManagerProps {
   students: User[];
+  teachers?: User[];
   onUpdate: (updated: User[]) => void;
   onAddStudent: (newStudent: User) => Promise<void>;
   onDeleteStudent: (id: string) => Promise<void>;
@@ -26,7 +27,7 @@ interface MasterStudentOption {
   studentCode?: string;
 }
 
-const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onAddStudent, onDeleteStudent, onEditStudent }) => {
+const StudentManager: React.FC<StudentManagerProps> = ({ students, teachers = [], onUpdate, onAddStudent, onDeleteStudent, onEditStudent }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const [modalMode, setModalMode] = useState<'add' | 'edit' | null>(null);
@@ -119,6 +120,61 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
   const classOptions = Array.from(new Set(masterStudents.map(s => s.className))).sort((a, b) =>
     a.localeCompare(b, 'id-ID', { numeric: true })
   );
+
+  const handleExportCredentials = () => {
+    const rows = filteredStudents.map((s, idx) => ({
+      No: idx + 1,
+      Nama: s.name || '-',
+      Role: 'Siswa',
+      Username: s.email || '-',
+      'Login Alternatif (NIS)': s.nis || '-',
+      Password: s.password || 'password',
+      Kelas: s.grade || '-'
+    }));
+
+    if (rows.length === 0) {
+      addAlert('Tidak ada data siswa untuk diexport.', 'warning');
+      return;
+    }
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Akun Siswa');
+    XLSX.writeFile(wb, `Data_Login_Siswa_${Date.now()}.xlsx`);
+    addAlert('✅ Data login siswa berhasil diexport.', 'success');
+  };
+
+  const handleExportCombined = () => {
+    const teacherRows = teachers.map((t, idx) => ({
+      No: idx + 1,
+      Nama: t.name || '-',
+      Role: 'Guru',
+      Username: t.email || '-',
+      'Login Alternatif (NIP)': t.nis || '-',
+      Password: t.password || 'password',
+      Mapel: t.subject || '-'
+    }));
+    const studentRows = students.map((s, idx) => ({
+      No: idx + 1,
+      Nama: s.name || '-',
+      Role: 'Siswa',
+      Username: s.email || '-',
+      'Login Alternatif (NIS)': s.nis || '-',
+      Password: s.password || 'password',
+      Kelas: s.grade || '-'
+    }));
+
+    if (teacherRows.length === 0 && studentRows.length === 0) {
+      addAlert('Tidak ada data akun untuk diexport.', 'warning');
+      return;
+    }
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(teacherRows.length ? teacherRows : [{ Info: 'Tidak ada data guru' }]), 'Akun Guru');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(studentRows.length ? studentRows : [{ Info: 'Tidak ada data siswa' }]), 'Akun Siswa');
+    XLSX.writeFile(wb, `Data_Login_Gabungan_${Date.now()}.xlsx`);
+    addAlert('✅ Data login gabungan berhasil diexport (2 sheet).', 'success');
+  };
 
   const handleDownloadTemplate = () => {
     // Gunakan email contoh yang jelas tidak akan collision dengan data nyata
@@ -325,6 +381,18 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
             className="flex-1 md:flex-none bg-indigo-50 border-2 border-indigo-100 text-indigo-600 px-6 py-4 rounded-[20px] font-black hover:bg-indigo-100 transition-all flex items-center justify-center gap-2 text-sm shadow-sm"
           >
             <Upload className="w-5 h-5" /> Import Excel
+          </button>
+          <button
+            onClick={handleExportCredentials}
+            className="flex-1 md:flex-none bg-emerald-50 border-2 border-emerald-100 text-emerald-700 px-6 py-4 rounded-[20px] font-black hover:bg-emerald-100 transition-all flex items-center justify-center gap-2 text-sm shadow-sm"
+          >
+            <FileSpreadsheet className="w-5 h-5" /> Export Login
+          </button>
+          <button
+            onClick={handleExportCombined}
+            className="flex-1 md:flex-none bg-teal-50 border-2 border-teal-100 text-teal-700 px-6 py-4 rounded-[20px] font-black hover:bg-teal-100 transition-all flex items-center justify-center gap-2 text-sm shadow-sm"
+          >
+            <FileSpreadsheet className="w-5 h-5" /> Export Gabungan (2 Sheet)
           </button>
           <button
             onClick={() => {

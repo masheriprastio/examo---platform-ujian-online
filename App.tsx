@@ -44,6 +44,8 @@ type ImportedGradeEntry = {
   score: number;
   teacherId?: string;
   sourceFile?: string;
+  scoreImage1?: string;
+  scoreImage2?: string;
   importedAt: string;
 };
 
@@ -125,6 +127,64 @@ function isExamVisibleForStudent(exam: Exam, student?: User | null): boolean {
 
 function hasTargetGradeSelection(exam?: Pick<Exam, 'targetGrades'> | null): boolean {
   return Array.isArray(exam?.targetGrades) && exam!.targetGrades!.length > 0;
+}
+
+function isActiveExamResultStatus(status?: string): boolean {
+  return status === 'in_progress' || status === 'blocked';
+}
+
+function hasUnresolvedViolationLock(logs?: any): boolean {
+  if (!Array.isArray(logs)) return false;
+  let lastEventByOrder: 'violation_locked' | 'violation_unlocked' | null = null;
+  let lockAt = -1;
+  let unlockAt = -1;
+  for (const item of logs) {
+    const evt = item?.event;
+    if (evt !== 'violation_locked' && evt !== 'violation_unlocked') continue;
+    lastEventByOrder = evt;
+    const ts = new Date(item?.timestamp || 0).getTime();
+    if (!Number.isFinite(ts)) continue;
+    if (evt === 'violation_locked') lockAt = Math.max(lockAt, ts);
+    if (evt === 'violation_unlocked') unlockAt = Math.max(unlockAt, ts);
+  }
+  // Prefer event order to avoid stuck-lock when one timestamp is invalid/stale.
+  if (lastEventByOrder) return lastEventByOrder === 'violation_locked';
+  return lockAt > unlockAt;
+}
+
+function isResultLockedByRule(row: any): boolean {
+  const submittedAt = row?.submittedAt ?? row?.submitted_at ?? null;
+  const status = String(row?.status || '').toLowerCase();
+  // Riwayat yang sudah selesai/disubmit tidak boleh memblokir sesi baru.
+  if (submittedAt || status === 'completed' || status === 'disqualified') {
+    return false;
+  }
+
+  const statusBlocked = String(row?.status || '').toLowerCase() === 'blocked';
+  const violationCount = Number(row?.violation_count || 0);
+  const unresolvedLock = hasUnresolvedViolationLock(row?.logs);
+  // Do not re-lock purely from historical tab_blur logs after supervisor unlock.
+  return statusBlocked || violationCount >= 3 || unresolvedLock;
+}
+
+function getExamLockStorageKey(examId: string, studentId: string): string {
+  return `examo_lock_${examId}_${studentId}`;
+}
+
+function getLatestExamResultForStudent(results: ExamResult[], examId: string, studentId?: string | null): ExamResult | undefined {
+  if (!studentId) return undefined;
+  const rows = results
+    .filter(r => r.examId === examId && r.studentId === studentId)
+    .sort((a, b) => new Date(b.startedAt || 0).getTime() - new Date(a.startedAt || 0).getTime());
+  return rows[0];
+}
+
+function getActiveExamResultForStudent(results: ExamResult[], examId: string, studentId?: string | null): ExamResult | undefined {
+  if (!studentId) return undefined;
+  const rows = results
+    .filter(r => r.examId === examId && r.studentId === studentId && isActiveExamResultStatus(r.status))
+    .sort((a, b) => new Date(b.startedAt || 0).getTime() - new Date(a.startedAt || 0).getTime());
+  return rows[0];
 }
 
 function normalizeName(s?: any): string {
@@ -269,6 +329,7 @@ const Sidebar: React.FC<{
     { id: 'STUDENT_DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'STUDENT_MATERIALS', label: 'Materi Belajar', icon: Book },
     { id: 'STUDENT_HISTORY', label: 'Nilai Ujian', icon: History },
+    { id: 'STUDENT_MY_GRADES', label: 'Nilai Saya', icon: Award },
   ];
 
   const closeSidebarIfMobile = () => {
@@ -351,6 +412,9 @@ export default function App() {
     type: 'info' | 'warning' | 'success';
     timestamp: string;
     read: boolean;
+    targetView?: AppView;
+    targetGradeViewMode?: 'summary' | 'history';
+    targetHistoryStatusFilter?: 'all' | 'blocked' | 'in_progress' | 'completed' | 'disqualified' | 'violation';
   };
 
   const [view, setView] = useState<AppView>('LOGIN');
@@ -364,12 +428,22 @@ export default function App() {
   const seenViolationCountRef = useRef<Record<string, number>>({});
   const seenSubmissionRef = useRef<Record<string, boolean>>({});
   const seenDisqualifiedRef = useRef<Record<string, boolean>>({});
+  const seenBlockedRef = useRef<Record<string, boolean>>({});
   const shouldFetchRef = useRef(true); // Prevent re-fetching stale data after save
   const IMPORTED_GRADE_STORAGE_KEY = 'examo_imported_grade_entries';
   const fileInputRef = useRef<HTMLInputElement>(null);
   const docxFileInputRef = useRef<HTMLInputElement>(null);
 
   const { addAlert } = useNotification();
+  const lockDebugEnabled = typeof window !== 'undefined' && (
+    window.location.search.includes('debugLock=1') ||
+    localStorage.getItem('examo_debug_lock') === '1'
+  );
+  const debugLockLog = (scope: string, payload: any) => {
+    if (!lockDebugEnabled) return;
+    // eslint-disable-next-line no-console
+    console.log(`[LOCK_DEBUG] ${scope}`, payload);
+  };
 
   // Notification helper (uses NotificationContext which handles dedupe by key)
   const notify = (message: string, type: 'info' | 'error' | 'success' = 'info', key?: string) => {
@@ -377,15 +451,47 @@ export default function App() {
   };
 
   const pushHeaderNotification = (title: string, message: string, type: 'info' | 'warning' | 'success' = 'info') => {
+    const targetByTitle = (() => {
+      if (title === 'Siswa Mulai Ujian') {
+        return { targetView: 'TEACHER_GRADES' as AppView, targetGradeViewMode: 'history' as const, targetHistoryStatusFilter: 'in_progress' as const };
+      }
+      if (title === 'Ujian Selesai') {
+        return { targetView: 'TEACHER_GRADES' as AppView, targetGradeViewMode: 'history' as const, targetHistoryStatusFilter: 'completed' as const };
+      }
+      if (title === 'Pelanggaran Berat') {
+        return { targetView: 'TEACHER_GRADES' as AppView, targetGradeViewMode: 'history' as const, targetHistoryStatusFilter: 'disqualified' as const };
+      }
+      if (title === 'Peringatan Ujian' || title === 'Sesi Ujian Dikunci') {
+        return { targetView: 'TEACHER_GRADES' as AppView, targetGradeViewMode: 'history' as const, targetHistoryStatusFilter: 'violation' as const };
+      }
+      return undefined;
+    })();
+
     const item: DashboardNotification = {
       id: generateUUID(),
       title,
       message,
       type,
       timestamp: new Date().toISOString(),
-      read: false
+      read: false,
+      ...(targetByTitle || {})
     };
     setHeaderNotifications(prev => [item, ...prev].slice(0, 30));
+  };
+
+  const handleHeaderNotificationClick = (item: DashboardNotification) => {
+    if (item.targetView) {
+      setView(item.targetView);
+    }
+    if (item.targetGradeViewMode) {
+      setGradeViewMode(item.targetGradeViewMode);
+    }
+    if (item.targetHistoryStatusFilter) {
+      setHistoryStatusFilter(item.targetHistoryStatusFilter);
+    }
+
+    setHeaderNotifications(prev => prev.map(n => n.id === item.id ? { ...n, read: true } : n));
+    setIsHeaderNotifOpen(false);
   };
 
   const handleNavigate = (nextView: AppView) => {
@@ -422,24 +528,14 @@ export default function App() {
         const sess = JSON.parse(raw);
         if (sess?.user) setCurrentUser(sess.user);
         if (sess?.view) setView(sess.view as AppView);
+        if (sess?.view === 'EXAM_SESSION' && sess?.activeExamId) {
+          setPendingActiveExamId(String(sess.activeExamId));
+        }
       }
     } catch (err) {
       console.error('Failed to restore session', err);
     }
   }, []);
-
-  // Persist session when user/view changes
-  useEffect(() => {
-    if (currentUser) {
-      try {
-        localStorage.setItem('examo_session', JSON.stringify({ user: currentUser, view }));
-      } catch (err) {
-        console.error('Failed to persist session', err);
-      }
-    } else {
-      localStorage.removeItem('examo_session');
-    }
-  }, [currentUser, view]);
 
   // State Initialization: Use Mocks only if Supabase is NOT configured
   const [exams, setExams] = useState<Exam[]>(isSupabaseConfigured ? [] : MOCK_EXAMS);
@@ -467,6 +563,7 @@ export default function App() {
   const [studentMaterials, setStudentMaterials] = useState<Material[]>([]);
 
   const [activeExam, setActiveExam] = useState<Exam | null>(null);
+  const [pendingActiveExamId, setPendingActiveExamId] = useState<string | null>(null);
   const [editingExam, setEditingExam] = useState<Exam | null>(null);
   const [lastResult, setLastResult] = useState<ExamResult | null>(null);
   const [selectedResult, setSelectedResult] = useState<ExamResult | null>(null);
@@ -477,8 +574,20 @@ export default function App() {
   const [dailyScoreColumns, setDailyScoreColumns] = useState<string[]>(['Capaian 1']);
   const [dailyScores, setDailyScores] = useState<Record<string, Record<number, number>>>({}); // studentId -> colIndex -> score
   const [gradeViewMode, setGradeViewMode] = useState<'summary' | 'history'>('summary');
+  const [historyStatusFilter, setHistoryStatusFilter] = useState<'all' | 'blocked' | 'in_progress' | 'completed' | 'disqualified' | 'violation'>('all');
   const [importedGrades, setImportedGrades] = useState<ImportedGradeEntry[]>([]);
   const [isImportingGrades, setIsImportingGrades] = useState(false);
+  const [showManualGradeForm, setShowManualGradeForm] = useState(false);
+  const [isSavingManualGrade, setIsSavingManualGrade] = useState(false);
+  const [editingImportedGradeId, setEditingImportedGradeId] = useState<string | null>(null);
+  const [manualGradeForm, setManualGradeForm] = useState({
+    studentId: '',
+    classFilter: '',
+    subjectFilter: '',
+    assessmentName: 'Nilai Harian',
+    score: '',
+    sourceFile: 'Input Manual Guru'
+  });
   const gradeImportInputRef = useRef<HTMLInputElement>(null);
 
   // New State for Create Exam Dropdown
@@ -511,6 +620,51 @@ export default function App() {
   const [timeoutWarningSeconds, setTimeoutWarningSeconds] = useState(0);
   const SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
   const WARNING_BEFORE_LOGOUT_MS = 60 * 1000; // Show warning 1 minute before logout
+
+  // Persist session when user/view changes
+  useEffect(() => {
+    if (currentUser) {
+      try {
+        localStorage.setItem('examo_session', JSON.stringify({
+          user: currentUser,
+          view,
+          activeExamId: activeExam?.id || null
+        }));
+      } catch (err) {
+        console.error('Failed to persist session', err);
+      }
+    } else {
+      localStorage.removeItem('examo_session');
+    }
+  }, [currentUser, view, activeExam?.id]);
+
+  useEffect(() => {
+    if (!pendingActiveExamId || !currentUser || currentUser.role !== 'student') return;
+    if (activeExam) {
+      setPendingActiveExamId(null);
+      return;
+    }
+    if (!Array.isArray(exams) || exams.length === 0) return;
+    if (!Array.isArray(results)) return;
+
+    const examToResume = exams.find(e => e.id === pendingActiveExamId);
+    if (!examToResume) {
+      setPendingActiveExamId(null);
+      setView('STUDENT_DASHBOARD');
+      return;
+    }
+
+    const resumedProgress = getActiveExamResultForStudent(results, examToResume.id, currentUser.id);
+    if (!resumedProgress) {
+      setPendingActiveExamId(null);
+      setView('STUDENT_DASHBOARD');
+      return;
+    }
+
+    setActiveExam(examToResume);
+    setView('EXAM_SESSION');
+    setPendingActiveExamId(null);
+  }, [pendingActiveExamId, currentUser, exams, results, activeExam]);
 
   useEffect(() => {
     try {
@@ -602,6 +756,8 @@ export default function App() {
     score: Number(row?.score || 0),
     teacherId: row?.teacher_id ? String(row.teacher_id) : undefined,
     sourceFile: row?.source_file ? String(row.source_file) : undefined,
+    scoreImage1: row?.score_image_1 ? String(row.score_image_1) : undefined,
+    scoreImage2: row?.score_image_2 ? String(row.score_image_2) : undefined,
     importedAt: String(row?.imported_at || new Date().toISOString())
   });
 
@@ -795,11 +951,11 @@ export default function App() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentUser]);
+  }, [currentUser, view]);
 
   // Fetch Data on view change (specifically when switching to Dashboard)
   useEffect(() => {
-    if (view === 'STUDENT_DASHBOARD' || view === 'TEACHER_DASHBOARD') {
+    if (view === 'STUDENT_DASHBOARD' || view === 'TEACHER_DASHBOARD' || view === 'STUDENT_MY_GRADES') {
       if (shouldFetchRef.current) {
         fetchData();
       } else {
@@ -851,7 +1007,7 @@ export default function App() {
       }
     };
     fetchStudents();
-  }, [currentUser]);
+  }, [currentUser, view]);
 
   // Fetch Teachers (if Teacher or Admin logged in)
   useEffect(() => {
@@ -1005,6 +1161,7 @@ export default function App() {
             }
 
             const isDisqualifiedNow = newRecord.status === 'disqualified';
+            const isBlockedNow = newRecord.status === 'blocked';
             if (isDisqualifiedNow && !seenDisqualifiedRef.current[resultKey]) {
               pushHeaderNotification(
                 'Pelanggaran Berat',
@@ -1013,8 +1170,23 @@ export default function App() {
               );
               setEndedActivityCount(prev => prev + 1);
               seenDisqualifiedRef.current[resultKey] = true;
+            } else if (isBlockedNow && !seenBlockedRef.current[resultKey]) {
+              pushHeaderNotification(
+                'Sesi Ujian Dikunci',
+                `Siswa ${newRecord.student_name} terkunci karena pelanggaran. Perlu aktivasi pengawas.`,
+                'warning'
+              );
+              // Auto fokus ke daftar pelanggaran agar pengawas langsung melihat siswa yang perlu diaktifkan ulang.
+              if (view === 'TEACHER_GRADES') {
+                setGradeViewMode('history');
+                setHistoryStatusFilter('violation');
+              }
+              seenBlockedRef.current[resultKey] = true;
             } else if (!isDisqualifiedNow) {
               seenDisqualifiedRef.current[resultKey] = false;
+            }
+            if (!isBlockedNow) {
+              seenBlockedRef.current[resultKey] = false;
             }
 
             const isSubmittedNow = !!newRecord.submitted_at;
@@ -1230,6 +1402,8 @@ export default function App() {
 
           const isDisqualifiedNow = row.status === 'disqualified';
           const wasDisqualified = prev?.status === 'disqualified';
+          const isBlockedNow = row.status === 'blocked';
+          const wasBlocked = prev?.status === 'blocked';
           if (isDisqualifiedNow && !wasDisqualified && !seenDisqualifiedRef.current[key]) {
             pushHeaderNotification(
               'Pelanggaran Berat',
@@ -1239,6 +1413,21 @@ export default function App() {
             seenDisqualifiedRef.current[key] = true;
           } else if (!isDisqualifiedNow) {
             seenDisqualifiedRef.current[key] = false;
+          }
+
+          if (isBlockedNow && !wasBlocked && !seenBlockedRef.current[key]) {
+            pushHeaderNotification(
+              'Sesi Ujian Dikunci',
+              `Siswa ${row.studentName} terkunci karena pelanggaran. Perlu aktivasi pengawas.`,
+              'warning'
+            );
+            if (view === 'TEACHER_GRADES') {
+              setGradeViewMode('history');
+              setHistoryStatusFilter('violation');
+            }
+            seenBlockedRef.current[key] = true;
+          } else if (!isBlockedNow) {
+            seenBlockedRef.current[key] = false;
           }
 
           const isSubmittedNow = !!row.submittedAt;
@@ -1406,11 +1595,13 @@ export default function App() {
         seenViolationCountRef.current = {};
         seenSubmissionRef.current = {};
         seenDisqualifiedRef.current = {};
+        seenBlockedRef.current = {};
         fetched.results.forEach(r => {
           const key = String((r as any).id || '');
           seenViolationCountRef.current[key] = Number((r as any).violation_count || 0);
           seenSubmissionRef.current[key] = !!(r as any).submittedAt;
           seenDisqualifiedRef.current[key] = (r as any).status === 'disqualified';
+          seenBlockedRef.current[key] = (r as any).status === 'blocked';
           if (r.violation_alert) {
             // Mark in state so UI still shows highlight in table.
             setResults(prev => prev.map(p => p.id === r.id ? { ...p, violation_alert: true } : p));
@@ -1444,12 +1635,14 @@ export default function App() {
           seenViolationCountRef.current = {};
           seenSubmissionRef.current = {};
           seenDisqualifiedRef.current = {};
+          seenBlockedRef.current = {};
           results.forEach(r => {
             const key = String(r.id);
             const vCount = Array.isArray(r.logs) ? r.logs.filter((l: any) => l.event === 'tab_blur').length : 0;
             seenViolationCountRef.current[key] = vCount;
             seenSubmissionRef.current[key] = !!r.submittedAt;
             seenDisqualifiedRef.current[key] = r.status === 'disqualified';
+            seenBlockedRef.current[key] = r.status === 'blocked';
           });
           // For mock mode, mark historical violations without popup alerts
           results.forEach(r => {
@@ -1476,6 +1669,11 @@ export default function App() {
 
   // Function to handle exam start with token check
   const handleStartExamWithToken = (exam: Exam) => {
+    debugLockLog('handleStartExamWithToken.entry', {
+      examId: exam.id,
+      examTitle: exam.title,
+      requireToken: !!exam.requireToken
+    });
     // Check if exam requires token
     if (exam.requireToken && exam.examToken) {
       setTokenExam(exam);
@@ -1490,6 +1688,12 @@ export default function App() {
   // Verify token and start exam
   const verifyTokenAndStartExam = () => {
     if (!tokenExam) return;
+
+    debugLockLog('verifyTokenAndStartExam.submit', {
+      examId: tokenExam.id,
+      examTitle: tokenExam.title,
+      tokenMatch: inputToken.toUpperCase() === tokenExam.examToken?.toUpperCase()
+    });
 
     if (inputToken.toUpperCase() === tokenExam.examToken?.toUpperCase()) {
       setShowTokenModal(false);
@@ -1535,14 +1739,138 @@ export default function App() {
     }
   };
 
-  const handleStartExam = (exam: Exam) => {
-    const existing = results.find(r => r.examId === exam.id && r.studentId === currentUser?.id && r.status === 'in_progress');
+  const handleStartExam = async (exam: Exam) => {
+    if (!currentUser) return;
+    const lockStorageKey = getExamLockStorageKey(exam.id, currentUser.id);
+    let hadLocalLock = false;
+    try {
+      if (localStorage.getItem(lockStorageKey) === '1') {
+        hadLocalLock = true;
+      }
+    } catch (_) { }
+    debugLockLog('handleStartExam.entry', {
+      examId: exam.id,
+      examTitle: exam.title,
+      studentId: currentUser.id,
+      hadLocalLock
+    });
+
+    let existing = getActiveExamResultForStudent(results, exam.id, currentUser.id);
+
+    // Hard gate: selalu cek sesi terbaru di DB agar refresh tidak bisa bypass status blocked.
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data: blockedRows, error: blockedError } = await supabase
+          .from('exam_results')
+          .select('*')
+          .eq('exam_id', exam.id)
+          .eq('student_id', currentUser.id)
+          .eq('status', 'blocked')
+          .order('started_at', { ascending: false })
+          .limit(1);
+
+        if (blockedError) {
+          console.error('Failed to validate blocked exam session:', blockedError);
+          addAlert('Gagal memvalidasi status lock ujian. Coba lagi beberapa saat.', 'error', `lock-validate:${exam.id}:${currentUser.id}`);
+          return;
+        }
+
+        if (!blockedError && Array.isArray(blockedRows) && blockedRows.length > 0) {
+          try { localStorage.setItem(lockStorageKey, '1'); } catch (_) { }
+          debugLockLog('handleStartExam.blockedRows', {
+            examId: exam.id,
+            studentId: currentUser.id,
+            rows: blockedRows
+          });
+          const blockedRow = mapExamResultRow(blockedRows[0]);
+          setResults(prev => {
+            const hasRow = prev.some(r => r.id === blockedRow.id);
+            if (hasRow) return prev.map(r => r.id === blockedRow.id ? blockedRow : r);
+            return [blockedRow, ...prev];
+          });
+          addAlert('Sesi ujian masih terkunci karena pelanggaran. Menunggu aktivasi guru.', 'error', `lock:${exam.id}:${currentUser.id}`);
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from('exam_results')
+          .select('*')
+          .eq('exam_id', exam.id)
+          .eq('student_id', currentUser.id)
+          .is('submitted_at', null)
+          .order('started_at', { ascending: false })
+          .limit(1);
+
+        if (error) {
+          console.error('Failed to validate active exam session:', error);
+          addAlert('Gagal memvalidasi sesi ujian aktif. Coba lagi beberapa saat.', 'error', `active-validate:${exam.id}:${currentUser.id}`);
+          return;
+        }
+
+        if (!error && Array.isArray(data) && data.length > 0) {
+          debugLockLog('handleStartExam.activeRows', {
+            examId: exam.id,
+            studentId: currentUser.id,
+            rows: data.map((row: any) => ({
+              id: row.id,
+              status: row.status,
+              violation_count: row.violation_count,
+              tab_blur_count: Array.isArray(row.logs) ? row.logs.filter((l: any) => l?.event === 'tab_blur').length : 0,
+              has_unresolved_lock: hasUnresolvedViolationLock(row.logs || []),
+              started_at: row.started_at,
+              submitted_at: row.submitted_at
+            }))
+          });
+          const lockedByRule = data.find((row: any) => isResultLockedByRule(row));
+          if (lockedByRule) {
+            try { localStorage.setItem(lockStorageKey, '1'); } catch (_) { }
+            const blockedRow = mapExamResultRow(lockedByRule);
+            setResults(prev => {
+              const hasRow = prev.some(r => r.id === blockedRow.id);
+              if (hasRow) return prev.map(r => r.id === blockedRow.id ? blockedRow : r);
+              return [blockedRow, ...prev];
+            });
+            addAlert('Sesi ujian masih terkunci karena pelanggaran. Menunggu aktivasi guru.', 'error', `lock:${exam.id}:${currentUser.id}`);
+            return;
+          }
+          const dbExisting = mapExamResultRow(data[0]);
+          if (isResultLockedByRule(data[0])) {
+            try { localStorage.setItem(lockStorageKey, '1'); } catch (_) { }
+          } else {
+            try { localStorage.removeItem(lockStorageKey); } catch (_) { }
+          }
+          existing = dbExisting;
+          setResults(prev => {
+            const hasRow = prev.some(r => r.id === dbExisting.id);
+            if (hasRow) return prev.map(r => r.id === dbExisting.id ? dbExisting : r);
+            return [dbExisting, ...prev];
+          });
+        } else if (!error && Array.isArray(data) && data.length === 0) {
+          // Tidak ada sesi aktif di DB -> bersihkan lock key lokal agar tidak false-lock.
+          try { localStorage.removeItem(lockStorageKey); } catch (_) { }
+        }
+      } catch (err) {
+        console.warn('Failed to validate latest exam status before start:', err);
+      }
+    }
+
+    if (existing?.status === 'blocked') {
+      try { localStorage.setItem(lockStorageKey, '1'); } catch (_) { }
+      debugLockLog('handleStartExam.rejectBlocked', {
+        examId: exam.id,
+        studentId: currentUser.id,
+        existing
+      });
+      addAlert('Sesi ujian Anda sedang dikunci karena pelanggaran. Hubungi guru/pengawas untuk aktivasi ulang.', 'error', `lock:${exam.id}:${currentUser.id}`);
+      return;
+    }
+
     if (!existing) {
       const newResult: ExamResult = {
         id: generateUUID(),
         examId: exam.id,
-        studentId: currentUser!.id,
-        studentName: currentUser!.name,
+        studentId: currentUser.id,
+        studentName: currentUser.name,
         score: 0,
         status: 'in_progress',
         totalPointsPossible: 0,
@@ -1564,8 +1892,8 @@ export default function App() {
         supabase.from('exam_results').insert({
           id: newResult.id,
           exam_id: exam.id,
-          student_id: currentUser!.id,
-          student_name: currentUser!.name,
+          student_id: currentUser.id,
+          student_name: currentUser.name,
           status: 'in_progress',
           started_at: newResult.startedAt,
           total_questions: newResult.totalQuestions,
@@ -1590,12 +1918,16 @@ export default function App() {
   const handleAutosave = (answers: Record<string, any>, logs: ExamLog[]) => {
     if (currentUser && activeExam) {
       // Optimistic
-      setResults(prev => prev.map(r => (r.examId === activeExam.id && r.studentId === currentUser.id && r.status === 'in_progress') ? { ...r, answers, logs } : r));
+      setResults(prev => {
+        const activeResultId = getActiveExamResultForStudent(prev, activeExam.id, currentUser.id)?.id;
+        if (!activeResultId) return prev;
+        return prev.map(r => (r.id === activeResultId) ? { ...r, answers, logs } : r);
+      });
 
       // DB Sync (Debounced ideally, but here direct)
       if (isSupabaseConfigured && supabase) {
         // Find the result ID to update
-        const currentResult = results.find(r => r.examId === activeExam.id && r.studentId === currentUser.id && r.status === 'in_progress');
+        const currentResult = getActiveExamResultForStudent(results, activeExam.id, currentUser.id);
         if (currentResult) {
           supabase.from('exam_results')
             .update({ answers, logs })
@@ -1618,8 +1950,11 @@ export default function App() {
       let finalRes: ExamResult | null = null;
 
       // Optimistic Update
+      const activeResultId =
+        getActiveExamResultForStudent(results, activeExam.id, currentUser.id)?.id ||
+        getLatestExamResultForStudent(results, activeExam.id, currentUser.id)?.id;
       const updatedResults = results.map(r => {
-        if (r.examId === activeExam.id && r.studentId === currentUser.id && r.status === 'in_progress') {
+        if (activeResultId && r.id === activeResultId) {
           finalRes = {
             ...r,
             score,
@@ -1937,6 +2272,8 @@ export default function App() {
     let nameCol = -1;
     let nisCol = -1;
     let scoreCol = -1;
+    let image1Col = -1;
+    let image2Col = -1;
     let assessmentName = 'Nilai';
 
     const cleanCell = (value: unknown) => String(value || '').trim();
@@ -1955,25 +2292,32 @@ export default function App() {
       }
 
       const normalizedRow = row.map(norm);
-      const candidateNameCol = normalizedRow.findIndex(v => v === 'nama siswa' || v === 'nama');
+      const candidateNameCol = normalizedRow.findIndex(v => v === 'nama siswa' || v === 'nama' || v === 'student name' || v === 'name');
       if (candidateNameCol !== -1) {
-        const candidateNisCol = normalizedRow.findIndex(v => v === 'nis' || v === 'nis ujian');
-        const candidateScoreCol = normalizedRow.findIndex(v => v.includes('nilai'));
-        if (candidateScoreCol !== -1) {
-          headerRowIndex = r;
-          nameCol = candidateNameCol;
-          nisCol = candidateNisCol;
-          scoreCol = candidateScoreCol;
-          assessmentName = cleanCell(row[candidateScoreCol]) || 'Nilai';
-          break;
-        }
+        const candidateNisCol = normalizedRow.findIndex(v => v === 'nis' || v === 'nis ujian' || v === 'student id' || v === 'nis/nisn');
+        const candidateScoreCol = normalizedRow.findIndex(v => v.includes('nilai') || v === 'score' || v === 'skor' || v === 'marks');
+
+        // detect image columns with common headers
+        const imageCandidates = normalizedRow
+          .map((h, idx) => ({ h, idx }))
+          .filter(x => /gambar|foto|image|photo|image url|image_url|score_image|score image|foto1|foto 1/i.test(x.h));
+
+        headerRowIndex = candidateScoreCol !== -1 ? r : headerRowIndex;
+        nameCol = candidateNameCol;
+        nisCol = candidateNisCol !== -1 ? candidateNisCol : -1;
+        scoreCol = candidateScoreCol !== -1 ? candidateScoreCol : scoreCol;
+        if (imageCandidates.length > 0 && image1Col === -1) image1Col = imageCandidates[0].idx;
+        if (imageCandidates.length > 1 && image2Col === -1) image2Col = imageCandidates[1].idx;
+        assessmentName = cleanCell(row[candidateScoreCol]) || assessmentName;
+
+        if (scoreCol !== -1) break;
       }
     }
 
     if (headerRowIndex === -1 || nameCol === -1 || scoreCol === -1) return [];
 
     const importedAt = new Date().toISOString();
-    const result: Omit<ImportedGradeEntry, 'id' | 'teacherId' | 'importedAt' | 'studentId'>[] = [];
+    const result: any[] = [];
     let emptyStreak = 0;
 
     for (let r = headerRowIndex + 1; r < rows.length; r += 1) {
@@ -1981,6 +2325,8 @@ export default function App() {
       const studentName = cleanCell(row[nameCol]);
       const rawScore = cleanCell(row[scoreCol]);
       const nis = nisCol !== -1 ? cleanCell(row[nisCol]) : '';
+      const img1 = image1Col !== -1 ? cleanCell(row[image1Col]) : '';
+      const img2 = image2Col !== -1 ? cleanCell(row[image2Col]) : '';
 
       if (!studentName) {
         emptyStreak += 1;
@@ -1989,7 +2335,9 @@ export default function App() {
       }
       emptyStreak = 0;
 
-      const scoreNumber = parseInt(rawScore.replace(/\./g, '').replace(',', '.'), 10);
+      // Only accept integer-like scores (no decimal fractions). Normalize common separators.
+      const normalizedScoreStr = String(rawScore).replace(/\./g, '').replace(',', '.').trim();
+      const scoreNumber = parseInt(normalizedScoreStr, 10);
       if (!Number.isFinite(scoreNumber)) continue;
 
       result.push({
@@ -1998,11 +2346,15 @@ export default function App() {
         className: className || '-',
         assessmentName,
         score: Math.max(0, Math.min(100, scoreNumber)),
-        sourceFile
+        sourceFile,
+        scoreImage1: img1 || undefined,
+        scoreImage2: img2 || undefined,
+        importedAt
       });
     }
 
-    return result;
+    // Cast back to expected return type (extras are allowed)
+    return result as Omit<ImportedGradeEntry, 'id' | 'teacherId' | 'importedAt' | 'studentId'>[];
   };
 
   const handleImportGradeFile = async (file: File) => {
@@ -2040,6 +2392,8 @@ export default function App() {
           assessmentName: item.assessmentName,
           score: item.score,
           sourceFile: item.sourceFile,
+          scoreImage1: (item as any).scoreImage1,
+          scoreImage2: (item as any).scoreImage2,
           teacherId: currentUser?.id,
           importedAt: new Date().toISOString()
         };
@@ -2058,6 +2412,8 @@ export default function App() {
           score: item.score,
           teacher_id: item.teacherId || null,
           source_file: item.sourceFile || null,
+          score_image_1: (item as any).scoreImage1 || null,
+          score_image_2: (item as any).scoreImage2 || null,
           imported_at: item.importedAt
         }));
         const { error } = await supabase.from('student_grade_entries').insert(payload);
@@ -2075,6 +2431,188 @@ export default function App() {
       setIsImportingGrades(false);
       if (gradeImportInputRef.current) gradeImportInputRef.current.value = '';
     }
+  };
+
+  const handleSubmitManualGrade = async () => {
+    if (!manualGradeForm.studentId) {
+      addAlert('Pilih siswa terlebih dahulu.', 'error');
+      return;
+    }
+
+    const parsedScore = Number.parseFloat(String(manualGradeForm.score).replace(',', '.'));
+    if (!Number.isFinite(parsedScore) || parsedScore < 0 || parsedScore > 100) {
+      addAlert('Skor harus berupa angka 0 sampai 100.', 'error');
+      return;
+    }
+
+    const selectedStudent = students.find(s => s.id === manualGradeForm.studentId);
+    if (!selectedStudent) {
+      addAlert('Data siswa tidak ditemukan. Coba segarkan data.', 'error');
+      return;
+    }
+
+    setIsSavingManualGrade(true);
+    const newEntry: ImportedGradeEntry = {
+      id: generateUUID(),
+      studentId: selectedStudent.id,
+      studentName: selectedStudent.name,
+      nis: selectedStudent.nis,
+      className: selectedStudent.grade || '-',
+      assessmentName: manualGradeForm.assessmentName.trim() || 'Nilai Manual',
+      score: Math.round(parsedScore),
+      sourceFile: manualGradeForm.sourceFile.trim() || `Input Manual Guru${manualGradeForm.subjectFilter ? ` - ${manualGradeForm.subjectFilter}` : ''}`,
+      teacherId: currentUser?.id,
+      importedAt: new Date().toISOString()
+    };
+
+    setImportedGrades(prev => [newEntry, ...prev]);
+
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from('student_grade_entries').insert({
+        id: newEntry.id,
+        student_id: newEntry.studentId || null,
+        student_name: newEntry.studentName,
+        nis: newEntry.nis || null,
+        class_name: newEntry.className,
+        assessment_name: newEntry.assessmentName,
+        score: newEntry.score,
+        teacher_id: newEntry.teacherId || null,
+        source_file: newEntry.sourceFile || null,
+        score_image_1: null,
+        score_image_2: null,
+        imported_at: newEntry.importedAt
+      });
+
+      if (error) {
+        setImportedGrades(prev => prev.filter(entry => entry.id !== newEntry.id));
+        addAlert(`Gagal menyimpan nilai manual: ${error.message}`, 'error');
+        setIsSavingManualGrade(false);
+        return;
+      }
+    }
+
+    setManualGradeForm({
+      studentId: '',
+      classFilter: '',
+      subjectFilter: '',
+      assessmentName: 'Nilai Harian',
+      score: '',
+      sourceFile: 'Input Manual Guru'
+    });
+    setEditingImportedGradeId(null);
+    setShowManualGradeForm(false);
+    setIsSavingManualGrade(false);
+    addAlert('Nilai manual berhasil disimpan dan tampil ke siswa.', 'success');
+  };
+
+  const handleStartEditImportedGrade = (entry: ImportedGradeEntry) => {
+    setEditingImportedGradeId(entry.id);
+    setShowManualGradeForm(true);
+    setManualGradeForm({
+      studentId: entry.studentId || '',
+      classFilter: entry.className || '',
+      subjectFilter: (() => {
+        const src = String(entry.sourceFile || '');
+        const marker = 'Input Manual Guru - ';
+        return src.startsWith(marker) ? src.slice(marker.length).trim() : '';
+      })(),
+      assessmentName: entry.assessmentName || 'Nilai Harian',
+      score: String(entry.score ?? ''),
+      sourceFile: entry.sourceFile || 'Input Manual Guru'
+    });
+  };
+
+  const handleDeleteImportedGrade = async (entry: ImportedGradeEntry) => {
+    if (!confirm(`Hapus nilai "${entry.assessmentName}" milik ${entry.studentName}?`)) return;
+
+    const prev = importedGrades;
+    setImportedGrades(prevList => prevList.filter(item => item.id !== entry.id));
+    if (editingImportedGradeId === entry.id) {
+      setEditingImportedGradeId(null);
+      setShowManualGradeForm(false);
+    }
+
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from('student_grade_entries').delete().eq('id', entry.id);
+      if (error) {
+        setImportedGrades(prev);
+        addAlert(`Gagal menghapus nilai: ${error.message}`, 'error');
+        return;
+      }
+    }
+
+    addAlert('Nilai berhasil dihapus.', 'success');
+  };
+
+  const handleUpdateManualGrade = async () => {
+    if (!editingImportedGradeId) return;
+    if (!manualGradeForm.studentId) {
+      addAlert('Pilih siswa terlebih dahulu.', 'error');
+      return;
+    }
+
+    const parsedScore = Number.parseFloat(String(manualGradeForm.score).replace(',', '.'));
+    if (!Number.isFinite(parsedScore) || parsedScore < 0 || parsedScore > 100) {
+      addAlert('Skor harus berupa angka 0 sampai 100.', 'error');
+      return;
+    }
+
+    const selectedStudent = students.find(s => s.id === manualGradeForm.studentId);
+    if (!selectedStudent) {
+      addAlert('Data siswa tidak ditemukan. Coba segarkan data.', 'error');
+      return;
+    }
+
+    setIsSavingManualGrade(true);
+    const updatedEntry: ImportedGradeEntry = {
+      id: editingImportedGradeId,
+      studentId: selectedStudent.id,
+      studentName: selectedStudent.name,
+      nis: selectedStudent.nis,
+      className: selectedStudent.grade || '-',
+      assessmentName: manualGradeForm.assessmentName.trim() || 'Nilai Manual',
+      score: Math.round(parsedScore),
+      sourceFile: manualGradeForm.sourceFile.trim() || `Input Manual Guru${manualGradeForm.subjectFilter ? ` - ${manualGradeForm.subjectFilter}` : ''}`,
+      teacherId: currentUser?.id,
+      importedAt: new Date().toISOString()
+    };
+
+    const prev = importedGrades;
+    setImportedGrades(prevList => prevList.map(item => item.id === editingImportedGradeId ? updatedEntry : item));
+
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from('student_grade_entries').update({
+        student_id: updatedEntry.studentId || null,
+        student_name: updatedEntry.studentName,
+        nis: updatedEntry.nis || null,
+        class_name: updatedEntry.className,
+        assessment_name: updatedEntry.assessmentName,
+        score: updatedEntry.score,
+        teacher_id: updatedEntry.teacherId || null,
+        source_file: updatedEntry.sourceFile || null,
+        imported_at: updatedEntry.importedAt
+      }).eq('id', editingImportedGradeId);
+
+      if (error) {
+        setImportedGrades(prev);
+        addAlert(`Gagal memperbarui nilai: ${error.message}`, 'error');
+        setIsSavingManualGrade(false);
+        return;
+      }
+    }
+
+    setManualGradeForm({
+      studentId: '',
+      classFilter: '',
+      subjectFilter: '',
+      assessmentName: 'Nilai Harian',
+      score: '',
+      sourceFile: 'Input Manual Guru'
+    });
+    setEditingImportedGradeId(null);
+    setShowManualGradeForm(false);
+    setIsSavingManualGrade(false);
+    addAlert('Nilai manual berhasil diperbarui.', 'success');
   };
 
   // --- EXAM ROOM HANDLERS ---
@@ -3131,8 +3669,62 @@ export default function App() {
     }
   };
 
+  const handleReactivateResult = async (resultId: string) => {
+    if (!confirm("Aktivasi ulang akan melanjutkan ujian dari progres terakhir. Data jawaban tidak dihapus.\n\nLanjutkan aktivasi sesi siswa ini?")) return;
+    const target = results.find(r => r.id === resultId);
+    if (!target) return;
+
+    const unlockLog: ExamLog = {
+      event: 'violation_unlocked',
+      timestamp: new Date().toISOString(),
+      detail: `Sesi diaktifkan ulang oleh pengawas (${currentUser?.name || 'Guru'})`
+    };
+    const nextLogs = [...(target.logs || []), unlockLog];
+
+    setResults(prev => prev.map(r => r.id === resultId ? {
+      ...r,
+      status: 'in_progress',
+      violation_alert: false,
+      logs: nextLogs
+    } : r));
+
+    if (isSupabaseConfigured && supabase) {
+      const fullPayload = {
+        status: 'in_progress',
+        violation_alert: false,
+        violation_count: 0,
+        logs: nextLogs
+      };
+      const { error } = await supabase.from('exam_results').update(fullPayload).eq('id', resultId);
+
+      if (error) {
+        const { error: fallbackError } = await supabase.from('exam_results').update({
+          status: 'in_progress',
+          violation_count: 0,
+          logs: nextLogs
+        }).eq('id', resultId);
+
+        if (fallbackError) {
+          const { error: lastFallbackError } = await supabase.from('exam_results').update({
+            status: 'in_progress',
+            logs: nextLogs
+          }).eq('id', resultId);
+
+          if (lastFallbackError) {
+            console.error("Failed to reactivate exam session:", { error, fallbackError, lastFallbackError });
+            addAlert("Gagal mengaktifkan kembali sesi ujian.", 'error');
+            fetchData();
+            return;
+          }
+        }
+      }
+    }
+
+    addAlert('Sesi ujian berhasil diaktifkan kembali.', 'success');
+  };
+
   const handleDeleteResult = async (resultId: string) => {
-    if (!confirm("Hapus data nilai ini? Tindakan ini akan menghapus riwayat pengerjaan dan membatalkan status pelanggaran.")) return;
+    if (!confirm("Hapus TOTAL data ujian siswa ini? Tindakan ini akan menghapus riwayat pengerjaan, jawaban, dan status pelanggaran, serta tidak dapat dikembalikan.")) return;
 
     // Optimistic Update
     setResults(prev => prev.filter(r => r.id !== resultId));
@@ -3266,7 +3858,15 @@ export default function App() {
     }
   };
 
-  const visibleStudentExams = exams.filter(e => isExamVisibleForStudent(e, currentUser));
+  const EXPIRED_HIDE_AFTER_MS = 24 * 60 * 60 * 1000;
+  const visibleStudentExams = exams.filter(e => {
+    if (!isExamVisibleForStudent(e, currentUser)) return false;
+    if (!e.endDate) return true;
+    const endMs = new Date(e.endDate).getTime();
+    if (!Number.isFinite(endMs)) return true;
+    // Hide exams that have been expired for more than 24 hours.
+    return (Date.now() - endMs) <= EXPIRED_HIDE_AFTER_MS;
+  });
   const nowTs = Date.now();
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
@@ -3304,11 +3904,43 @@ export default function App() {
     })
     .sort((a, b) => new Date(b.importedAt).getTime() - new Date(a.importedAt).getTime());
   const latestImportedGrade = myImportedGrades[0] || null;
+  const classFilterOptions = Array.from(new Set(students.map(s => String(s.grade || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'id-ID'));
+  const subjectFilterOptions = Array.from(new Set(teachers.map(t => String(t.subject || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'id-ID'));
+  const filteredManualStudents = students
+    .filter((s) => {
+      if (manualGradeForm.classFilter && String(s.grade || '').trim() !== manualGradeForm.classFilter) return false;
+      return true;
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, 'id-ID'));
+
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== 'student') return;
+    try {
+      const myRows = results.filter(r => r.studentId === currentUser.id);
+      const examIds = new Set(myRows.map(r => r.examId));
+      examIds.forEach(examId => {
+        const key = getExamLockStorageKey(examId, currentUser.id);
+        const locked = myRows
+          .filter(r => r.examId === examId)
+          .some(r => isResultLockedByRule(r));
+        if (locked) localStorage.setItem(key, '1');
+        else localStorage.removeItem(key);
+      });
+    } catch (_) { }
+  }, [results, currentUser?.id, currentUser?.role]);
+  const violationHistoryCount = results.filter(r => r.status === 'blocked' || r.status === 'disqualified').length;
+  const historyFilteredResults = [...results]
+    .filter(r => {
+      if (historyStatusFilter === 'all') return true;
+      if (historyStatusFilter === 'violation') return r.status === 'blocked' || r.status === 'disqualified';
+      return r.status === historyStatusFilter;
+    })
+    .sort((a, b) => new Date(b.submittedAt || b.startedAt).getTime() - new Date(a.submittedAt || a.startedAt).getTime());
 
   if (view === 'LOGIN') return <LoginView onLogin={handleLogin} />;
 
   if (view === 'EXAM_SESSION' && activeExam) {
-    const progress = results.find(r => r.examId === activeExam.id && r.studentId === currentUser?.id && r.status === 'in_progress');
+    const progress = getActiveExamResultForStudent(results, activeExam.id, currentUser?.id);
     return <ExamRunner exam={activeExam} userId={currentUser!.id} userName={currentUser!.name} existingProgress={progress} onAutosave={handleAutosave} onFinish={handleExamFinish} onExit={() => setView('STUDENT_DASHBOARD')} />;
   }
 
@@ -3479,7 +4111,11 @@ export default function App() {
                     ) : (
                       <div className="divide-y divide-gray-100">
                         {headerNotifications.map(item => (
-                          <div key={item.id} className="px-4 py-3">
+                          <button
+                            key={item.id}
+                            onClick={() => handleHeaderNotificationClick(item)}
+                            className="w-full text-left px-4 py-3 hover:bg-indigo-50/50 transition-colors"
+                          >
                             <div className="flex items-start justify-between gap-3">
                               <p className="text-sm font-black text-gray-800">{item.title}</p>
                               <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${item.type === 'warning' ? 'bg-red-50 text-red-600' : item.type === 'success' ? 'bg-green-50 text-green-600' : 'bg-indigo-50 text-indigo-600'}`}>
@@ -3488,7 +4124,7 @@ export default function App() {
                             </div>
                             <p className="text-xs text-gray-500 mt-1">{item.message}</p>
                             <p className="text-[10px] text-gray-400 mt-1">{new Date(item.timestamp).toLocaleString('id-ID')}</p>
-                          </div>
+                          </button>
                         ))}
                       </div>
                     )}
@@ -3537,11 +4173,129 @@ export default function App() {
                     >
                       <FileSpreadsheet className="w-5 h-5" /> {isImportingGrades ? 'Import...' : 'Import Nilai'}
                     </button>
+                    <button
+                      onClick={() => {
+                        setShowManualGradeForm(v => !v);
+                        if (editingImportedGradeId) {
+                          setEditingImportedGradeId(null);
+                          setManualGradeForm({
+                            studentId: '',
+                            classFilter: '',
+                            subjectFilter: '',
+                            assessmentName: 'Nilai Harian',
+                            score: '',
+                            sourceFile: 'Input Manual Guru'
+                          });
+                        }
+                      }}
+                      className="bg-white border-2 border-indigo-500 text-indigo-600 px-6 py-3 rounded-2xl font-black hover:bg-indigo-50 transition-all flex items-center gap-2"
+                    >
+                      <PenTool className="w-5 h-5" /> Input Manual
+                    </button>
                     <button onClick={exportGradesToCSV} className="bg-white border-2 border-green-600 text-green-600 px-6 py-3 rounded-2xl font-black hover:bg-green-50 transition-all flex items-center gap-2"><FileSpreadsheet className="w-5 h-5" /> CSV</button>
                     <button onClick={exportGradesToPDF} className="bg-white border-2 border-indigo-600 text-indigo-600 px-6 py-3 rounded-2xl font-black hover:bg-indigo-50 transition-all flex items-center gap-2"><FileDown className="w-5 h-5" /> PDF</button>
                     <button onClick={exportFullAnswersToPDF} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black hover:bg-indigo-700 transition-all flex items-center gap-2 shadow-lg shadow-indigo-100"><FileText className="w-5 h-5" /> Cetak Jawaban</button>
                   </div>
                 </div>
+
+                {showManualGradeForm && (
+                  <div className="mb-8 bg-white rounded-[28px] border border-indigo-100 shadow-sm p-6">
+                    <h3 className="text-lg font-black text-gray-900 mb-1">{editingImportedGradeId ? 'Edit Nilai Manual' : 'Input Nilai Manual'}</h3>
+                    <p className="text-sm text-gray-500 mb-5">Pilih siswa dari data master, bisa difilter berdasarkan kelas dan mapel.</p>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                      <select
+                        value={manualGradeForm.classFilter}
+                        onChange={(e) => {
+                          const nextClass = e.target.value;
+                          setManualGradeForm(prev => ({
+                            ...prev,
+                            classFilter: nextClass,
+                            studentId: nextClass && prev.studentId ? (
+                              students.find(s => s.id === prev.studentId && String(s.grade || '').trim() === nextClass) ? prev.studentId : ''
+                            ) : prev.studentId
+                          }));
+                        }}
+                        className="px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+                      >
+                        <option value="">Semua Kelas</option>
+                        {classFilterOptions.map((grade) => (
+                          <option key={grade} value={grade}>{grade}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={manualGradeForm.subjectFilter}
+                        onChange={(e) => setManualGradeForm(prev => ({ ...prev, subjectFilter: e.target.value }))}
+                        className="px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+                      >
+                        <option value="">Mapel (Opsional)</option>
+                        {subjectFilterOptions.map((subject) => (
+                          <option key={subject} value={subject}>{subject}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={manualGradeForm.studentId}
+                        onChange={(e) => setManualGradeForm(prev => ({ ...prev, studentId: e.target.value }))}
+                        className="px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+                      >
+                        <option value="">Pilih Siswa</option>
+                        {filteredManualStudents.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} - {s.grade || '-'} ({s.nis || s.email})
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="text"
+                        value={manualGradeForm.assessmentName}
+                        onChange={(e) => setManualGradeForm(prev => ({ ...prev, assessmentName: e.target.value }))}
+                        placeholder="Jenis nilai (contoh: Tugas 1)"
+                        className="px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={manualGradeForm.score}
+                        onChange={(e) => setManualGradeForm(prev => ({ ...prev, score: e.target.value }))}
+                        placeholder="Skor 0-100"
+                        className="px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+                      />
+                      <input
+                        type="text"
+                        value={manualGradeForm.sourceFile}
+                        onChange={(e) => setManualGradeForm(prev => ({ ...prev, sourceFile: e.target.value }))}
+                        placeholder="Sumber (opsional)"
+                        className="px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+                      />
+                    </div>
+                    <div className="flex gap-2 mt-4">
+                      <button
+                        onClick={editingImportedGradeId ? handleUpdateManualGrade : handleSubmitManualGrade}
+                        disabled={isSavingManualGrade}
+                        className="px-5 py-3 rounded-xl bg-indigo-600 text-white font-black hover:bg-indigo-700 transition-all disabled:opacity-70"
+                      >
+                        {isSavingManualGrade ? 'Menyimpan...' : (editingImportedGradeId ? 'Simpan Perubahan' : 'Simpan Nilai Manual')}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setShowManualGradeForm(false);
+                          setEditingImportedGradeId(null);
+                          setManualGradeForm({
+                            studentId: '',
+                            classFilter: '',
+                            subjectFilter: '',
+                            assessmentName: 'Nilai Harian',
+                            score: '',
+                            sourceFile: 'Input Manual Guru'
+                          });
+                        }}
+                        className="px-5 py-3 rounded-xl bg-gray-100 text-gray-600 font-bold hover:bg-gray-200 transition-all"
+                      >
+                        Batal
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <div className="bg-white p-2 rounded-[25px] border border-gray-100 shadow-sm inline-flex mb-8">
                   <button
@@ -3557,6 +4311,43 @@ export default function App() {
                     Riwayat Pengerjaan
                   </button>
                 </div>
+
+                {gradeViewMode === 'history' && (
+                  <div className="mb-6 flex flex-wrap items-center gap-2">
+                    <button onClick={() => setHistoryStatusFilter('violation')} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${historyStatusFilter === 'violation' ? 'bg-red-600 text-white' : 'bg-red-50 text-red-700 hover:bg-red-100'}`}>
+                      Pelanggaran {violationHistoryCount > 0 ? `(${violationHistoryCount})` : ''}
+                    </button>
+                    <button onClick={() => setHistoryStatusFilter('blocked')} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${historyStatusFilter === 'blocked' ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}>
+                      Sesi Terkunci
+                    </button>
+                    <button onClick={() => setHistoryStatusFilter('in_progress')} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${historyStatusFilter === 'in_progress' ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`}>
+                      Sedang Berjalan
+                    </button>
+                    <button onClick={() => setHistoryStatusFilter('completed')} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${historyStatusFilter === 'completed' ? 'bg-green-600 text-white' : 'bg-green-50 text-green-700 hover:bg-green-100'}`}>
+                      Selesai
+                    </button>
+                    <button onClick={() => setHistoryStatusFilter('disqualified')} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${historyStatusFilter === 'disqualified' ? 'bg-red-600 text-white' : 'bg-red-50 text-red-700 hover:bg-red-100'}`}>
+                      Diskualifikasi
+                    </button>
+                    <button onClick={() => setHistoryStatusFilter('all')} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${historyStatusFilter === 'all' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+                      Semua
+                    </button>
+                  </div>
+                )}
+
+                {gradeViewMode === 'history' && historyStatusFilter === 'disqualified' && violationHistoryCount > 0 && (
+                  <div className="mb-6 p-4 rounded-2xl border border-amber-100 bg-amber-50 flex items-center justify-between gap-3">
+                    <p className="text-xs font-bold text-amber-700">
+                      Data pelanggaran aktif ada di status <strong>Sesi Terkunci</strong>, bukan diskualifikasi.
+                    </p>
+                    <button
+                      onClick={() => setHistoryStatusFilter('violation')}
+                      className="px-4 py-2 rounded-xl bg-amber-500 text-white text-xs font-black hover:bg-amber-600 transition-all"
+                    >
+                      Lihat Pelanggaran
+                    </button>
+                  </div>
+                )}
 
                 {(() => {
                   const completedResults = results.filter(r => r.status === 'completed');
@@ -3620,15 +4411,18 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
-                        {[...results].sort((a, b) => new Date(b.submittedAt || b.startedAt).getTime() - new Date(a.submittedAt || a.startedAt).getTime()).map(r => {
+                        {historyFilteredResults.map(r => {
                           const examForResult = exams.find(e => e.id === r.examId);
                           const passingScore = getExamPassingScore(examForResult);
+                          const rowLocked = isResultLockedByRule(r);
+                          const canReactivate = rowLocked || r.status === 'disqualified';
                           return (
-                          <tr key={r.id} className={`hover:bg-gray-50 transition-colors ${r.status === 'disqualified' ? 'bg-red-50/30' : ''} ${r.violation_alert ? 'animate-pulse bg-red-100' : ''}`}>
+                          <tr key={r.id} className={`hover:bg-gray-50 transition-colors ${r.status === 'disqualified' ? 'bg-red-50/30' : rowLocked ? 'bg-amber-50/40' : ''} ${r.violation_alert ? 'animate-pulse bg-red-100' : ''}`}>
                             <td className="px-10 py-8 font-bold text-gray-900">
                               {r.studentName}
                               <p className="text-[10px] font-black text-gray-300 uppercase mt-1">{formatDate(r.startedAt)}</p>
                               {r.status === 'disqualified' && <span className="inline-block mt-2 px-2 py-0.5 bg-red-600 text-white text-[10px] font-bold rounded">DISKUALIFIKASI</span>}
+                              {rowLocked && <span className="inline-block mt-2 px-2 py-0.5 bg-amber-500 text-white text-[10px] font-bold rounded">TERKUNCI</span>}
                               {r.violation_alert && <div className="mt-2 text-[10px] font-black text-red-600 animate-bounce">🚨 TERJADI PELANGGARAN 🚨</div>}
                             </td>
                             <td className="px-10 py-8 text-gray-500 font-medium">{examForResult?.title}</td>
@@ -3642,8 +4436,8 @@ export default function App() {
                             <td className="px-10 py-8 text-right">
                               <div className="flex items-center justify-end gap-4">
                                 <div className="text-right">
-                                  <span className={`font-black text-3xl tracking-tighter block ${r.status === 'completed' && r.score < passingScore ? 'text-red-500' : r.status === 'disqualified' ? 'text-gray-400 line-through' : 'text-indigo-600'}`}>
-                                    {r.status === 'completed' || r.status === 'disqualified' ? r.score : '-'}
+                                  <span className={`font-black text-3xl tracking-tighter block ${r.status === 'completed' && r.score < passingScore ? 'text-red-500' : r.status === 'disqualified' ? 'text-gray-400 line-through' : rowLocked ? 'text-amber-500' : 'text-indigo-600'}`}>
+                                    {r.status === 'completed' || r.status === 'disqualified' || rowLocked ? r.score : '-'}
                                   </span>
                                   {r.logs.filter(l => l.event === 'tab_blur').length > 0 && (
                                     <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-1 rounded-md mt-1 inline-block">
@@ -3651,6 +4445,12 @@ export default function App() {
                                     </span>
                                   )}
                                 </div>
+
+                                {canReactivate && (
+                                  <button onClick={() => handleReactivateResult(r.id)} className="p-3 bg-green-50 text-green-600 hover:text-white hover:bg-green-600 rounded-xl transition-all" title={r.status === 'disqualified' ? 'Aktifkan Kembali dari status diskualifikasi' : 'Aktifkan Kembali (Lanjut dari jawaban terakhir, tidak menghapus)'}>
+                                    <PlayCircle className="w-5 h-5" />
+                                  </button>
+                                )}
 
                                 {r.status !== 'disqualified' && (
                                   <button onClick={() => handleDisqualify(r.id)} className="p-3 bg-red-50 text-red-400 hover:text-white hover:bg-red-500 rounded-xl transition-all" title="Nonaktifkan / Diskualifikasi">
@@ -3661,7 +4461,7 @@ export default function App() {
                                 <button
                                   onClick={() => handleDeleteResult(r.id)}
                                   className="p-3 bg-red-50 text-red-600 hover:bg-red-600 hover:text-white rounded-xl transition-all"
-                                  title="Hapus Nilai / Reset Pelanggaran"
+                                  title="Hapus total data ujian siswa (tidak bisa dikembalikan)"
                                 >
                                   <Trash2 className="w-5 h-5" />
                                 </button>
@@ -3676,7 +4476,9 @@ export default function App() {
                             </td>
                           </tr>
                         )})}
-                        {results.length === 0 && <tr><td colSpan={4} className="py-20 text-center text-gray-400 font-medium italic">Belum ada data pengerjaan.</td></tr>}
+                        {historyFilteredResults.length === 0 && (
+                          <tr><td colSpan={4} className="py-20 text-center text-gray-400 font-medium italic">{historyStatusFilter === 'disqualified' ? 'Belum ada siswa yang didiskualifikasi. Pelanggaran aktif ada di filter "Sesi Terkunci" atau "Pelanggaran".' : 'Tidak ada data untuk filter ini.'}</td></tr>
+                        )}
                       </tbody>
                     </table>
                   ) : (
@@ -3794,7 +4596,7 @@ export default function App() {
                     <span className="text-xs font-bold text-gray-400">{importedGrades.length} entri</span>
                   </div>
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[760px]">
+                    <table className="w-full min-w-[840px]">
                       <thead className="bg-gray-50/50 border-b text-left">
                         <tr>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Siswa</th>
@@ -3802,6 +4604,7 @@ export default function App() {
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Jenis Nilai</th>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Skor</th>
                           <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Waktu Import</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Aksi</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
@@ -3815,11 +4618,27 @@ export default function App() {
                             <td className="px-6 py-4 font-medium text-gray-600">{entry.assessmentName}</td>
                             <td className="px-6 py-4 text-right font-black text-indigo-600">{entry.score}</td>
                             <td className="px-6 py-4 text-xs text-gray-500 font-medium">{new Date(entry.importedAt).toLocaleString('id-ID')}</td>
+                            <td className="px-6 py-4">
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => handleStartEditImportedGrade(entry)}
+                                  className="px-3 py-2 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 font-bold text-xs"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteImportedGrade(entry)}
+                                  className="px-3 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 font-bold text-xs"
+                                >
+                                  Hapus
+                                </button>
+                              </div>
+                            </td>
                           </tr>
                         ))}
                         {importedGrades.length === 0 && (
                           <tr>
-                            <td colSpan={5} className="px-6 py-10 text-center text-gray-400 font-medium italic">
+                            <td colSpan={6} className="px-6 py-10 text-center text-gray-400 font-medium italic">
                               Belum ada nilai import. Gunakan tombol Import Nilai.
                             </td>
                           </tr>
@@ -4115,6 +4934,7 @@ export default function App() {
             ) : view === 'TEACHER_TEACHERS' ? (
               <TeacherManager
                 teachers={teachers}
+                students={students}
                 onUpdate={handleTeacherUpdate}
                 onAddTeacher={handleAddTeacher}
                 onDeleteTeacher={handleDeleteTeacher}
@@ -4123,6 +4943,7 @@ export default function App() {
             ) : view === 'TEACHER_STUDENTS' ? (
               <StudentManager
                 students={students}
+                teachers={teachers}
                 onUpdate={handleStudentUpdate}
                 onAddStudent={handleAddStudent}
                 onDeleteStudent={handleDeleteStudent}
@@ -4549,6 +5370,71 @@ export default function App() {
                 )}
 
               </div>
+            ) : view === 'STUDENT_MY_GRADES' ? (
+              <div className="max-w-5xl mx-auto animate-in fade-in">
+                <div className="flex justify-between items-center mb-8">
+                  <div>
+                    <h1 className="text-3xl font-black text-gray-900">Nilai Saya</h1>
+                    <p className="text-sm text-gray-500 font-medium mt-1">Nilai manual dan nilai import dari guru.</p>
+                  </div>
+                  <button onClick={fetchData} className="p-3 bg-gray-50 text-gray-400 hover:text-indigo-600 rounded-2xl transition-all" title="Segarkan Data">
+                    <RotateCcw className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  <div className="bg-indigo-600 rounded-3xl p-6 text-white shadow-lg shadow-indigo-100">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-indigo-100">Jumlah Entri</p>
+                    <p className="text-4xl font-black mt-2">{myImportedGrades.length}</p>
+                  </div>
+                  <div className="bg-white border border-gray-100 rounded-3xl p-6">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Rata-rata Nilai</p>
+                    <p className="text-4xl font-black text-gray-900 mt-2">
+                      {myImportedGrades.length > 0
+                        ? Math.round(myImportedGrades.reduce((acc, item) => acc + item.score, 0) / myImportedGrades.length)
+                        : 0}
+                    </p>
+                  </div>
+                  <div className="bg-white border border-gray-100 rounded-3xl p-6">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Nilai Tertinggi</p>
+                    <p className="text-4xl font-black text-green-600 mt-2">
+                      {myImportedGrades.length > 0 ? Math.max(...myImportedGrades.map(item => item.score)) : 0}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-[28px] border border-gray-100 shadow-sm overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[680px]">
+                      <thead className="bg-gray-50/70 border-b text-left">
+                        <tr>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Jenis Nilai</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Skor</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Sumber</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Waktu</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {myImportedGrades.map((entry) => (
+                          <tr key={entry.id} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-6 py-4 font-bold text-gray-800">{entry.assessmentName}</td>
+                            <td className="px-6 py-4 text-right font-black text-indigo-600">{entry.score}</td>
+                            <td className="px-6 py-4 text-sm text-gray-600 font-medium">{entry.sourceFile || '-'}</td>
+                            <td className="px-6 py-4 text-xs text-gray-500 font-medium">{new Date(entry.importedAt).toLocaleString('id-ID')}</td>
+                          </tr>
+                        ))}
+                        {myImportedGrades.length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="px-6 py-10 text-center text-gray-400 font-medium italic">
+                              Belum ada nilai manual/import untuk akun Anda.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
             ) : (
               <div className="max-w-6xl mx-auto animate-in fade-in">
                 <div className="flex justify-between items-center mb-8">
@@ -4613,6 +5499,49 @@ export default function App() {
                     )}
                   </button>
                 </div>
+                <div className="bg-white rounded-[32px] border border-gray-100 shadow-sm mb-10 overflow-hidden">
+                  <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-black text-gray-900">Nilai Manual/Import Saya</h3>
+                      <p className="text-xs text-gray-500 font-medium mt-1">Nilai non-ujian dari input guru berdasarkan data siswa.</p>
+                    </div>
+                    <span className="text-xs font-bold text-gray-400">{myImportedGrades.length} entri</span>
+                  </div>
+                  {latestImportedGrade ? (
+                    <div className="p-6">
+                      <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-5 mb-5 flex items-center justify-between">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Nilai Terbaru</p>
+                          <p className="text-xl font-black text-gray-900 mt-1">{latestImportedGrade.assessmentName}</p>
+                          <p className="text-xs text-gray-500 mt-1">{new Date(latestImportedGrade.importedAt).toLocaleString('id-ID')}</p>
+                        </div>
+                        <p className="text-4xl font-black text-indigo-600 tracking-tighter">{latestImportedGrade.score}</p>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[640px]">
+                          <thead className="bg-gray-50/60 border-b text-left">
+                            <tr>
+                              <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-widest">Jenis Nilai</th>
+                              <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Skor</th>
+                              <th className="px-4 py-3 text-[10px] font-black text-gray-400 uppercase tracking-widest">Waktu</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-50">
+                            {myImportedGrades.slice(0, 5).map((entry) => (
+                              <tr key={entry.id}>
+                                <td className="px-4 py-3 font-bold text-gray-800">{entry.assessmentName}</td>
+                                <td className="px-4 py-3 text-right font-black text-indigo-600">{entry.score}</td>
+                                <td className="px-4 py-3 text-xs text-gray-500 font-medium">{new Date(entry.importedAt).toLocaleString('id-ID')}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="px-6 py-10 text-sm text-gray-400 font-medium italic">Belum ada nilai manual/import untuk akun Anda.</p>
+                  )}
+                </div>
                 <h2 className="text-2xl font-black text-gray-900 mb-8 tracking-tight">Ujian Tersedia</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
                   {visibleStudentExams.length === 0 ? (
@@ -4621,9 +5550,50 @@ export default function App() {
                       <button onClick={fetchData} className="mt-4 text-indigo-600 font-bold hover:underline">Coba Segarkan</button>
                     </div>
                   ) : visibleStudentExams.map(e => {
-                    const progress = results.find(r => r.examId === e.id && r.studentId === currentUser?.id);
+                    const examRowsForStudent = results.filter(r => r.examId === e.id && r.studentId === currentUser?.id);
+                    const activeRowsForStudent = examRowsForStudent.filter(r => !r.submittedAt && (r.status === 'in_progress' || r.status === 'blocked'));
+                    const lockedByRule = activeRowsForStudent.some(r => isResultLockedByRule(r));
+                    const progress = getActiveExamResultForStudent(results, e.id, currentUser?.id) || getLatestExamResultForStudent(results, e.id, currentUser?.id);
+                    const isBlockedByDb = progress?.status === 'blocked' || lockedByRule;
+                    const lockedByStorage = (() => {
+                      try {
+                        if (!currentUser?.id) return false;
+                        const hasActiveSession = examRowsForStudent.some(r => !r.submittedAt && (r.status === 'in_progress' || r.status === 'blocked'));
+                        if (!hasActiveSession) {
+                          localStorage.removeItem(getExamLockStorageKey(e.id, currentUser.id));
+                          return false;
+                        }
+                        if (!isBlockedByDb) {
+                          localStorage.removeItem(getExamLockStorageKey(e.id, currentUser.id));
+                          return false;
+                        }
+                        return localStorage.getItem(getExamLockStorageKey(e.id, currentUser.id)) === '1';
+                      } catch (_) {
+                        return false;
+                      }
+                    })();
                     const isTaken = progress?.status === 'completed';
-                    const isInProgress = progress?.status === 'in_progress';
+                    const isInProgress = isActiveExamResultStatus(progress?.status);
+                    const isBlocked = isBlockedByDb || lockedByStorage;
+                    debugLockLog('studentCard.compute', {
+                      examId: e.id,
+                      examTitle: e.title,
+                      studentId: currentUser?.id,
+                      progressId: progress?.id,
+                      progressStatus: progress?.status,
+                      lockedByRule,
+                      lockedByStorage,
+                      isBlocked,
+                      rows: examRowsForStudent.map(r => ({
+                        id: r.id,
+                        status: r.status,
+                        violation_count: (r as any).violation_count,
+                        tab_blur_count: Array.isArray(r.logs) ? r.logs.filter((l: any) => l?.event === 'tab_blur').length : 0,
+                        unresolved_lock: hasUnresolvedViolationLock(r.logs || []),
+                        startedAt: r.startedAt,
+                        submittedAt: r.submittedAt
+                      }))
+                    });
 
                     const now = new Date().getTime();
                     const start = e.startDate ? new Date(e.startDate).getTime() : 0;
@@ -4654,9 +5624,10 @@ export default function App() {
                       btnClass = 'bg-white border-2 border-indigo-600 text-indigo-600 shadow-none hover:bg-indigo-50';
                       btnIcon = <RotateCcw className="w-5 h-5" />;
                     } else if (isInProgress) {
-                      btnText = 'Lanjutkan';
-                      btnClass = 'bg-amber-500 text-white';
+                      btnText = isBlocked ? 'Menunggu Aktivasi' : 'Lanjutkan';
+                      btnClass = isBlocked ? 'bg-red-500 text-white' : 'bg-amber-500 text-white';
                       btnIcon = <Clock className="w-5 h-5" />;
+                      if (isBlocked) isDisabled = true;
                     }
 
                     return (
@@ -4681,7 +5652,23 @@ export default function App() {
 
                         <div className="pt-4 border-t border-gray-50">
                           <button
-                            onClick={() => !isDisabled && handleStartExamWithToken(e)}
+                            onClick={() => {
+                              debugLockLog('studentCard.click', {
+                                examId: e.id,
+                                examTitle: e.title,
+                                studentId: currentUser?.id,
+                                progressId: progress?.id,
+                                progressStatus: progress?.status,
+                                lockedByRule,
+                                isBlocked,
+                                isDisabled
+                              });
+                              if (isBlocked) {
+                                addAlert('Sesi ujian ini masih dikunci. Tunggu aktivasi guru/pengawas.', 'error', `lock:${e.id}:${currentUser?.id || ''}`);
+                                return;
+                              }
+                              if (!isDisabled) handleStartExamWithToken(e);
+                            }}
                             disabled={isDisabled}
                             className={`w-full font-black py-4 rounded-[20px] shadow-xl transition-all flex items-center justify-center gap-3 active:scale-95 ${btnClass} ${isDisabled ? 'shadow-none active:scale-100' : ''}`}
                           >

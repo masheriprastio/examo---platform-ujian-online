@@ -107,7 +107,7 @@ export interface Exam {
 }
 
 export interface ExamLog {
-  event: 'start' | 'tab_blur' | 'tab_focus' | 'autosave' | 'submit' | 'violation_disqualified';
+  event: 'start' | 'tab_blur' | 'tab_focus' | 'autosave' | 'submit' | 'violation_disqualified' | 'violation_locked' | 'violation_unlocked';
   timestamp: string;
   detail?: string;
 }
@@ -118,7 +118,7 @@ export interface ExamResult {
   studentId: string;
   studentName: string;
   score: number;
-  status: 'in_progress' | 'completed' | 'disqualified';
+  status: 'in_progress' | 'blocked' | 'completed' | 'disqualified';
   totalPointsPossible: number;
   pointsObtained: number;
   totalQuestions: number;
