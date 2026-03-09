@@ -8,6 +8,7 @@ export interface User {
   grade?: string;
   school?: string;
   nis?: string;
+  masterStudentId?: string;
   subject?: string; // Mapel for teachers
   session_token?: string;
 }
@@ -102,6 +103,7 @@ export interface Exam {
   requireToken?: boolean; // Apakah ujian memerlukan token
   roomId?: string; // ID ruang ujian
   room?: ExamRoom; // Data ruang ujian lengkap (optional)
+  targetGrades?: string[]; // Kelas siswa yang menjadi target ujian
 }
 
 export interface ExamLog {
@@ -146,4 +148,4 @@ export interface Material {
   isPublic: boolean;
 }
 
-export type AppView = 'LOGIN' | 'TEACHER_DASHBOARD' | 'TEACHER_GRADES' | 'TEACHER_BANK' | 'TEACHER_EXAM_ROOM' | 'TEACHER_STUDENTS' | 'TEACHER_TEACHERS' | 'STUDENT_DASHBOARD' | 'STUDENT_HISTORY' | 'STUDENT_MATERIALS' | 'EXAM_SESSION' | 'RESULT' | 'AI_GENERATOR' | 'EXAM_EDITOR' | 'CHANGE_PASSWORD' | 'MATERIAL_MANAGER' | 'MONITORING' | 'USER_MANAGEMENT';
+export type AppView = 'LOGIN' | 'TEACHER_DASHBOARD' | 'TEACHER_GRADES' | 'TEACHER_BANK' | 'TEACHER_EXAM_ROOM' | 'TEACHER_STUDENTS' | 'TEACHER_TEACHERS' | 'TEACHER_CLASS_MASTER' | 'STUDENT_DASHBOARD' | 'STUDENT_HISTORY' | 'STUDENT_MATERIALS' | 'STUDENT_MY_GRADES' | 'EXAM_SESSION' | 'RESULT' | 'AI_GENERATOR' | 'EXAM_EDITOR' | 'CHANGE_PASSWORD' | 'MATERIAL_MANAGER' | 'MONITORING' | 'USER_MANAGEMENT';

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { generateUUID } from '../lib/uuid';
 import { Exam, Question, QuestionType, EssayGradingMode, DragDropScoringMode } from '../types';
 import RichTextEditor from './RichTextEditor';
-import { supabase } from '../lib/supabase';
+import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import * as XLSX from 'xlsx';
 import {
   Save, Plus, Trash2, Check, Clock, Type, Star, X,
@@ -17,7 +17,19 @@ interface ExamEditorProps {
   onCancel: () => void;
   onSaveToBank?: (q: Question) => void;
   onPreview?: (exam: Exam) => void;
+  bankQuestions?: Question[];
 }
+
+const CLASS_MASTER_STORAGE_KEY = 'examo_class_master_records';
+
+const QUESTION_TYPE_LABEL: Record<QuestionType, string> = {
+  mcq: 'Pilihan Ganda',
+  multiple_select: 'PG Banyak Jawaban',
+  true_false: 'Benar / Salah',
+  short_answer: 'Isian Singkat',
+  essay: 'Esai',
+  essay_dragdrop: 'Drag & Drop (Cloze)'
+};
 
 // Helper function untuk format datetime-local input dengan timezone awareness
 const formatDateTimeLocal = (dateString: string): string => {
@@ -192,10 +204,16 @@ const uploadImageToSupabase = async (file: File, examId: string): Promise<string
   }
 };
 
-const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveToBank, onPreview }) => {
+const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveToBank, onPreview, bankQuestions = [] }) => {
   // Parse initial dates if they exist, or keep them empty/null
   // Try to recover from backup if available
-  const [formData, setFormData] = useState<Exam>(() => recoverBackup(exam.id, exam));
+  const [formData, setFormData] = useState<Exam>(() => {
+    const recovered = recoverBackup(exam.id, exam);
+    return {
+      ...recovered,
+      targetGrades: Array.isArray(recovered.targetGrades) ? recovered.targetGrades : []
+    };
+  });
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(formData.questions[0]?.id || null);
   const [questionToDelete, setQuestionToDelete] = useState<string | null>(null);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -209,8 +227,70 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
   const [questionListError, setQuestionListError] = useState('');
   const [hasAttemptedSave, setHasAttemptedSave] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [availableClasses, setAvailableClasses] = useState<string[]>([]);
+  const [showBankImportModal, setShowBankImportModal] = useState(false);
+  const [bankSearchText, setBankSearchText] = useState('');
+  const [bankTypeFilter, setBankTypeFilter] = useState<'all' | QuestionType>('all');
+  const [selectedBankQuestionIds, setSelectedBankQuestionIds] = useState<string[]>([]);
   const backupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedRef = useRef<string>(JSON.stringify(exam));
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadAvailableClasses = async () => {
+      const classSet = new Set<string>();
+
+      try {
+        const raw = localStorage.getItem(CLASS_MASTER_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as Array<{ className?: string }>;
+          if (Array.isArray(parsed)) {
+            parsed.forEach((item) => {
+              const className = String(item?.className || '').trim();
+              if (className) classSet.add(className);
+            });
+          }
+        }
+      } catch {
+        // Ignore invalid local storage
+      }
+
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const [studentsRes, classMasterRes] = await Promise.all([
+            supabase.from('users').select('grade').eq('role', 'student'),
+            supabase.from('class_master_records').select('class_name')
+          ]);
+
+          if (studentsRes.data && !studentsRes.error) {
+            studentsRes.data.forEach((row: any) => {
+              const className = String(row?.grade || '').trim();
+              if (className) classSet.add(className);
+            });
+          }
+
+          if (classMasterRes.data && !classMasterRes.error) {
+            classMasterRes.data.forEach((row: any) => {
+              const className = String(row?.class_name || '').trim();
+              if (className) classSet.add(className);
+            });
+          }
+        } catch {
+          // Fallback to local class data only
+        }
+      }
+
+      const sortedClasses = Array.from(classSet).sort((a, b) => a.localeCompare(b, 'id-ID', { numeric: true }));
+      if (isMounted) setAvailableClasses(sortedClasses);
+    };
+
+    void loadAvailableClasses();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Auto-backup state to localStorage every 2 seconds
   useEffect(() => {
@@ -354,6 +434,10 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
           if (Number.isFinite(duration) && duration > 0) delete next.durationMinutes;
           else next.durationMinutes = 'Durasi ujian harus lebih dari 0 menit.';
         }
+        if (field === 'targetGrades') {
+          if (Array.isArray(value) && value.length > 0) delete next.targetGrades;
+          else next.targetGrades = 'Pilih minimal 1 kelas target.';
+        }
         return next;
       });
     }
@@ -382,6 +466,56 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
         return next;
       });
     }
+  };
+
+  const handleToggleTargetClass = (className: string) => {
+    const current = Array.isArray(formData.targetGrades) ? formData.targetGrades : [];
+    const exists = current.includes(className);
+    const next = exists
+      ? current.filter(item => item !== className)
+      : [...current, className];
+    handleExamChange('targetGrades', next);
+  };
+
+  const filteredBankQuestions = bankQuestions.filter((q) => {
+    if (bankTypeFilter !== 'all' && q.type !== bankTypeFilter) return false;
+    if (!bankSearchText.trim()) return true;
+    const keyword = bankSearchText.toLowerCase();
+    const text = getQuestionPreviewText(q.text).toLowerCase();
+    return text.includes(keyword) || (q.topic || '').toLowerCase().includes(keyword);
+  });
+
+  const toggleBankQuestionSelection = (questionId: string) => {
+    setSelectedBankQuestionIds(prev => (
+      prev.includes(questionId)
+        ? prev.filter(id => id !== questionId)
+        : [...prev, questionId]
+    ));
+  };
+
+  const importSelectedBankQuestions = () => {
+    if (selectedBankQuestionIds.length === 0) return;
+
+    const now = new Date().toISOString();
+    const selected = bankQuestions.filter(q => selectedBankQuestionIds.includes(q.id));
+    const clonedQuestions: Question[] = selected.map((q) => {
+      const cloned = JSON.parse(JSON.stringify(q)) as Question;
+      return {
+        ...cloned,
+        id: generateUUID(),
+        createdAt: now,
+        updatedAt: now
+      };
+    });
+
+    setFormData(prev => ({
+      ...prev,
+      questions: [...prev.questions, ...clonedQuestions]
+    }));
+    setQuestionListError('');
+    setActiveQuestionId(clonedQuestions[0]?.id || null);
+    setSelectedBankQuestionIds([]);
+    setShowBankImportModal(false);
   };
 
   const validateRequiredQuestions = (): boolean => {
@@ -426,6 +560,10 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
       nextExamErrors.durationMinutes = 'Durasi ujian harus lebih dari 0 menit.';
     }
 
+    if (!Array.isArray(formData.targetGrades) || formData.targetGrades.length === 0) {
+      nextExamErrors.targetGrades = 'Pilih minimal 1 kelas target.';
+    }
+
     setExamFieldErrors(nextExamErrors);
     return Object.keys(nextExamErrors).length === 0;
   };
@@ -439,7 +577,7 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
 
     if (!isExamFieldValid || !isQuestionValid || hasPointsError) {
       if (!isExamFieldValid) {
-        alert('Lengkapi data ujian bertanda seru terlebih dahulu (judul, kategori, atau durasi).');
+        alert('Lengkapi data ujian bertanda seru terlebih dahulu (judul, kategori, durasi, dan kelas target).');
       } else if (formData.questions.length === 0) {
         alert('Ujian belum memiliki pertanyaan. Tambahkan minimal 1 pertanyaan sebelum menyimpan.');
       } else if (hasPointsError) {
@@ -1174,6 +1312,41 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
                 </div>
                 <input type="number" min={1} value={formData.durationMinutes} onChange={(e) => handleExamChange('durationMinutes', parseInt(e.target.value, 10))} className={`w-full px-5 py-3 rounded-xl border-2 bg-gray-50 focus:bg-white outline-none transition font-bold ${examFieldErrors.durationMinutes ? 'border-red-500 bg-red-50' : 'border-gray-100'}`} />
               </div>
+              <div className="md:col-span-2">
+                <div className="flex items-center justify-between mb-2 ml-1">
+                  <label className="block text-xs font-black text-gray-400 uppercase tracking-widest">
+                    Kelas Target Ujian
+                  </label>
+                  {examFieldErrors.targetGrades && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-black text-red-600">
+                      <AlertCircle className="w-3 h-3" />
+                      {examFieldErrors.targetGrades}
+                    </span>
+                  )}
+                </div>
+                {availableClasses.length === 0 ? (
+                  <div className="px-4 py-3 rounded-xl border border-amber-200 bg-amber-50 text-xs font-bold text-amber-700">
+                    Belum ada data kelas. Tambahkan kelas siswa atau import Master Data Kelas terlebih dahulu.
+                  </div>
+                ) : (
+                  <div className={`grid grid-cols-2 md:grid-cols-4 gap-2 p-3 rounded-xl border-2 bg-gray-50 ${examFieldErrors.targetGrades ? 'border-red-500 bg-red-50' : 'border-gray-100'}`}>
+                    {availableClasses.map((className) => {
+                      const checked = (formData.targetGrades || []).includes(className);
+                      return (
+                        <label key={className} className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-bold cursor-pointer transition ${checked ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'}`}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => handleToggleTargetClass(className)}
+                            className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                          />
+                          <span className="truncate">{className}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
               <div>
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Nilai Kelulusan (KKM)</label>
                 <input
@@ -1330,6 +1503,20 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
 
                 {/* Import CSV/XLSX (CSV parser simple) */}
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setBankSearchText('');
+                      setBankTypeFilter('all');
+                      setSelectedBankQuestionIds([]);
+                      setShowBankImportModal(true);
+                    }}
+                    disabled={bankQuestions.length === 0}
+                    className="px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-bold text-indigo-600 hover:bg-indigo-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={bankQuestions.length === 0 ? 'Belum ada soal di bank soal' : 'Pilih soal dari bank soal'}
+                  >
+                    Import dari Bank Soal
+                  </button>
+
                   <input id="exam-import-file" type="file" accept=".csv,.xls,.xlsx" className="hidden" onChange={async (e) => {
                     const file = e.target.files?.[0];
                     if (!file) return;
@@ -2044,6 +2231,114 @@ const ExamEditor: React.FC<ExamEditorProps> = ({ exam, onSave, onCancel, onSaveT
           </section>
         </div>
       </div>
+
+      {showBankImportModal && (
+        <div className="fixed inset-0 bg-gray-900/60 flex items-center justify-center z-[75] p-4 animate-in fade-in">
+          <div className="bg-white w-full max-w-4xl rounded-[28px] border border-gray-100 shadow-2xl overflow-hidden">
+            <div className="p-5 border-b border-gray-100 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-black text-gray-900">Import dari Bank Soal</h3>
+                <p className="text-xs text-gray-500 font-medium mt-0.5">
+                  Pilih soal bank untuk ditambahkan ke daftar pertanyaan ujian ini.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowBankImportModal(false)}
+                className="p-2 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 border-b border-gray-100 bg-gray-50/50">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <input
+                  type="text"
+                  value={bankSearchText}
+                  onChange={(e) => setBankSearchText(e.target.value)}
+                  placeholder="Cari teks soal atau topik..."
+                  className="md:col-span-2 px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <select
+                  value={bankTypeFilter}
+                  onChange={(e) => setBankTypeFilter(e.target.value as 'all' | QuestionType)}
+                  className="px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="all">Semua Tipe</option>
+                  <option value="mcq">Pilihan Ganda</option>
+                  <option value="multiple_select">PG Banyak Jawaban</option>
+                  <option value="true_false">Benar / Salah</option>
+                  <option value="short_answer">Isian Singkat</option>
+                  <option value="essay">Esai</option>
+                  <option value="essay_dragdrop">Drag & Drop (Cloze)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="max-h-[52vh] overflow-y-auto p-5 space-y-2">
+              {filteredBankQuestions.length === 0 ? (
+                <div className="p-6 text-center text-sm font-medium text-gray-500 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                  Tidak ada soal bank yang sesuai filter.
+                </div>
+              ) : (
+                filteredBankQuestions.map((q) => {
+                  const checked = selectedBankQuestionIds.includes(q.id);
+                  return (
+                    <label
+                      key={q.id}
+                      className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition ${checked ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-gray-200 hover:bg-gray-50'}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleBankQuestionSelection(q.id)}
+                        className="mt-1 w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                      />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-black bg-indigo-100 text-indigo-700 uppercase">
+                            {QUESTION_TYPE_LABEL[q.type]}
+                          </span>
+                          {q.topic && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-gray-100 text-gray-600">
+                              {q.topic}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-gray-800 font-bold line-clamp-2">
+                          {getQuestionPreviewText(q.text)}
+                        </p>
+                        <p className="text-xs text-gray-500 font-medium mt-1">Poin: {q.points ?? 0}</p>
+                      </div>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="p-5 border-t border-gray-100 flex items-center justify-between gap-3">
+              <p className="text-xs text-gray-500 font-bold">
+                {selectedBankQuestionIds.length} soal dipilih
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowBankImportModal(false)}
+                  className="px-4 py-2 rounded-xl border border-gray-200 text-gray-600 font-bold text-sm hover:bg-gray-50 transition"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={importSelectedBankQuestions}
+                  disabled={selectedBankQuestionIds.length === 0}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 text-white font-black text-sm hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  Tambahkan ke Ujian
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {questionToDelete && (
         <div className="fixed inset-0 bg-gray-900/60 flex items-center justify-center z-[70] p-6 animate-in fade-in">

@@ -1,7 +1,8 @@
 
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { generateUUID } from '../lib/uuid';
 import { User } from '../types';
+import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import {
   Users, Upload, Download, FileSpreadsheet, Trash2,
   UserPlus, Search, X, CheckCircle2, AlertCircle, Edit3, Save,
@@ -18,21 +19,105 @@ interface StudentManagerProps {
   onEditStudent?: (editedStudent: User) => Promise<void>;
 }
 
+interface MasterStudentOption {
+  id: string;
+  name: string;
+  className: string;
+  studentCode?: string;
+}
+
 const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onAddStudent, onDeleteStudent, onEditStudent }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const [modalMode, setModalMode] = useState<'add' | 'edit' | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState({ name: '', email: '', grade: '', nis: '', password: '' });
+  const [formData, setFormData] = useState({ name: '', email: '', grade: '', nis: '', password: '', masterStudentId: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [masterStudents, setMasterStudents] = useState<MasterStudentOption[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { addAlert } = useNotification();
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadMasterStudents = async () => {
+      const mapped: MasterStudentOption[] = [];
+
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const { data, error } = await supabase
+            .from('class_master_students')
+            .select('id, student_name, class_name, student_code')
+            .order('class_name', { ascending: true })
+            .order('student_name', { ascending: true });
+
+          if (data && !error) {
+            data.forEach((row: any) => {
+              const name = String(row?.student_name || '').trim();
+              const className = String(row?.class_name || '').trim();
+              if (!name || !className) return;
+              mapped.push({
+                id: String(row.id),
+                name,
+                className,
+                studentCode: row?.student_code ? String(row.student_code) : undefined
+              });
+            });
+          }
+        } catch {
+          // fallback to local storage below
+        }
+      }
+
+      if (mapped.length === 0) {
+        try {
+          const raw = localStorage.getItem('examo_class_master_records');
+          const parsed = raw ? JSON.parse(raw) : [];
+          if (Array.isArray(parsed)) {
+            parsed.forEach((record: any) => {
+              const className = String(record?.className || '').trim();
+              if (!className || !Array.isArray(record?.students)) return;
+              record.students.forEach((st: any, idx: number) => {
+                const name = String(st?.name || '').trim();
+                if (!name) return;
+                mapped.push({
+                  id: `local-${className}-${idx}-${name}`.replace(/\s+/g, '-').toLowerCase(),
+                  name,
+                  className
+                });
+              });
+            });
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (isMounted) {
+        const unique = Array.from(
+          new Map(
+            mapped.map(item => [`${item.className}::${item.name}::${item.studentCode || ''}`, item])
+          ).values()
+        );
+        setMasterStudents(unique);
+      }
+    };
+
+    void loadMasterStudents();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const filteredStudents = students.filter(s =>
     s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     s.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (s.grade && s.grade.toLowerCase().includes(searchTerm.toLowerCase())) ||
     (s.nis && s.nis.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
+
+  const classOptions = Array.from(new Set(masterStudents.map(s => s.className))).sort((a, b) =>
+    a.localeCompare(b, 'id-ID', { numeric: true })
   );
 
   const handleDownloadTemplate = () => {
@@ -120,7 +205,8 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
       email: student.email,
       grade: student.grade || '',
       nis: student.nis || '',
-      password: student.password || ''
+      password: student.password || '',
+      masterStudentId: student.masterStudentId || ''
     });
     setEditingId(student.id);
     setModalMode('edit');
@@ -128,14 +214,20 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
 
   const handleSubmitManual = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || (!formData.email && !formData.nis)) {
-      alert("Nama dan salah satu dari Email atau NIS wajib diisi.");
+    if (!formData.name.trim()) {
+      alert("Nama wajib diisi.");
       return;
     }
 
     setIsSubmitting(true);
-    // Fallback email if empty but NIS provided
-    const emailToUse = formData.email || `${formData.nis}@sekolah.id`;
+    // Fallback email if not provided
+    const generatedEmail =
+      formData.nis?.trim()
+        ? `${formData.nis.trim()}@sekolah.id`
+        : formData.masterStudentId
+          ? `master-${formData.masterStudentId}@sekolah.id`
+          : `siswa-${Date.now()}@sekolah.id`;
+    const emailToUse = (formData.email || generatedEmail).trim().toLowerCase();
     const passwordToUse = formData.password || 'password';
 
     try {
@@ -146,6 +238,7 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
           email: emailToUse,
           grade: formData.grade,
           nis: formData.nis,
+          masterStudentId: formData.masterStudentId || undefined,
           role: 'student',
           password: passwordToUse
         };
@@ -160,6 +253,7 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
             email: emailToUse,
             grade: formData.grade,
             nis: formData.nis,
+            masterStudentId: formData.masterStudentId || undefined,
             password: passwordToUse
           };
           if (onEditStudent) {
@@ -173,7 +267,7 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
         }
       }
 
-      setFormData({ name: '', email: '', grade: '', nis: '', password: '' });
+      setFormData({ name: '', email: '', grade: '', nis: '', password: '', masterStudentId: '' });
       setModalMode(null);
       setEditingId(null);
     } catch (error) {
@@ -193,6 +287,22 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
         alert("Gagal menghapus siswa.");
       }
     }
+  };
+
+  const handleMasterStudentSelect = (masterStudentId: string) => {
+    const selected = masterStudents.find(item => item.id === masterStudentId);
+    setFormData(prev => {
+      if (!selected) {
+        return { ...prev, masterStudentId: '' };
+      }
+      return {
+        ...prev,
+        masterStudentId: selected.id,
+        name: selected.name || prev.name,
+        grade: selected.className || prev.grade,
+        nis: prev.nis || selected.studentCode || ''
+      };
+    });
   };
 
   return (
@@ -218,7 +328,7 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
           </button>
           <button
             onClick={() => {
-              setFormData({ name: '', email: '', grade: '', nis: '', password: '' });
+              setFormData({ name: '', email: '', grade: '', nis: '', password: '', masterStudentId: '' });
               setModalMode('add');
             }}
             className="flex-1 md:flex-none bg-indigo-600 text-white px-6 py-4 rounded-[20px] font-black shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 active:scale-95 text-sm"
@@ -307,6 +417,23 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
 
             <div className="space-y-5">
               <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Relasi Master Siswa</label>
+                <select
+                  value={formData.masterStudentId}
+                  onChange={(e) => handleMasterStudentSelect(e.target.value)}
+                  className="w-full px-5 py-4 rounded-2xl bg-gray-50 border-transparent focus:border-indigo-500 focus:bg-white outline-none font-bold transition-all"
+                >
+                  <option value="">-- Pilih dari Master Data (Opsional) --</option>
+                  {masterStudents.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} - {item.className}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-gray-400 mt-1 ml-1">Memilih data master akan mengisi nama/kelas otomatis.</p>
+              </div>
+
+              <div>
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Nama Lengkap *</label>
                 <input
                   type="text"
@@ -341,6 +468,9 @@ const StudentManager: React.FC<StudentManagerProps> = ({ students, onUpdate, onA
                   placeholder="Misal: X-1, XII-IPA-1"
                 />
                 <datalist id="grades-list">
+                  {classOptions.map((grade) => (
+                    <option key={grade} value={grade} />
+                  ))}
                   <option value="X-1" /><option value="X-2" /><option value="X-3" />
                   <option value="XI-IPA-1" /><option value="XI-IPS-1" />
                   <option value="XII-IPA-1" /><option value="XII-IPS-1" />

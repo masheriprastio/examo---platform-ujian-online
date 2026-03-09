@@ -24,6 +24,7 @@ import MaterialManager from './components/MaterialManager';
 import StudentMaterialList from './components/StudentMaterialList';
 import MonitoringDashboard from './components/MonitoringDashboard';
 import UserManagement from './components/UserManagement';
+import ClassMasterManager from './components/ClassMasterManager';
 import EssayManualScoreInput from './components/EssayManualScoreInput';
 import { MaterialService, Material } from './services/MaterialService';
 import UserActivityService from './services/UserActivityService';
@@ -32,6 +33,19 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
+
+type ImportedGradeEntry = {
+  id: string;
+  studentId?: string;
+  studentName: string;
+  nis?: string;
+  className: string;
+  assessmentName: string;
+  score: number;
+  teacherId?: string;
+  sourceFile?: string;
+  importedAt: string;
+};
 
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString('id-ID', {
   day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
@@ -74,6 +88,47 @@ function getExamPassingScore(exam?: Exam | null): number {
     return Math.max(0, Math.min(100, raw));
   }
   return 75;
+}
+
+function mapUserRow(row: any): User {
+  return {
+    id: String(row?.id ?? ''),
+    email: String(row?.email ?? ''),
+    password: row?.password ?? undefined,
+    role: row?.role,
+    name: String(row?.name ?? ''),
+    grade: row?.grade ?? undefined,
+    school: row?.school ?? undefined,
+    nis: row?.nis ?? undefined,
+    subject: row?.subject ?? undefined,
+    session_token: row?.session_token ?? row?.sessionToken ?? undefined,
+    masterStudentId: row?.master_student_id ?? row?.masterStudentId ?? undefined
+  };
+}
+
+function mapUserRows(rows: any[] | null | undefined): User[] {
+  if (!Array.isArray(rows)) return [];
+  return rows.map(mapUserRow);
+}
+
+function isExamVisibleForStudent(exam: Exam, student?: User | null): boolean {
+  const status = (exam.status || '').toString().toLowerCase();
+  const isPublished = status.includes('publish') || status.includes('active');
+  if (!isPublished) return false;
+
+  const targets = Array.isArray(exam.targetGrades) ? exam.targetGrades.filter(Boolean) : [];
+  if (targets.length === 0) return true;
+
+  const studentGrade = String(student?.grade || '').trim();
+  return studentGrade ? targets.includes(studentGrade) : false;
+}
+
+function hasTargetGradeSelection(exam?: Pick<Exam, 'targetGrades'> | null): boolean {
+  return Array.isArray(exam?.targetGrades) && exam!.targetGrades!.length > 0;
+}
+
+function normalizeName(s?: any): string {
+  return normalizeText(s || '');
 }
 
 const LoginView: React.FC<{
@@ -190,6 +245,7 @@ const Sidebar: React.FC<{
       ]
     },
     { id: 'TEACHER_GRADES', label: 'Buku Nilai', icon: ClipboardList, badge: endedActivityCount },
+    { id: 'TEACHER_CLASS_MASTER', label: 'Master Data Kelas', icon: Users },
     // Group "Guru & Siswa" - Only for Admin
     ...(isAdmin ? [{
       id: 'GROUP_USERS',
@@ -212,8 +268,14 @@ const Sidebar: React.FC<{
   ] : [
     { id: 'STUDENT_DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'STUDENT_MATERIALS', label: 'Materi Belajar', icon: Book },
-    { id: 'STUDENT_HISTORY', label: 'Riwayat Ujian', icon: History },
+    { id: 'STUDENT_HISTORY', label: 'Nilai Ujian', icon: History },
   ];
+
+  const closeSidebarIfMobile = () => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      onClose();
+    }
+  };
 
   return (
     <>
@@ -251,7 +313,7 @@ const Sidebar: React.FC<{
                     {item.children.map((child: any) => (
                       <button
                         key={child.id}
-                        onClick={() => { onNavigate(child.id as AppView); onClose(); }}
+                        onClick={() => { onNavigate(child.id as AppView); closeSidebarIfMobile(); }}
                         className={`w-full text-left px-4 py-3 rounded-xl font-bold text-sm transition-all ${activeView === child.id ? 'text-indigo-600 bg-white shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
                       >
                         {child.label}
@@ -261,7 +323,7 @@ const Sidebar: React.FC<{
                 )}
               </div>
             ) : (
-              <button key={item.id} onClick={() => { onNavigate(item.id as AppView); onClose(); }} className={`w-full flex items-center gap-3 px-5 py-4 rounded-2xl font-bold transition-all ${activeView === item.id ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-100' : 'text-gray-400 hover:bg-gray-50'}`}>
+              <button key={item.id} onClick={() => { onNavigate(item.id as AppView); closeSidebarIfMobile(); }} className={`w-full flex items-center gap-3 px-5 py-4 rounded-2xl font-bold transition-all ${activeView === item.id ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-100' : 'text-gray-400 hover:bg-gray-50'}`}>
                 <item.icon className="w-5 h-5" />
                 <span className="flex-1 text-left">{item.label}</span>
                 {typeof item.badge === 'number' && item.badge > 0 && (
@@ -274,7 +336,7 @@ const Sidebar: React.FC<{
           ))}
         </div>
         <div className="p-4 border-t border-gray-50 shrink-0 bg-white">
-          <button onClick={() => { onLogout(); onClose(); }} className="w-full flex items-center gap-3 px-5 py-3 rounded-2xl font-bold text-red-400 hover:bg-red-50 transition-all"><LogOut className="w-5 h-5" /> Keluar</button>
+          <button onClick={() => { onLogout(); closeSidebarIfMobile(); }} className="w-full flex items-center gap-3 px-5 py-3 rounded-2xl font-bold text-red-400 hover:bg-red-50 transition-all"><LogOut className="w-5 h-5" /> Keluar</button>
         </div>
       </aside>
     </>
@@ -296,12 +358,14 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isHeaderNotifOpen, setIsHeaderNotifOpen] = useState(false);
   const [headerNotifications, setHeaderNotifications] = useState<DashboardNotification[]>([]);
+  const [lastDataSyncAt, setLastDataSyncAt] = useState<string>('');
   const [endedActivityCount, setEndedActivityCount] = useState(0);
   const [studentTeacherReviewed, setStudentTeacherReviewed] = useState<Record<string, boolean>>({});
   const seenViolationCountRef = useRef<Record<string, number>>({});
   const seenSubmissionRef = useRef<Record<string, boolean>>({});
   const seenDisqualifiedRef = useRef<Record<string, boolean>>({});
   const shouldFetchRef = useRef(true); // Prevent re-fetching stale data after save
+  const IMPORTED_GRADE_STORAGE_KEY = 'examo_imported_grade_entries';
   const fileInputRef = useRef<HTMLInputElement>(null);
   const docxFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -342,8 +406,12 @@ export default function App() {
     const mq = window.matchMedia('(min-width: 768px)');
     const syncSidebarMode = () => setIsSidebarOpen(mq.matches);
     syncSidebarMode();
-    mq.addEventListener('change', syncSidebarMode);
-    return () => mq.removeEventListener('change', syncSidebarMode);
+    if (typeof mq.addEventListener === 'function') {
+      mq.addEventListener('change', syncSidebarMode);
+      return () => mq.removeEventListener('change', syncSidebarMode);
+    }
+    mq.addListener(syncSidebarMode);
+    return () => mq.removeListener(syncSidebarMode);
   }, []);
 
   // Restore session from localStorage so refresh keeps user logged in
@@ -409,6 +477,9 @@ export default function App() {
   const [dailyScoreColumns, setDailyScoreColumns] = useState<string[]>(['Capaian 1']);
   const [dailyScores, setDailyScores] = useState<Record<string, Record<number, number>>>({}); // studentId -> colIndex -> score
   const [gradeViewMode, setGradeViewMode] = useState<'summary' | 'history'>('summary');
+  const [importedGrades, setImportedGrades] = useState<ImportedGradeEntry[]>([]);
+  const [isImportingGrades, setIsImportingGrades] = useState(false);
+  const gradeImportInputRef = useRef<HTMLInputElement>(null);
 
   // New State for Create Exam Dropdown
   const [showCreateMenu, setShowCreateMenu] = useState(false);
@@ -440,6 +511,14 @@ export default function App() {
   const [timeoutWarningSeconds, setTimeoutWarningSeconds] = useState(0);
   const SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
   const WARNING_BEFORE_LOGOUT_MS = 60 * 1000; // Show warning 1 minute before logout
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(IMPORTED_GRADE_STORAGE_KEY, JSON.stringify(importedGrades));
+    } catch (e) {
+      // ignore local storage errors
+    }
+  }, [importedGrades]);
 
   // Auto Logout Logic (Students Only) - 5 minutes with warning at 4 minutes
   useEffect(() => {
@@ -513,12 +592,35 @@ export default function App() {
     violation_alert: Boolean(r.violation_alert) || (Array.isArray(r.logs) && r.logs.some((l: any) => l.event === 'tab_blur' || l.event === 'violation_disqualified'))
   });
 
+  const mapImportedGradeRow = (row: any): ImportedGradeEntry => ({
+    id: String(row?.id || generateUUID()),
+    studentId: row?.student_id ? String(row.student_id) : undefined,
+    studentName: String(row?.student_name || ''),
+    nis: row?.nis ? String(row.nis) : undefined,
+    className: String(row?.class_name || ''),
+    assessmentName: String(row?.assessment_name || 'Nilai'),
+    score: Number(row?.score || 0),
+    teacherId: row?.teacher_id ? String(row.teacher_id) : undefined,
+    sourceFile: row?.source_file ? String(row.source_file) : undefined,
+    importedAt: String(row?.imported_at || new Date().toISOString())
+  });
+
   const fetchData = async () => {
     if (!isSupabaseConfigured || !supabase) {
       // Helpful debug when Supabase isn't configured so user understands why no network logs appear
       try { console.warn('DEBUG: Supabase not configured or supabase client missing. Running in Mock Mode.'); } catch (e) { }
       try { console.log('DEBUG: isSupabaseConfigured', isSupabaseConfigured); } catch (e) { }
       try { console.log('DEBUG: supabase', supabase); } catch (e) { }
+      try {
+        const raw = localStorage.getItem(IMPORTED_GRADE_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            setImportedGrades(parsed);
+          }
+        }
+      } catch (e) { }
+      setLastDataSyncAt(new Date().toISOString());
       setIsFetching(false);
       return { exams: null as any, results: null as any };
     }
@@ -526,11 +628,12 @@ export default function App() {
     setIsFetching(true);
     try {
       // Fetch all data in parallel to reduce network round trips
-      const [examsRes, resultsRes, roomsRes, usersRes] = await Promise.all([
+      const [examsRes, resultsRes, roomsRes, usersRes, importedGradesRes] = await Promise.all([
         supabase.from('exams').select('*').order('created_at', { ascending: false }),
         supabase.from('exam_results').select('*'),
         supabase.from('exam_rooms').select('*'),
-        supabase.from('users').select('*')
+        supabase.from('users').select('*'),
+        supabase.from('student_grade_entries').select('*').order('imported_at', { ascending: false }).limit(2000)
       ]);
 
       // Debug logs to help diagnose missing data issues (remove after verification)
@@ -538,6 +641,7 @@ export default function App() {
       try { console.log('DEBUG: resultsRes', resultsRes); } catch (e) { }
       try { console.log('DEBUG: roomsRes', roomsRes); } catch (e) { }
       try { console.log('DEBUG: usersRes', usersRes); } catch (e) { }
+      try { console.log('DEBUG: importedGradesRes', importedGradesRes); } catch (e) { }
 
       // 1. Process Exams
       let mappedExams: Exam[] = [];
@@ -571,7 +675,12 @@ export default function App() {
           })(),
           examToken: e.exam_token,
           requireToken: e.require_token || false,
-          roomId: String(e.room_id)
+          roomId: e.room_id ? String(e.room_id) : undefined,
+          targetGrades: Array.isArray(e.target_grades)
+            ? e.target_grades.map((g: any) => String(g)).filter(Boolean)
+            : (Array.isArray(e.targetGrades)
+              ? e.targetGrades.map((g: any) => String(g)).filter(Boolean)
+              : [])
         }));
         setExams(mappedExams);
         setBankQuestions(mappedExams.flatMap(e => e.questions || []));
@@ -604,13 +713,32 @@ export default function App() {
 
       // 4. Process Users (Students and Teachers)
       if (usersRes.data && !usersRes.error) {
-        const users = usersRes.data as User[];
+        const users = mapUserRows(usersRes.data as any[]);
         const studentsData = users.filter(u => u.role === 'student');
         const teachersData = users.filter(u => u.role === 'teacher');
 
         setStudents(studentsData);
         setTeachers(teachersData);
       }
+
+      // 5. Process Imported Grade Entries
+      if (importedGradesRes.data && !importedGradesRes.error) {
+        const mappedImported = importedGradesRes.data.map((row: any) => mapImportedGradeRow(row));
+        setImportedGrades(mappedImported);
+      } else if (importedGradesRes.error) {
+        // Fallback silently to local cache if table does not exist yet / blocked by policy
+        try {
+          const raw = localStorage.getItem(IMPORTED_GRADE_STORAGE_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              setImportedGrades(parsed);
+            }
+          }
+        } catch (e) { }
+      }
+
+      setLastDataSyncAt(new Date().toISOString());
 
       return { exams: mappedExams, results: mappedResults };
     } catch (err) {
@@ -692,6 +820,15 @@ export default function App() {
     }
   }, [view]);
 
+  // Keep student dashboard data fresh without requiring manual refresh.
+  useEffect(() => {
+    if (currentUser?.role !== 'student' || view !== 'STUDENT_DASHBOARD') return;
+    const timer = setInterval(() => {
+      fetchData();
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [currentUser?.id, currentUser?.role, view]);
+
   useEffect(() => {
     if (currentUser?.role !== 'student') return;
     const reviewedMap: Record<string, boolean> = {};
@@ -709,7 +846,7 @@ export default function App() {
       if ((currentUser?.role === 'teacher' || currentUser?.role === 'admin') && isSupabaseConfigured && supabase) {
         const { data, error } = await supabase.from('users').select('*').eq('role', 'student');
         if (data && !error) {
-          setStudents(data as User[]);
+          setStudents(mapUserRows(data as any[]));
         }
       }
     };
@@ -722,7 +859,7 @@ export default function App() {
       if ((currentUser?.role === 'teacher' || currentUser?.role === 'admin') && isSupabaseConfigured && supabase) {
         const { data, error } = await supabase.from('users').select('*').eq('role', 'teacher');
         if (data && !error) {
-          setTeachers(data as User[]);
+          setTeachers(mapUserRows(data as any[]));
         }
       }
     };
@@ -971,7 +1108,7 @@ export default function App() {
           const eventType = payload?.eventType || payload?.event;
 
           if (eventType === 'INSERT') {
-            const newUser = payload.new as User;
+            const newUser = mapUserRow(payload.new);
             if (newUser.role === 'student') {
               setStudents(prev => {
                 if (prev.find(s => s.id === newUser.id)) return prev;
@@ -984,7 +1121,7 @@ export default function App() {
               });
             }
           } else if (eventType === 'UPDATE') {
-            const updatedUser = payload.new as User;
+            const updatedUser = mapUserRow(payload.new);
             if (updatedUser.role === 'student') {
               setStudents(prev => prev.map(s => s.id === updatedUser.id ? updatedUser : s));
             } else if (updatedUser.role === 'teacher') {
@@ -1190,7 +1327,7 @@ export default function App() {
 
           if (newUser && !createError) {
             // Logged in with real DB user now!
-            const userWithToken = { ...newUser, session_token: generateUUID() };
+            const userWithToken = { ...mapUserRow(newUser), session_token: generateUUID() };
             // Update session token
             await supabase.from('users').update({ session_token: userWithToken.session_token }).eq('id', newUser.id);
 
@@ -1255,7 +1392,7 @@ export default function App() {
         Notification.requestPermission();
       }
 
-      const userWithToken = { ...data, session_token: sessionToken };
+      const userWithToken = { ...mapUserRow(data), session_token: sessionToken };
       setCurrentUser(userWithToken);
 
       const isStaff = userWithToken.role === 'teacher' || userWithToken.role === 'admin';
@@ -1620,7 +1757,7 @@ export default function App() {
         setTeachers(teachers); // Rollback
       } else {
         const { data } = await supabase.from('users').select('*').eq('role', 'teacher');
-        if (data) setTeachers(data as User[]);
+        if (data) setTeachers(mapUserRows(data as any[]));
       }
     }
   };
@@ -1640,7 +1777,8 @@ export default function App() {
         role: 'student',
         grade: newStudent.grade,
         school: newStudent.school || 'SMA Negeri 1 Digital',
-        nis: newStudent.nis
+        nis: newStudent.nis,
+        master_student_id: newStudent.masterStudentId || null
       }).select().single();
 
       if (error) {
@@ -1692,7 +1830,8 @@ export default function App() {
           email: editedStudent.email,
           password: editedStudent.password,
           grade: editedStudent.grade,
-          nis: editedStudent.nis
+          nis: editedStudent.nis,
+          master_student_id: editedStudent.masterStudentId || null
         })
         .eq('id', editedStudent.id);
 
@@ -1750,7 +1889,8 @@ export default function App() {
           role: 'student',
           grade: s.grade,
           school: 'SMA Negeri 1 Digital',
-          nis: s.nis
+          nis: s.nis,
+          master_student_id: s.masterStudentId || null
         }));
 
       const skippedCount = addedStudents.length - rowsToInsert.length;
@@ -1762,7 +1902,7 @@ export default function App() {
         );
         // Rollback optimistic since nothing was inserted
         const { data } = await supabase.from('users').select('*').eq('role', 'student');
-        if (data) setStudents(data as User[]);
+        if (data) setStudents(mapUserRows(data as any[]));
         return;
       }
 
@@ -1773,7 +1913,7 @@ export default function App() {
         addAlert("Gagal import ke database: " + error.message, 'error');
         // Rollback optimistic
         const { data } = await supabase.from('users').select('*').eq('role', 'student');
-        if (data) setStudents(data as User[]);
+        if (data) setStudents(mapUserRows(data as any[]));
       } else {
         const successMsg = skippedCount > 0
           ? `Berhasil import ${rowsToInsert.length} siswa. ${skippedCount} dilewati (email sudah terdaftar).`
@@ -1781,11 +1921,159 @@ export default function App() {
         addAlert(successMsg, 'success');
         // Re-fetch untuk update ID dari DB
         const { data } = await supabase.from('users').select('*').eq('role', 'student');
-        if (data) setStudents(data as User[]);
+        if (data) setStudents(mapUserRows(data as any[]));
       }
     } else {
       // Mock mode
       addAlert(`Berhasil import ${addedStudents.length} siswa (Mock Mode)!`, 'success');
+    }
+  };
+
+  const parseImportedGradeRows = (rows: unknown[][], sourceFile: string): Omit<ImportedGradeEntry, 'id' | 'teacherId' | 'importedAt' | 'studentId'>[] => {
+    if (!rows.length) return [];
+
+    let className = '';
+    let headerRowIndex = -1;
+    let nameCol = -1;
+    let nisCol = -1;
+    let scoreCol = -1;
+    let assessmentName = 'Nilai';
+
+    const cleanCell = (value: unknown) => String(value || '').trim();
+    const norm = (value: unknown) => cleanCell(value).toLowerCase().replace(/\s+/g, ' ');
+
+    for (let r = 0; r < rows.length; r += 1) {
+      const row = rows[r] || [];
+      for (let c = 0; c < row.length; c += 1) {
+        const cellNorm = norm(row[c]);
+        if (!className && cellNorm.includes('absensi kelas')) {
+          for (let nx = c + 1; nx < row.length; nx += 1) {
+            const val = cleanCell(row[nx]);
+            if (val) { className = val; break; }
+          }
+        }
+      }
+
+      const normalizedRow = row.map(norm);
+      const candidateNameCol = normalizedRow.findIndex(v => v === 'nama siswa' || v === 'nama');
+      if (candidateNameCol !== -1) {
+        const candidateNisCol = normalizedRow.findIndex(v => v === 'nis' || v === 'nis ujian');
+        const candidateScoreCol = normalizedRow.findIndex(v => v.includes('nilai'));
+        if (candidateScoreCol !== -1) {
+          headerRowIndex = r;
+          nameCol = candidateNameCol;
+          nisCol = candidateNisCol;
+          scoreCol = candidateScoreCol;
+          assessmentName = cleanCell(row[candidateScoreCol]) || 'Nilai';
+          break;
+        }
+      }
+    }
+
+    if (headerRowIndex === -1 || nameCol === -1 || scoreCol === -1) return [];
+
+    const importedAt = new Date().toISOString();
+    const result: Omit<ImportedGradeEntry, 'id' | 'teacherId' | 'importedAt' | 'studentId'>[] = [];
+    let emptyStreak = 0;
+
+    for (let r = headerRowIndex + 1; r < rows.length; r += 1) {
+      const row = rows[r] || [];
+      const studentName = cleanCell(row[nameCol]);
+      const rawScore = cleanCell(row[scoreCol]);
+      const nis = nisCol !== -1 ? cleanCell(row[nisCol]) : '';
+
+      if (!studentName) {
+        emptyStreak += 1;
+        if (emptyStreak >= 5) break;
+        continue;
+      }
+      emptyStreak = 0;
+
+      const scoreNumber = parseInt(rawScore.replace(/\./g, '').replace(',', '.'), 10);
+      if (!Number.isFinite(scoreNumber)) continue;
+
+      result.push({
+        studentName,
+        nis: nis || undefined,
+        className: className || '-',
+        assessmentName,
+        score: Math.max(0, Math.min(100, scoreNumber)),
+        sourceFile
+      });
+    }
+
+    return result;
+  };
+
+  const handleImportGradeFile = async (file: File) => {
+    setIsImportingGrades(true);
+    try {
+      const data = await file.arrayBuffer();
+      const wb = XLSX.read(data, { type: 'array' });
+      const firstSheet = wb.SheetNames[0];
+      if (!firstSheet) {
+        addAlert('Sheet nilai tidak ditemukan pada file.', 'error');
+        return;
+      }
+
+      const ws = wb.Sheets[firstSheet];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as unknown[][];
+      const parsedRows = parseImportedGradeRows(rows, file.name);
+      if (parsedRows.length === 0) {
+        addAlert('Format file nilai tidak sesuai. Pastikan ada kolom Nama Siswa dan kolom Nilai.', 'error');
+        return;
+      }
+
+      const classNorm = (s?: string) => String(s || '').trim().toLowerCase();
+      const toInsert: ImportedGradeEntry[] = parsedRows.map((item) => {
+        const candidateStudents = students.filter(s => classNorm(s.grade) === classNorm(item.className));
+        const byNis = item.nis ? candidateStudents.find(s => (s.nis || '').trim() === item.nis!.trim()) : undefined;
+        const byName = candidateStudents.find(s => normalizeName(s.name) === normalizeName(item.studentName));
+        const linked = byNis || byName;
+
+        return {
+          id: generateUUID(),
+          studentId: linked?.id,
+          studentName: item.studentName,
+          nis: item.nis,
+          className: item.className,
+          assessmentName: item.assessmentName,
+          score: item.score,
+          sourceFile: item.sourceFile,
+          teacherId: currentUser?.id,
+          importedAt: new Date().toISOString()
+        };
+      });
+
+      setImportedGrades(prev => [...toInsert, ...prev]);
+
+      if (isSupabaseConfigured && supabase) {
+        const payload = toInsert.map(item => ({
+          id: item.id,
+          student_id: item.studentId || null,
+          student_name: item.studentName,
+          nis: item.nis || null,
+          class_name: item.className,
+          assessment_name: item.assessmentName,
+          score: item.score,
+          teacher_id: item.teacherId || null,
+          source_file: item.sourceFile || null,
+          imported_at: item.importedAt
+        }));
+        const { error } = await supabase.from('student_grade_entries').insert(payload);
+        if (error) {
+          addAlert(`Nilai diimport lokal, namun gagal sinkron DB: ${error.message}`, 'warning');
+        } else {
+          addAlert(`Berhasil import ${toInsert.length} nilai siswa.`, 'success');
+        }
+      } else {
+        addAlert(`Berhasil import ${toInsert.length} nilai siswa (mode lokal).`, 'success');
+      }
+    } catch (err: any) {
+      addAlert(`Gagal import nilai: ${err?.message || 'Unknown error'}`, 'error');
+    } finally {
+      setIsImportingGrades(false);
+      if (gradeImportInputRef.current) gradeImportInputRef.current.value = '';
     }
   };
 
@@ -1895,6 +2183,7 @@ export default function App() {
         questions: updatedExam.questions,
         start_date: updatedExam.startDate,
         end_date: updatedExam.endDate,
+        target_grades: updatedExam.targetGrades || [],
         created_by: currentUser?.id,
         created_at: exists ? undefined : updatedExam.createdAt
       };
@@ -1911,9 +2200,17 @@ export default function App() {
           error = res.error;
         }
 
-        // Backward compatibility: if DB column `passing_score` does not exist yet, retry without it.
-        if (error && /passing_score/i.test(error.message || '')) {
-          const { passing_score, ...legacyDbExam } = dbExam as any;
+        // Backward compatibility: allow fallback for legacy columns,
+        // but DO NOT drop target_grades when teacher already selected target classes.
+        if (error && /(passing_score|target_grades)/i.test(error.message || '')) {
+          const isTargetGradesColumnIssue = /target_grades/i.test(error.message || '');
+          if (isTargetGradesColumnIssue && hasTargetGradeSelection(updatedExam)) {
+            throw new Error(
+              'Kolom target_grades belum tersedia di database. Simpan dibatalkan agar target kelas tidak hilang.'
+            );
+          }
+
+          const { passing_score, target_grades, ...legacyDbExam } = dbExam as any;
           if (exists) {
             const retry = await supabase.from('exams').update(legacyDbExam).eq('id', updatedExam.id);
             error = retry.error;
@@ -1963,12 +2260,24 @@ export default function App() {
         questions: newExam.questions,
         start_date: newExam.startDate,
         end_date: newExam.endDate,
+        target_grades: newExam.targetGrades || [],
         created_by: currentUser?.id,
         created_at: newExam.createdAt
       };
       let { error } = await supabase.from('exams').insert(dbExam);
-      if (error && /passing_score/i.test(error.message || '')) {
-        const { passing_score, ...legacyDbExam } = dbExam as any;
+      if (error && /(passing_score|target_grades)/i.test(error.message || '')) {
+        const isTargetGradesColumnIssue = /target_grades/i.test(error.message || '');
+        if (isTargetGradesColumnIssue && hasTargetGradeSelection(newExam)) {
+          addAlert(
+            'Kolom target_grades belum tersedia di database. Ujian tidak disimpan agar target kelas tidak hilang.',
+            'error'
+          );
+          // Rollback optimistic insert
+          setExams(prev => prev.filter(e => e.id !== newExam.id));
+          return;
+        }
+
+        const { passing_score, target_grades, ...legacyDbExam } = dbExam as any;
         const retry = await supabase.from('exams').insert(legacyDbExam);
         error = retry.error;
       }
@@ -1995,7 +2304,8 @@ export default function App() {
       category: '',
       status: 'draft',
       createdAt: new Date().toISOString(),
-      questions: []
+      questions: [],
+      targetGrades: []
     };
     setEditingExam(newExam);
     setView('EXAM_EDITOR');
@@ -2022,7 +2332,8 @@ export default function App() {
       category: payload.category || 'Umum',
       status: 'draft',
       createdAt: new Date().toISOString(),
-      questions: clonedQuestions
+      questions: clonedQuestions,
+      targetGrades: []
     };
 
     setEditingExam(newExam);
@@ -2192,7 +2503,8 @@ export default function App() {
             category: 'Umum',
             status: 'draft',
             createdAt: new Date().toISOString(),
-            questions: newQuestions
+            questions: newQuestions,
+            targetGrades: []
           };
 
           // Robust existing-check: compare normalized base titles so "Template_Import_Soal_Examo (1)" matches "Template_Import_Soal_Examo"
@@ -2226,12 +2538,17 @@ export default function App() {
                   questions: newExam.questions,
                   start_date: newExam.startDate,
                   end_date: newExam.endDate,
+                  target_grades: newExam.targetGrades || [],
                   created_by: currentUser?.id,
                   created_at: newExam.createdAt
                 };
                 try {
                   // Use select() to get inserted row back where supported
-                  const res = await supabase.from('exams').insert(dbExam).select();
+                  let res = await supabase.from('exams').insert(dbExam).select();
+                  if (res.error && /target_grades/i.test(res.error.message || '')) {
+                    const { target_grades, ...legacyDbExam } = dbExam as any;
+                    res = await supabase.from('exams').insert(legacyDbExam).select();
+                  }
                   if (res.error) {
                     console.error("Failed to save imported exam:", res.error);
                     setEditingExam(newExam);
@@ -2416,7 +2733,8 @@ export default function App() {
           category: 'Umum',
           status: 'draft',
           createdAt: new Date().toISOString(),
-          questions: newQuestions
+          questions: newQuestions,
+          targetGrades: []
         };
 
         // Reuse existing dedupe logic
@@ -2448,11 +2766,16 @@ export default function App() {
                 questions: newExam.questions,
                 start_date: newExam.startDate,
                 end_date: newExam.endDate,
+                target_grades: newExam.targetGrades || [],
                 created_by: currentUser?.id,
                 created_at: newExam.createdAt
               };
               try {
-                const res = await supabase.from('exams').insert(dbExam).select();
+                let res = await supabase.from('exams').insert(dbExam).select();
+                if (res.error && /target_grades/i.test(res.error.message || '')) {
+                  const { target_grades, ...legacyDbExam } = dbExam as any;
+                  res = await supabase.from('exams').insert(legacyDbExam).select();
+                }
                 if (res.error) {
                   console.error("Failed to save imported exam:", res.error);
                   setEditingExam(newExam);
@@ -2943,6 +3266,45 @@ export default function App() {
     }
   };
 
+  const visibleStudentExams = exams.filter(e => isExamVisibleForStudent(e, currentUser));
+  const nowTs = Date.now();
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const tomorrowStart = new Date(todayStart);
+  tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+  const todaysExams = visibleStudentExams.filter((exam) => {
+    if (!exam.startDate) return false;
+    const startMs = new Date(exam.startDate).getTime();
+    return startMs >= todayStart.getTime() && startMs < tomorrowStart.getTime();
+  });
+  const upcomingExams = visibleStudentExams
+    .filter((exam) => exam.startDate && new Date(exam.startDate).getTime() >= nowTs)
+    .sort((a, b) => new Date(a.startDate!).getTime() - new Date(b.startDate!).getTime());
+  const nearestUpcomingExam = upcomingExams[0] || null;
+  const runningExams = visibleStudentExams
+    .filter((exam) => {
+      const start = exam.startDate ? new Date(exam.startDate).getTime() : 0;
+      const end = exam.endDate ? new Date(exam.endDate).getTime() : Infinity;
+      return start <= nowTs && end >= nowTs;
+    })
+    .sort((a, b) => {
+      const aStart = a.startDate ? new Date(a.startDate).getTime() : 0;
+      const bStart = b.startDate ? new Date(b.startDate).getTime() : 0;
+      return aStart - bStart;
+    });
+  const firstRunningExam = runningExams[0] || null;
+  const myImportedGrades = importedGrades
+    .filter((entry) => {
+      if (!currentUser || currentUser.role !== 'student') return false;
+      if (entry.studentId && String(entry.studentId) === String(currentUser.id)) return true;
+      if (entry.nis && currentUser.nis && String(entry.nis).trim() === String(currentUser.nis).trim()) return true;
+      const sameClass = String(entry.className || '').trim().toLowerCase() === String(currentUser.grade || '').trim().toLowerCase();
+      const sameName = normalizeName(entry.studentName) === normalizeName(currentUser.name);
+      return sameClass && sameName;
+    })
+    .sort((a, b) => new Date(b.importedAt).getTime() - new Date(a.importedAt).getTime());
+  const latestImportedGrade = myImportedGrades[0] || null;
+
   if (view === 'LOGIN') return <LoginView onLogin={handleLogin} />;
 
   if (view === 'EXAM_SESSION' && activeExam) {
@@ -3158,6 +3520,23 @@ export default function App() {
                     <p className="text-gray-400">Kelola dan ekspor hasil ujian kelas.</p>
                   </div>
                   <div className="flex gap-2">
+                    <input
+                      ref={gradeImportInputRef}
+                      type="file"
+                      accept=".csv,.xlsx,.xls"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) void handleImportGradeFile(file);
+                      }}
+                    />
+                    <button
+                      onClick={() => gradeImportInputRef.current?.click()}
+                      disabled={isImportingGrades}
+                      className="bg-white border-2 border-amber-500 text-amber-600 px-6 py-3 rounded-2xl font-black hover:bg-amber-50 transition-all flex items-center gap-2 disabled:opacity-70"
+                    >
+                      <FileSpreadsheet className="w-5 h-5" /> {isImportingGrades ? 'Import...' : 'Import Nilai'}
+                    </button>
                     <button onClick={exportGradesToCSV} className="bg-white border-2 border-green-600 text-green-600 px-6 py-3 rounded-2xl font-black hover:bg-green-50 transition-all flex items-center gap-2"><FileSpreadsheet className="w-5 h-5" /> CSV</button>
                     <button onClick={exportGradesToPDF} className="bg-white border-2 border-indigo-600 text-indigo-600 px-6 py-3 rounded-2xl font-black hover:bg-indigo-50 transition-all flex items-center gap-2"><FileDown className="w-5 h-5" /> PDF</button>
                     <button onClick={exportFullAnswersToPDF} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black hover:bg-indigo-700 transition-all flex items-center gap-2 shadow-lg shadow-indigo-100"><FileText className="w-5 h-5" /> Cetak Jawaban</button>
@@ -3374,15 +3753,17 @@ export default function App() {
                                           min="0" max="100"
                                           value={dailyScores[s.id]?.[idx] ?? ''}
                                           onChange={(e) => {
-                                            const val = e.target.value === '' ? undefined : parseInt(e.target.value);
-                                            setDailyScores(prev => ({
-                                              ...prev,
-                                              [s.id]: {
-                                                ...(prev[s.id] || {}),
-                                                [idx]: val as number
-                                              }
-                                            }));
-                                          }}
+                                                                                      const valStr = e.target.value.replace(',', '.');
+                                                                                      const val = e.target.value === '' ? undefined : Number.parseFloat(valStr);
+                                                                                      if (e.target.value === '' || (!isNaN(val) && val >= 0 && val <= 100)) {
+                                                                                        setDailyScores(prev => ({
+                                                                                          ...prev,
+                                                                                          [s.id]: {
+                                                                                            ...(prev[s.id] || {}),
+                                                                                            [idx]: val as number
+                                                                                          }
+                                                                                        }));
+                                                                                      }                                          }}
                                           placeholder="0"
                                           className="w-16 px-2 py-2 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 font-bold text-center outline-none text-sm"
                                         />
@@ -3405,6 +3786,47 @@ export default function App() {
                       </div>
                     </div>
                   )}
+                </div>
+
+                <div className="mt-8 bg-white rounded-[32px] shadow-sm border border-gray-100 overflow-hidden">
+                  <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                    <h3 className="text-lg font-black text-gray-900">Nilai Import Kelas (Terbaru)</h3>
+                    <span className="text-xs font-bold text-gray-400">{importedGrades.length} entri</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[760px]">
+                      <thead className="bg-gray-50/50 border-b text-left">
+                        <tr>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Siswa</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Kelas</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Jenis Nilai</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Skor</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Waktu Import</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {importedGrades.slice(0, 20).map((entry) => (
+                          <tr key={entry.id} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-6 py-4">
+                              <p className="font-bold text-gray-900">{entry.studentName}</p>
+                              <p className="text-xs text-gray-400">{entry.nis || '-'}</p>
+                            </td>
+                            <td className="px-6 py-4 font-bold text-gray-700">{entry.className}</td>
+                            <td className="px-6 py-4 font-medium text-gray-600">{entry.assessmentName}</td>
+                            <td className="px-6 py-4 text-right font-black text-indigo-600">{entry.score}</td>
+                            <td className="px-6 py-4 text-xs text-gray-500 font-medium">{new Date(entry.importedAt).toLocaleString('id-ID')}</td>
+                          </tr>
+                        ))}
+                        {importedGrades.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="px-6 py-10 text-center text-gray-400 font-medium italic">
+                              Belum ada nilai import. Gunakan tombol Import Nilai.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
 
                 {selectedResult && (
@@ -3706,6 +4128,8 @@ export default function App() {
                 onDeleteStudent={handleDeleteStudent}
                 onEditStudent={handleEditStudent}
               />
+            ) : view === 'TEACHER_CLASS_MASTER' ? (
+              <ClassMasterManager />
             ) : view === 'MATERIAL_MANAGER' ? (
               <MaterialManager />
             ) : view === 'MONITORING' ? (
@@ -4128,7 +4552,12 @@ export default function App() {
             ) : (
               <div className="max-w-6xl mx-auto animate-in fade-in">
                 <div className="flex justify-between items-center mb-8">
-                  <h1 className="text-3xl font-black text-gray-900">Dashboard Siswa</h1>
+                  <div>
+                    <h1 className="text-3xl font-black text-gray-900">Dashboard Siswa</h1>
+                    <p className="text-xs text-gray-500 font-bold mt-1">
+                      Update terakhir: {lastDataSyncAt ? new Date(lastDataSyncAt).toLocaleString('id-ID') : '-'}
+                    </p>
+                  </div>
                   <button onClick={fetchData} className="p-3 bg-gray-50 text-gray-400 hover:text-indigo-600 rounded-2xl transition-all" title="Segarkan Data"><RotateCcw className="w-5 h-5" /></button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-14">
@@ -4141,20 +4570,57 @@ export default function App() {
                     <div className="bg-green-50 p-8 rounded-[35px] border border-green-100"><TrendingUp className="w-12 h-12 text-green-600" /></div>
                   </div>
                 </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+                  <div className="bg-white p-6 rounded-[28px] border border-gray-100 shadow-sm">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">Ujian Hari Ini</p>
+                    <h3 className="text-4xl font-black text-gray-900">{todaysExams.length}</h3>
+                    <p className="text-sm text-gray-500 font-medium mt-2">
+                      {todaysExams.length > 0 ? `Ada ${todaysExams.length} ujian terjadwal hari ini.` : 'Tidak ada jadwal ujian baru hari ini.'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (firstRunningExam) {
+                        handleStartExamWithToken(firstRunningExam);
+                        return;
+                      }
+                      if (nearestUpcomingExam) {
+                        addAlert(
+                          `Belum ada ujian yang sedang berlangsung. Jadwal terdekat: ${nearestUpcomingExam.title} (${nearestUpcomingExam.startDate ? new Date(nearestUpcomingExam.startDate).toLocaleString('id-ID') : '-'})`,
+                          'info'
+                        );
+                        return;
+                      }
+                      addAlert('Belum ada jadwal ujian yang bisa dibuka.', 'info');
+                    }}
+                    className="bg-white p-6 rounded-[28px] border border-gray-100 shadow-sm text-left hover:shadow-md transition-all"
+                  >
+                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">Jadwal Ujian Terdekat</p>
+                    {nearestUpcomingExam ? (
+                      <>
+                        <h3 className="text-2xl font-black text-gray-900 truncate">{nearestUpcomingExam.title}</h3>
+                        <p className="text-sm text-indigo-600 font-bold mt-2">
+                          Mulai: {nearestUpcomingExam.startDate ? new Date(nearestUpcomingExam.startDate).toLocaleString('id-ID') : '-'}
+                        </p>
+                        <p className="text-[11px] text-gray-500 font-bold mt-3">
+                          {firstRunningExam
+                            ? `Klik untuk masuk ujian berlangsung: ${firstRunningExam.title}`
+                            : 'Klik untuk melihat info jadwal aktif.'}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-sm text-gray-500 font-medium">Belum ada jadwal ujian berikutnya.</p>
+                    )}
+                  </button>
+                </div>
                 <h2 className="text-2xl font-black text-gray-900 mb-8 tracking-tight">Ujian Tersedia</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
-                  {exams.filter(e => {
-                    const s = (e.status || '').toString().toLowerCase();
-                    return s.includes('publish') || s.includes('active');
-                  }).length === 0 ? (
+                  {visibleStudentExams.length === 0 ? (
                     <div className="col-span-full text-center py-20 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
                       <p className="text-gray-400 font-medium">Belum ada ujian yang tersedia saat ini.</p>
                       <button onClick={fetchData} className="mt-4 text-indigo-600 font-bold hover:underline">Coba Segarkan</button>
                     </div>
-                  ) : exams.filter(e => {
-                    const s = (e.status || '').toString().toLowerCase();
-                    return s.includes('publish') || s.includes('active');
-                  }).map(e => {
+                  ) : visibleStudentExams.map(e => {
                     const progress = results.find(r => r.examId === e.id && r.studentId === currentUser?.id);
                     const isTaken = progress?.status === 'completed';
                     const isInProgress = progress?.status === 'in_progress';

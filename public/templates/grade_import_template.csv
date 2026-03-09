@@ -1,0 +1,5 @@
+student_id,student_name,exam_code,score,score_image_1,score_image_2,notes
+INSTRUKSI: Masukkan nilai TANPA KOMA (misal 85, bukan 8,5 atau 1.000). Untuk gambar masukkan URL atau path yang dapat diakses. Jika tidak ada gambar kedua, biarkan kosong.
+S001,Andi,UTS-2026-01,85,https://example.com/images/andi_score1.jpg,https://example.com/images/andi_score2.jpg,"Contoh: nilai lengkap dengan 2 gambar"
+S002,Budi,UTS-2026-01,90,https://example.com/images/budi_score1.jpg,,"Contoh: hanya 1 gambar"
+S003,Citra,UTS-2026-01,78,,,"Contoh: tanpa gambar"
