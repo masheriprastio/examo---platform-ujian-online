@@ -92,6 +92,30 @@ function getExamPassingScore(exam?: Exam | null): number {
   return 75;
 }
 
+function isRemedialExam(exam?: Exam | null): boolean {
+  const title = (exam?.title || '').toLowerCase();
+  return /\b(remedial|remidi)\b/.test(title);
+}
+
+function calculateFinalScoreByExamPolicy(
+  exam: Exam | null | undefined,
+  obtainedPoints: number,
+  totalPoints: number
+): { rawScore: number; finalScore: number } {
+  const passingScore = getExamPassingScore(exam);
+  const remedialMode = isRemedialExam(exam);
+  // Remedial policy:
+  // - score uses original points (not normalized to 0-100)
+  // - capped at KKM (default 75), no extra above cap
+  if (remedialMode) {
+    const rawScore = Math.round(Number(obtainedPoints || 0));
+    const finalScore = Math.min(rawScore, passingScore);
+    return { rawScore, finalScore };
+  }
+  const rawScore = totalPoints > 0 ? Math.round((obtainedPoints / totalPoints) * 100) : 0;
+  return { rawScore, finalScore: rawScore };
+}
+
 function mapUserRow(row: any): User {
   return {
     id: String(row?.id ?? ''),
@@ -575,6 +599,9 @@ export default function App() {
   const [dailyScores, setDailyScores] = useState<Record<string, Record<number, number>>>({}); // studentId -> colIndex -> score
   const [gradeViewMode, setGradeViewMode] = useState<'summary' | 'history'>('summary');
   const [historyStatusFilter, setHistoryStatusFilter] = useState<'all' | 'blocked' | 'in_progress' | 'completed' | 'disqualified' | 'violation'>('all');
+  const [historySearchTerm, setHistorySearchTerm] = useState('');
+  const [historyClassFilter, setHistoryClassFilter] = useState('');
+  const [historyExamFilter, setHistoryExamFilter] = useState('');
   const [importedGrades, setImportedGrades] = useState<ImportedGradeEntry[]>([]);
   const [isImportingGrades, setIsImportingGrades] = useState(false);
   const [showManualGradeForm, setShowManualGradeForm] = useState(false);
@@ -1947,6 +1974,14 @@ export default function App() {
     logs: ExamLog[]
   ) => {
     if (currentUser && activeExam) {
+      const remedialMode = isRemedialExam(activeExam);
+      const { rawScore, finalScore } = calculateFinalScoreByExamPolicy(activeExam, obtained, total);
+      const answersToSave = {
+        ...answers,
+        _raw_score_0_100: rawScore,
+        _final_score_0_100: finalScore,
+        _remedial_capped_to_kkm: remedialMode
+      };
       let finalRes: ExamResult | null = null;
 
       // Optimistic Update
@@ -1957,7 +1992,7 @@ export default function App() {
         if (activeResultId && r.id === activeResultId) {
           finalRes = {
             ...r,
-            score,
+            score: finalScore,
             status: 'completed',
             totalPointsPossible: total,
             pointsObtained: obtained,
@@ -1966,7 +2001,7 @@ export default function App() {
             incorrectCount: stats.incorrect,
             unansweredCount: stats.unanswered,
             submittedAt: new Date().toISOString(),
-            answers,
+            answers: answersToSave,
             logs
           };
           return finalRes;
@@ -1983,7 +2018,7 @@ export default function App() {
           exam_id: activeExam.id,
           student_id: currentUser.id,
           student_name: currentUser.name,
-          score,
+          score: finalScore,
           status: 'completed',
           total_points_possible: total,
           points_obtained: obtained,
@@ -1993,7 +2028,7 @@ export default function App() {
           unanswered_count: stats.unanswered,
           submitted_at: finalRes.submittedAt,
           started_at: finalRes.startedAt,
-          answers,
+          answers: answersToSave,
           logs
         }, { onConflict: 'id' });
 
@@ -3445,6 +3480,7 @@ export default function App() {
       doc.text(`Ujian: ${exam.title}`, 14, yPos);
       doc.text(`Waktu: ${startTimeStr} - ${endTimeStr} (${durationStr})`, 120, yPos);
       yPos += 6;
+      doc.text(`Poin: ${result.pointsObtained}/${result.totalPointsPossible}`, 14, yPos);
       doc.text(`Skor: ${result.score}`, 120, yPos);
 
       const violationCount = result.logs.filter(l => l.event === 'tab_blur').length;
@@ -3471,17 +3507,38 @@ export default function App() {
 
       yPos += 10;
 
+      const ESSAY_PARTICIPATION_POINTS = 1;
+      const ESSAY_FULL_THRESHOLD = 0.7;
+      const ESSAY_PARTIAL_THRESHOLD = 0.35;
+      const normalizeEssayTextForReport = (text: string): string =>
+        stripHtml(text || '')
+          .toLowerCase()
+          .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+      const tokenOverlapRatioEssay = (a: string, b: string): number => {
+        const as = new Set((a || '').split(' ').filter(Boolean));
+        const bs = new Set((b || '').split(' ').filter(Boolean));
+        if (as.size === 0 || bs.size === 0) return 0;
+        let inter = 0;
+        as.forEach(t => { if (bs.has(t)) inter += 1; });
+        return inter / Math.max(1, Math.min(as.size, bs.size));
+      };
+
       const tableBody = exam.questions.map((q, qIdx) => {
         const answer = result.answers[q.id];
         // Strip HTML dari teks soal
         const questionText = stripHtml(q.text || '');
         let answerText = '-';
         let status = '';
+        let pointsEarned = 0;
 
         if (q.type === 'mcq') {
           const optText = q.options && answer !== undefined && answer !== '' ? stripHtml(q.options[Number(answer)] || '') : '';
           answerText = optText ? `${String.fromCharCode(65 + Number(answer))}. ${optText}` : '-';
-          status = answer === q.correctAnswerIndex ? 'Benar' : 'Salah';
+          const isCorrect = answer === q.correctAnswerIndex;
+          status = isCorrect ? 'Benar' : 'Salah';
+          pointsEarned = isCorrect ? (q.points ?? 0) : 0;
         } else if (q.type === 'multiple_select') {
           const ans = (answer as number[]) || [];
           answerText = q.options && ans.length > 0
@@ -3490,20 +3547,55 @@ export default function App() {
           const correctIndices = q.correctAnswerIndices || [];
           const isCorrect = ans.length === correctIndices.length && ans.every(val => correctIndices.includes(val));
           status = isCorrect ? 'Benar' : 'Salah';
+          pointsEarned = isCorrect ? (q.points ?? 0) : 0;
         } else if (q.type === 'true_false') {
           answerText = answer === true ? 'BENAR' : answer === false ? 'SALAH' : '-';
-          status = answer === q.trueFalseAnswer ? 'Benar' : 'Salah';
+          const isCorrect = answer === q.trueFalseAnswer;
+          status = isCorrect ? 'Benar' : 'Salah';
+          pointsEarned = isCorrect ? (q.points ?? 0) : 0;
         } else if (q.type === 'short_answer') {
           answerText = typeof answer === 'string' ? answer : '-';
-          const studentTxt = normalizeText(typeof answer === 'string' ? answer : String(answer || ''));
-          const keyTxt = normalizeText(q.shortAnswer as string);
-          const exactMatch = keyTxt.length > 0 && studentTxt === keyTxt;
-          const contains = keyTxt.length > 0 && (studentTxt.includes(keyTxt) || keyTxt.includes(studentTxt));
-          const overlap = keyTxt.length > 0 && tokenOverlapRatio(studentTxt, keyTxt) >= 0.6;
-          status = (exactMatch || contains || overlap) ? 'Benar' : 'Salah';
+          const studentRaw = typeof answer === 'string' ? answer : String(answer || '');
+          const keyRaw = q.shortAnswer || '';
+          const isCorrect = studentRaw.trim().toLowerCase() === keyRaw.trim().toLowerCase() && keyRaw.trim().length > 0;
+          status = isCorrect ? 'Benar' : 'Salah';
+          pointsEarned = isCorrect ? (q.points ?? 0) : 0;
         } else if (q.type === 'essay') {
           answerText = typeof answer === 'string' && answer.trim() ? answer.trim() : '(Kosong)';
           status = 'Esai';
+          const manualScore = result.answers[`${q.id}_manual_score`];
+          if (typeof manualScore === 'number') {
+            pointsEarned = Math.max(0, Math.min(q.points ?? 0, manualScore));
+          } else if (typeof answer === 'string' && answer.trim().length > 0) {
+            const gradingMode = q.essayGradingMode || 'keyword_auto';
+            if (gradingMode === 'manual') {
+              pointsEarned = 0;
+            } else {
+              const studentAnswer = normalizeEssayTextForReport(answer);
+              const teacherKey = normalizeEssayTextForReport(q.essayAnswer || '');
+              const overlap = tokenOverlapRatioEssay(studentAnswer, teacherKey);
+              const hasStrongContainment = !!teacherKey && (
+                studentAnswer.includes(teacherKey) ||
+                teacherKey.includes(studentAnswer)
+              );
+              const isFullMatch = hasStrongContainment || overlap >= ESSAY_FULL_THRESHOLD;
+              const isPartialMatch = overlap >= ESSAY_PARTIAL_THRESHOLD;
+
+              if (isFullMatch) {
+                pointsEarned = (q.points || 0);
+              } else if (isPartialMatch) {
+                const maxPts = q.points || 0;
+                const scaled = Math.round(maxPts * overlap);
+                const lowerBound = Math.min(maxPts, ESSAY_PARTICIPATION_POINTS + 1);
+                const upperBound = Math.max(lowerBound, maxPts - 1);
+                pointsEarned = maxPts > 1
+                  ? Math.min(upperBound, Math.max(lowerBound, scaled))
+                  : ESSAY_PARTICIPATION_POINTS;
+              } else {
+                pointsEarned = Math.min(ESSAY_PARTICIPATION_POINTS, q.points || ESSAY_PARTICIPATION_POINTS);
+              }
+            }
+          }
         } else if (q.type === 'essay_dragdrop') {
           const mapping = (answer as Record<string, string>) || {};
           const targets = q.dragDropTargets || [];
@@ -3516,6 +3608,9 @@ export default function App() {
           status = mode === 'all_or_nothing'
             ? (targets.length > 0 && correctCount === targets.length ? 'Benar' : 'Salah')
             : `${correctCount}/${targets.length}`;
+          pointsEarned = mode === 'all_or_nothing'
+            ? (targets.length > 0 && correctCount === targets.length ? (q.points ?? 0) : 0)
+            : ((q.points || 0) * (targets.length > 0 ? (correctCount / targets.length) : 0));
         }
 
         return [
@@ -3523,25 +3618,66 @@ export default function App() {
           questionText,
           q.type === 'mcq' ? 'PG' : q.type === 'multiple_select' ? 'PG (B)' : q.type === 'true_false' ? 'B/S' : q.type === 'short_answer' ? 'Isian' : q.type === 'essay_dragdrop' ? 'DragDrop' : 'Esai',
           answerText,
-          status
+          status,
+          `${Number(pointsEarned.toFixed(2))}/${q.points ?? 0}`,
+          `${Math.round(((q.points ?? 0) > 0 ? (pointsEarned / (q.points ?? 0)) * 100 : 0))}%`
         ];
       });
 
-      autoTable(doc, {
-        startY: yPos,
-        head: [['No', 'Soal', 'Tipe', 'Jawaban Siswa', 'Status']],
-        body: tableBody,
-        theme: 'grid',
-        headStyles: { fillColor: [79, 70, 229] },
-        styles: { fontSize: 8, cellPadding: 3, overflow: 'linebreak' },
-        margin: { left: 10, right: 10 },
-        columnStyles: {
-          0: { cellWidth: 12 },
-          1: { cellWidth: 60 },
-          2: { cellWidth: 16 },
-          3: { cellWidth: 'auto' },
-          4: { cellWidth: 18 }
+      const rowsPerPage = 5;
+      const tableChunks: any[][][] = [];
+      const formatPointValue = (val: number) => Number.isInteger(val) ? `${val}` : `${Number(val.toFixed(2))}`;
+      for (let i = 0; i < tableBody.length; i += rowsPerPage) {
+        tableChunks.push(tableBody.slice(i, i + rowsPerPage));
+      }
+
+      tableChunks.forEach((chunk, chunkIdx) => {
+        if (chunkIdx > 0) {
+          doc.addPage();
+          yPos = 20;
         }
+
+        autoTable(doc, {
+          startY: yPos,
+          head: [['No', 'Soal', 'Tipe', 'Jawaban Siswa', 'Status', 'Poin', 'Persen']],
+          body: chunk,
+          foot: chunkIdx === tableChunks.length - 1 ? [[
+            {
+              content: 'TOTAL POIN DIPEROLEH',
+              colSpan: 6,
+              styles: { halign: 'right', fontStyle: 'bold' }
+            },
+            {
+              content: formatPointValue(result.pointsObtained || 0),
+              styles: { halign: 'right', fontStyle: 'bold' }
+            }
+          ], [
+            {
+              content: 'TOTAL POIN MAKSIMAL',
+              colSpan: 6,
+              styles: { halign: 'right', fontStyle: 'bold' }
+            },
+            {
+              content: formatPointValue(result.totalPointsPossible || exam.questions.reduce((sum, q) => sum + (q.points ?? 0), 0)),
+              styles: { halign: 'right', fontStyle: 'bold' }
+            }
+          ]] : [],
+          showFoot: 'lastPage',
+          theme: 'grid',
+          headStyles: { fillColor: [79, 70, 229] },
+          footStyles: { fillColor: [243, 244, 246], textColor: [17, 24, 39] },
+          styles: { fontSize: 8, cellPadding: 3, overflow: 'linebreak' },
+          margin: { left: 10, right: 10 },
+          columnStyles: {
+            0: { cellWidth: 12 },
+            1: { cellWidth: 60 },
+            2: { cellWidth: 16 },
+            3: { cellWidth: 'auto' },
+            4: { cellWidth: 18 },
+            5: { cellWidth: 16, halign: 'right' },
+            6: { cellWidth: 16, halign: 'right' }
+          }
+        });
       });
 
       // ── Embed gambar kanvas coretan siswa untuk soal Esai ──
@@ -3929,13 +4065,37 @@ export default function App() {
     } catch (_) { }
   }, [results, currentUser?.id, currentUser?.role]);
   const violationHistoryCount = results.filter(r => r.status === 'blocked' || r.status === 'disqualified').length;
+  const historyExamOptions = Array.from(
+    new Set(
+      results
+        .map(r => exams.find(e => e.id === r.examId)?.title || '')
+        .filter(Boolean)
+    )
+  ).sort((a, b) => a.localeCompare(b, 'id-ID'));
   const historyFilteredResults = [...results]
     .filter(r => {
       if (historyStatusFilter === 'all') return true;
       if (historyStatusFilter === 'violation') return r.status === 'blocked' || r.status === 'disqualified';
       return r.status === historyStatusFilter;
     })
+    .filter(r => {
+      const normalizedSearch = normalizeText(historySearchTerm);
+      const student = students.find(s => String(s.id) === String(r.studentId));
+      const studentClass = String(student?.grade || '').trim();
+      const examTitle = exams.find(e => e.id === r.examId)?.title || '';
+
+      if (normalizedSearch && !normalizeText(r.studentName).includes(normalizedSearch)) return false;
+      if (historyClassFilter && studentClass !== historyClassFilter) return false;
+      if (historyExamFilter && examTitle !== historyExamFilter) return false;
+      return true;
+    })
     .sort((a, b) => new Date(b.submittedAt || b.startedAt).getTime() - new Date(a.submittedAt || a.startedAt).getTime());
+  const displayedHistoryResults = historyStatusFilter === 'completed'
+    ? historyFilteredResults.filter((result, index, arr) => {
+      const currentKey = String(result.studentId || normalizeName(result.studentName));
+      return arr.findIndex(item => String(item.studentId || normalizeName(item.studentName)) === currentKey) === index;
+    })
+    : historyFilteredResults;
 
   if (view === 'LOGIN') return <LoginView onLogin={handleLogin} />;
 
@@ -3953,8 +4113,13 @@ export default function App() {
 
         <div className="mb-10 flex justify-center">
           <div className="bg-indigo-600 rounded-[30px] p-8 text-white w-full max-w-sm">
-            <p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-80">Skor Akhir</p>
+            <p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-80">
+              {isRemedialExam(exams.find(e => e.id === lastResult.examId)) ? 'Nilai Akhir (Cap KKM)' : 'Skor Akhir'}
+            </p>
             <h3 className="text-7xl font-black tracking-tighter">{lastResult.score}</h3>
+            {isRemedialExam(exams.find(e => e.id === lastResult.examId)) && (
+              <p className="text-xs font-bold opacity-80 mt-2">Remedial dinilai dari poin asli, maksimal KKM.</p>
+            )}
           </div>
         </div>
 
@@ -4313,25 +4478,56 @@ export default function App() {
                 </div>
 
                 {gradeViewMode === 'history' && (
-                  <div className="mb-6 flex flex-wrap items-center gap-2">
-                    <button onClick={() => setHistoryStatusFilter('violation')} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${historyStatusFilter === 'violation' ? 'bg-red-600 text-white' : 'bg-red-50 text-red-700 hover:bg-red-100'}`}>
-                      Pelanggaran {violationHistoryCount > 0 ? `(${violationHistoryCount})` : ''}
-                    </button>
-                    <button onClick={() => setHistoryStatusFilter('blocked')} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${historyStatusFilter === 'blocked' ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}>
-                      Sesi Terkunci
-                    </button>
-                    <button onClick={() => setHistoryStatusFilter('in_progress')} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${historyStatusFilter === 'in_progress' ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`}>
-                      Sedang Berjalan
-                    </button>
-                    <button onClick={() => setHistoryStatusFilter('completed')} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${historyStatusFilter === 'completed' ? 'bg-green-600 text-white' : 'bg-green-50 text-green-700 hover:bg-green-100'}`}>
-                      Selesai
-                    </button>
-                    <button onClick={() => setHistoryStatusFilter('disqualified')} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${historyStatusFilter === 'disqualified' ? 'bg-red-600 text-white' : 'bg-red-50 text-red-700 hover:bg-red-100'}`}>
-                      Diskualifikasi
-                    </button>
-                    <button onClick={() => setHistoryStatusFilter('all')} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${historyStatusFilter === 'all' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
-                      Semua
-                    </button>
+                  <div className="mb-6 space-y-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button onClick={() => setHistoryStatusFilter('violation')} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${historyStatusFilter === 'violation' ? 'bg-red-600 text-white' : 'bg-red-50 text-red-700 hover:bg-red-100'}`}>
+                        Pelanggaran {violationHistoryCount > 0 ? `(${violationHistoryCount})` : ''}
+                      </button>
+                      <button onClick={() => setHistoryStatusFilter('blocked')} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${historyStatusFilter === 'blocked' ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}>
+                        Sesi Terkunci
+                      </button>
+                      <button onClick={() => setHistoryStatusFilter('in_progress')} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${historyStatusFilter === 'in_progress' ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`}>
+                        Sedang Berjalan
+                      </button>
+                      <button onClick={() => setHistoryStatusFilter('completed')} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${historyStatusFilter === 'completed' ? 'bg-green-600 text-white' : 'bg-green-50 text-green-700 hover:bg-green-100'}`}>
+                        Selesai
+                      </button>
+                      <button onClick={() => setHistoryStatusFilter('disqualified')} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${historyStatusFilter === 'disqualified' ? 'bg-red-600 text-white' : 'bg-red-50 text-red-700 hover:bg-red-100'}`}>
+                        Diskualifikasi
+                      </button>
+                      <button onClick={() => setHistoryStatusFilter('all')} className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${historyStatusFilter === 'all' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+                        Semua
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <input
+                        type="text"
+                        value={historySearchTerm}
+                        onChange={(e) => setHistorySearchTerm(e.target.value)}
+                        placeholder="Cari nama siswa..."
+                        className="px-4 py-3 rounded-2xl border border-gray-200 bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+                      />
+                      <select
+                        value={historyClassFilter}
+                        onChange={(e) => setHistoryClassFilter(e.target.value)}
+                        className="px-4 py-3 rounded-2xl border border-gray-200 bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+                      >
+                        <option value="">Semua Kelas</option>
+                        {classFilterOptions.map((grade) => (
+                          <option key={grade} value={grade}>{grade}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={historyExamFilter}
+                        onChange={(e) => setHistoryExamFilter(e.target.value)}
+                        className="px-4 py-3 rounded-2xl border border-gray-200 bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+                      >
+                        <option value="">Semua Ujian</option>
+                        {historyExamOptions.map((examTitle) => (
+                          <option key={examTitle} value={examTitle}>{examTitle}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 )}
 
@@ -4411,8 +4607,12 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
-                        {historyFilteredResults.map(r => {
+                        {displayedHistoryResults.map(r => {
                           const examForResult = exams.find(e => e.id === r.examId);
+                          const student = students.find(s => String(s.id) === String(r.studentId));
+                          const completedAttemptsByStudent = historyStatusFilter === 'completed'
+                            ? historyFilteredResults.filter(item => String(item.studentId || normalizeName(item.studentName)) === String(r.studentId || normalizeName(r.studentName)))
+                            : [];
                           const passingScore = getExamPassingScore(examForResult);
                           const rowLocked = isResultLockedByRule(r);
                           const canReactivate = rowLocked || r.status === 'disqualified';
@@ -4421,11 +4621,23 @@ export default function App() {
                             <td className="px-10 py-8 font-bold text-gray-900">
                               {r.studentName}
                               <p className="text-[10px] font-black text-gray-300 uppercase mt-1">{formatDate(r.startedAt)}</p>
+                              {student?.grade && <p className="text-[10px] font-black text-indigo-400 uppercase mt-2">Kelas {student.grade}</p>}
                               {r.status === 'disqualified' && <span className="inline-block mt-2 px-2 py-0.5 bg-red-600 text-white text-[10px] font-bold rounded">DISKUALIFIKASI</span>}
                               {rowLocked && <span className="inline-block mt-2 px-2 py-0.5 bg-amber-500 text-white text-[10px] font-bold rounded">TERKUNCI</span>}
                               {r.violation_alert && <div className="mt-2 text-[10px] font-black text-red-600 animate-bounce">🚨 TERJADI PELANGGARAN 🚨</div>}
+                              {historyStatusFilter === 'completed' && completedAttemptsByStudent.length > 1 && (
+                                <p className="text-[10px] font-bold text-gray-400 mt-2">{completedAttemptsByStudent.length} ujian selesai, ditampilkan hasil terbaru.</p>
+                              )}
                             </td>
-                            <td className="px-10 py-8 text-gray-500 font-medium">{examForResult?.title}</td>
+                            <td className="px-10 py-8 text-gray-500 font-medium">
+                              {examForResult?.title}
+                              {historyStatusFilter === 'completed' && completedAttemptsByStudent.length > 1 && (
+                                <p className="text-[10px] font-bold text-gray-400 mt-2">
+                                  {completedAttemptsByStudent.slice(1, 3).map(item => exams.find(e => e.id === item.examId)?.title).filter(Boolean).join(' • ')}
+                                  {completedAttemptsByStudent.length > 3 ? ' ...' : ''}
+                                </p>
+                              )}
+                            </td>
                             <td className="px-10 py-8">
                               <div className="flex items-center justify-center gap-2">
                                 <span className="bg-green-50 text-green-600 px-2 py-1 rounded-lg text-[10px] font-black border border-green-100">{r.correctCount}B</span>
@@ -4469,14 +4681,14 @@ export default function App() {
                                 <button onClick={() => exportAnswersToPDF([r], `Hasil_${r.studentName.replace(/\s+/g, '_')}.pdf`)} className="p-3 bg-gray-50 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Cetak Hasil Siswa Ini">
                                   <FileDown className="w-5 h-5" />
                                 </button>
-                                <button onClick={() => { setSelectedResult(r); setSelectedResultTab('jawaban'); }} className="p-3 bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-xl transition-all" title="Detail Jawaban & Penilaian">
+                                <button onClick={() => { setSelectedResult(r); setSelectedResultTab('jawaban'); }} className="p-3 bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-xl transition-all" title={historyStatusFilter === 'completed' ? 'Detail hasil terbaru siswa ini' : 'Detail Jawaban & Penilaian'}>
                                   <FileText className="w-5 h-5" />
                                 </button>
                               </div>
                             </td>
                           </tr>
                         )})}
-                        {historyFilteredResults.length === 0 && (
+                        {displayedHistoryResults.length === 0 && (
                           <tr><td colSpan={4} className="py-20 text-center text-gray-400 font-medium italic">{historyStatusFilter === 'disqualified' ? 'Belum ada siswa yang didiskualifikasi. Pelanggaran aktif ada di filter "Sesi Terkunci" atau "Pelanggaran".' : 'Tidak ada data untuk filter ini.'}</td></tr>
                         )}
                       </tbody>
@@ -4706,7 +4918,9 @@ export default function App() {
                             {/* Score summary */}
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                               <div className={`p-5 rounded-2xl border-2 text-center col-span-1 ${selectedResult.score >= getExamPassingScore(exams.find(e => e.id === selectedResult.examId)) ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
-                                <p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-70">Skor Akhir (0-100)</p>
+                                <p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-70">
+                                  {isRemedialExam(exams.find(e => e.id === selectedResult.examId)) ? 'Nilai Akhir (Cap KKM)' : 'Skor Akhir (0-100)'}
+                                </p>
                                 <h3 className="text-4xl font-black">{selectedResult.score}</h3>
                                 <p className="text-[11px] font-bold mt-1 opacity-80">KKM: {getExamPassingScore(exams.find(e => e.id === selectedResult.examId))}</p>
                               </div>
@@ -4717,7 +4931,12 @@ export default function App() {
                                 </div>
                                 <div className="flex justify-between">
                                   <span className="text-gray-500 font-bold text-sm">Rumus</span>
-                                  <span className="font-bold text-gray-700 text-xs">({selectedResult.pointsObtained}/{selectedResult.totalPointsPossible}) x 100 = {selectedResult.score}</span>
+                                  <span className="font-bold text-gray-700 text-xs">
+                                    {isRemedialExam(exams.find(e => e.id === selectedResult.examId))
+                                      ? `min(${Math.round(Number(selectedResult.pointsObtained || 0))}, KKM ${getExamPassingScore(exams.find(e => e.id === selectedResult.examId))}) = ${selectedResult.score}`
+                                      : `(${selectedResult.pointsObtained}/${selectedResult.totalPointsPossible}) x 100 = ${selectedResult.score}`
+                                    }
+                                  </span>
                                 </div>
                                 <div className="flex justify-between"><span className="text-gray-500 font-bold text-sm">Benar</span><span className="font-black text-green-600">{selectedResult.correctCount}</span></div>
                                 <div className="flex justify-between"><span className="text-gray-500 font-bold text-sm">Salah</span><span className="font-black text-red-500">{selectedResult.incorrectCount}</span></div>
@@ -4879,16 +5098,24 @@ export default function App() {
                                           }
                                         });
 
+                                        const examForResult = exams.find(e => e.id === res.examId);
                                         const totalPossible = res.totalPointsPossible;
                                         const finalPoints = autoPoints + manualPoints;
-                                        const score100 = totalPossible > 0 ? Math.round((finalPoints / totalPossible) * 100) : 0;
+                                        const remedialMode = isRemedialExam(examForResult);
+                                        const { rawScore, finalScore } = calculateFinalScoreByExamPolicy(examForResult, finalPoints, totalPossible);
+                                        const updatedAnswersWithMeta = {
+                                          ...updatedAnswers,
+                                          _raw_score_0_100: rawScore,
+                                          _final_score_0_100: finalScore,
+                                          _remedial_capped_to_kkm: remedialMode
+                                        };
 
                                         // Update Database
                                         if (isSupabaseConfigured && supabase) {
                                           const { error } = await supabase.from('exam_results').update({
-                                            answers: updatedAnswers,
+                                            answers: updatedAnswersWithMeta,
                                             points_obtained: finalPoints,
-                                            score: score100
+                                            score: finalScore
                                           }).eq('id', res.id);
 
                                           if (error) {
@@ -4898,7 +5125,7 @@ export default function App() {
                                         }
 
                                         // Update Local State
-                                        const newResultObj = { ...res, answers: updatedAnswers, pointsObtained: finalPoints, score: score100 };
+                                        const newResultObj = { ...res, answers: updatedAnswersWithMeta, pointsObtained: finalPoints, score: finalScore };
                                         setResults(prev => prev.map(r => r.id === newResultObj.id ? newResultObj : r));
                                         setSelectedResult(newResultObj);
                                       }}

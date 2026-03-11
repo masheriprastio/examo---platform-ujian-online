@@ -16,6 +16,13 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        proxy: {
+          // Frontend call to /api/* will be proxied to PHP backend during local development.
+          '/api': {
+            target: env.VITE_PHP_BACKEND_URL || 'http://localhost:8000',
+            changeOrigin: true,
+          }
+        }
       },
       build: {
         rollupOptions: {
